@@ -18,7 +18,7 @@ import { parseBroadcast, writeAddresses, cleanupAddresses } from "./helpers/addr
 
 // Paths
 const ROOT = resolve(__dirname, "../..");
-const CONTRACTS_DIR = resolve(ROOT, "packages/contracts");
+const CONTRACTS_DIR = resolve(ROOT, "packages/foundry");
 const BROADCAST_PATH = resolve(
   CONTRACTS_DIR,
   "broadcast/Deploy.s.sol/31337/run-latest.json"
@@ -77,7 +77,7 @@ async function registerSeedLegs(
 ): Promise<void> {
   // Dynamic import to avoid bundling issues
   const { SEED_MARKETS } = await import(
-    "../../packages/services/src/catalog/seed"
+    "@parlaycity/shared"
   );
 
   const account = privateKeyToAccount(DEPLOYER_KEY);

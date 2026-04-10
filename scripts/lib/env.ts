@@ -6,12 +6,12 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 
 /**
- * Parse apps/web/.env.local into a key-value record.
+ * Parse packages/nextjs/.env.local into a key-value record.
  * Returns empty record if file is missing or unreadable.
  */
 export function loadEnvLocal(): Record<string, string> {
-  // Walk up from scripts/ to repo root, then into apps/web
-  const envPath = resolve(__dirname, "../../apps/web/.env.local");
+  // Walk up from scripts/ to repo root, then into packages/nextjs
+  const envPath = resolve(__dirname, "../../packages/nextjs/.env.local");
   try {
     const content = readFileSync(envPath, "utf-8");
     const vars: Record<string, string> = {};

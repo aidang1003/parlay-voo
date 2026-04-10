@@ -142,7 +142,7 @@ flowchart LR
 
 ## MCP Server & AI Chat
 
-### MCP Tools (`apps/web/src/lib/mcp/tools.ts`)
+### MCP Tools (`packages/nextjs/src/lib/mcp/tools.ts`)
 
 Six protocol tools callable by any MCP-compatible AI agent:
 

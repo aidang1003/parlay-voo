@@ -4,12 +4,14 @@
   "scripts": {
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
+    "start": "pnpm --filter web start",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck",
-    "test:contracts": "cd packages/contracts && forge test",
+    "typecheck": "cd packages/nextjs && npx tsc --noEmit",
+    "test": "pnpm test:contracts && pnpm test:web",
+    "test:contracts": "cd packages/foundry && forge test -vvv",
     "test:web": "pnpm --filter web test",
-    "test:services": "pnpm --filter services test",
-    "test": "pnpm test:contracts && pnpm test:web && pnpm test:services"
+    "chain": "cd packages/foundry && anvil",
+    "deploy": "cd packages/foundry && forge script script/Deploy.s.sol --broadcast --rpc-url http://127.0.0.1:8545"
   },
   "pnpm": {
     "overrides": {

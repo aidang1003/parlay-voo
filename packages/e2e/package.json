@@ -7,7 +7,6 @@
   },
   "dependencies": {
     "@parlaycity/shared": "workspace:*",
-    "@parlaycity/services": "workspace:*",
     "viem": "^2.21.0"
   },
   "devDependencies": {

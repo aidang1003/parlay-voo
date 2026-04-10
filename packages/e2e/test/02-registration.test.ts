@@ -6,7 +6,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readAddresses, type DeployedAddresses } from "../helpers/addresses";
 import { getPublicClient } from "../helpers/clients";
 import { REGISTRY_ABI } from "../helpers/abis";
-import { SEED_MARKETS } from "../../../packages/services/src/catalog/seed";
+import { SEED_MARKETS } from "@parlaycity/shared";
 
 let addrs: DeployedAddresses;
 let pub: ReturnType<typeof getPublicClient>;

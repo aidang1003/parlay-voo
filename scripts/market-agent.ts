@@ -5,11 +5,11 @@
  * Humans make all betting decisions. This agent handles market infrastructure.
  *
  * Usage (from repo root):
- *   pnpm --filter services exec tsx ../../scripts/market-agent.ts
+ *   npx tsx scripts/market-agent.ts
  *   make market-agent           # local Anvil
  *   make market-agent-sepolia   # Base Sepolia
  *
- * Env vars (or reads from apps/web/.env.local):
+ * Env vars (or reads from packages/nextjs/.env.local):
  *   RPC_URL               -- defaults to http://127.0.0.1:8545
  *   PRIVATE_KEY           -- defaults to Anvil account #0 (local only)
  *   BDL_API_KEY           -- (required) BallDontLie API key
@@ -19,7 +19,7 @@
  *   LOOKBACK_DAYS         -- how far back to check results (default: 3)
  *   DRY_RUN               -- log without on-chain writes (default: false)
  *   ONCE                  -- single run then exit (default: false)
- *   SERVICES_URL          -- defaults to http://localhost:3001
+ *   API_URL               -- defaults to http://localhost:3000/api
  */
 
 import {
@@ -39,7 +39,7 @@ import { foundry, baseSepolia } from "viem/chains";
 
 import { loadEnvLocal, requireExplicitKeyForRemoteRpc, safeBigIntToNumber, safeParseNumber } from "./lib/env";
 import { BUILDER_SUFFIX } from "./lib/builder-code";
-import { fetchNBAMarkets, fetchCompletedGames, isBDLEnabled } from "../packages/services/src/catalog/bdl";
+import { fetchNBAMarkets, fetchCompletedGames, isBDLEnabled } from "../packages/nextjs/src/lib/bdl";
 
 // -- ABI fragments -----------------------------------------------------------
 
@@ -119,7 +119,7 @@ function getConfig() {
   const lookbackDays = safeParseNumber(process.env.LOOKBACK_DAYS, 3, "LOOKBACK_DAYS");
   const dryRun = (process.env.DRY_RUN ?? "false").toLowerCase() === "true";
   const once = (process.env.ONCE ?? "false").toLowerCase() === "true";
-  const servicesUrl = process.env.SERVICES_URL ?? "http://localhost:3001";
+  const servicesUrl = process.env.API_URL ?? "http://localhost:3000/api";
 
   return { rpcUrl, privateKey, registryAddr, adminOracleAddr, chain, pollInterval, lookbackDays, dryRun, once, servicesUrl };
 }

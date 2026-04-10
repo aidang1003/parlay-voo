@@ -9,7 +9,7 @@
  * This ensures the rocket animation on the frontend plays smoothly.
  *
  * Usage (from repo root):
- *   pnpm --filter services exec tsx ../../scripts/demo-autopilot.ts
+ *   npx tsx scripts/demo-autopilot.ts
  *   # or
  *   make demo-autopilot
  *

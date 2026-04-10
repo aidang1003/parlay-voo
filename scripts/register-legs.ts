@@ -3,16 +3,16 @@
  *
  * Reads SEED_MARKETS from the catalog, checks which questions are already
  * registered on-chain, and creates missing legs. Writes a mapping file
- * to apps/web/public/leg-mapping.json so the frontend can translate
+ * to packages/nextjs/public/leg-mapping.json so the frontend can translate
  * catalog IDs to on-chain IDs.
  *
  * Idempotent: safe to run multiple times. Uses question-text matching
  * (normalized lowercase + trimmed) to detect existing legs.
  *
  * Usage (from repo root):
- *   pnpm --filter services exec tsx ../../scripts/register-legs.ts
+ *   npx tsx scripts/register-legs.ts
  *
- * Env vars (or reads from apps/web/.env.local):
+ * Env vars (or reads from packages/nextjs/.env.local):
  *   RPC_URL               -- defaults to http://127.0.0.1:8545
  *   PRIVATE_KEY           -- defaults to Anvil account #0 (local only)
  *   LEG_REGISTRY_ADDRESS  -- overrides .env.local
@@ -35,7 +35,7 @@ import { foundry, baseSepolia } from "viem/chains";
 import { loadEnvLocal, requireExplicitKeyForRemoteRpc, safeBigIntToNumber } from "./lib/env";
 
 // Import seed markets directly (no API dependency)
-import { SEED_MARKETS } from "../packages/services/src/catalog/seed";
+import { SEED_MARKETS } from "../packages/shared/src/seed";
 
 // -- ABI fragments -----------------------------------------------------------
 
@@ -148,7 +148,8 @@ async function main() {
 
   // Optionally fetch BDL legs from services API
   try {
-    const res = await fetch("http://127.0.0.1:3001/markets?category=nba");
+    const apiUrl = process.env.API_URL ?? "http://localhost:3000/api";
+    const res = await fetch(`${apiUrl}/markets?category=nba`);
     if (res.ok) {
       const nbaMarkets = await res.json();
       if (Array.isArray(nbaMarkets)) {
@@ -240,7 +241,7 @@ async function main() {
 
   // Write mapping file
   const chainId = cfg.chain.id;
-  const outputPath = resolve(__dirname, "../apps/web/public/leg-mapping.json");
+  const outputPath = resolve(__dirname, "../packages/nextjs/public/leg-mapping.json");
   const output = {
     generated: new Date().toISOString(),
     chainId,

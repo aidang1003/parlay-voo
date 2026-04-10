@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reads deployed contract addresses from forge broadcast output
-# and writes them to apps/web/.env.local
+# and writes them to packages/nextjs/.env.local
 #
 # Usage:
 #   ./sync-env.sh          # Anvil (chain 31337)
@@ -14,13 +14,13 @@ NETWORK="${1:-local}"
 
 if [ "$NETWORK" = "sepolia" ]; then
   CHAIN_ID=84532
-  BROADCAST="$ROOT/packages/contracts/broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
+  BROADCAST="$ROOT/packages/foundry/broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
 else
   CHAIN_ID=31337
-  BROADCAST="$ROOT/packages/contracts/broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
+  BROADCAST="$ROOT/packages/foundry/broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
 fi
 
-ENV_FILE="$ROOT/apps/web/.env.local"
+ENV_FILE="$ROOT/packages/nextjs/.env.local"
 
 if [ ! -f "$BROADCAST" ]; then
   echo "No broadcast file found at $BROADCAST"

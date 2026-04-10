@@ -31,20 +31,16 @@ echo "=============================="
 echo ""
 
 # Contracts
-check "Forge fmt check" bash -c "cd packages/contracts && forge fmt --check"
-check "Forge build" bash -c "cd packages/contracts && forge build"
-check "Forge test (unit)" bash -c "cd packages/contracts && forge test --match-path 'test/unit/*'"
-check "Forge test (fuzz)" bash -c "cd packages/contracts && forge test --match-path 'test/fuzz/*'"
-check "Forge test (invariant)" bash -c "cd packages/contracts && forge test --match-path 'test/invariant/*'"
+check "Forge fmt check" bash -c "cd packages/foundry && forge fmt --check"
+check "Forge build" bash -c "cd packages/foundry && forge build"
+check "Forge test (unit)" bash -c "cd packages/foundry && forge test --match-path 'test/unit/*'"
+check "Forge test (fuzz)" bash -c "cd packages/foundry && forge test --match-path 'test/fuzz/*'"
+check "Forge test (invariant)" bash -c "cd packages/foundry && forge test --match-path 'test/invariant/*'"
 
 # Web
 check "Web lint" pnpm --filter web lint
 check "Web typecheck" pnpm --filter web typecheck
 check "Web build" pnpm --filter web build
-
-# Services
-check "Services lint" pnpm --filter @parlaycity/services lint
-check "Services typecheck" pnpm --filter @parlaycity/services typecheck
 
 # Shared
 check "Shared lint" pnpm --filter @parlaycity/shared lint

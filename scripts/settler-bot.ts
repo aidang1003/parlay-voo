@@ -5,9 +5,9 @@
  * oracle adapters, then calls settleTicket() on each one (permissionless).
  *
  * Usage (from repo root):
- *   pnpm --filter services exec tsx ../../scripts/settler-bot.ts
+ *   npx tsx scripts/settler-bot.ts
  *
- * Env vars (or reads from apps/web/.env.local):
+ * Env vars (or reads from packages/nextjs/.env.local):
  *   RPC_URL               -- defaults to http://127.0.0.1:8545
  *   PRIVATE_KEY           -- defaults to Anvil account #0 (local only)
  *   PARLAY_ENGINE_ADDRESS -- overrides .env.local

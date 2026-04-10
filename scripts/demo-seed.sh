@@ -41,7 +41,7 @@ if [ "$NETWORK" = "local" ] && [ -n "${BASE_SEPOLIA_RPC_URL:-}" ]; then
 fi
 
 # --- Load addresses from broadcast ---
-BROADCAST="$ROOT/packages/contracts/broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
+BROADCAST="$ROOT/packages/foundry/broadcast/Deploy.s.sol/$CHAIN_ID/run-latest.json"
 if [ ! -f "$BROADCAST" ]; then
   echo "ERROR: No broadcast at $BROADCAST. Deploy first."
   exit 1

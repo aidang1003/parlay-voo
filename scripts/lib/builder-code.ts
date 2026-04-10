@@ -1,6 +1,6 @@
 /**
  * ERC-8021 Builder Code attribution suffix for agent scripts.
- * Same encoding as apps/web/src/lib/builder-code.ts (Node.js version).
+ * Same encoding as packages/nextjs/src/lib/builder-code.ts (Node.js version).
  */
 
 export function encodeBuilderCodeSuffix(code: string): `0x${string}` {

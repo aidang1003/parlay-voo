@@ -6,12 +6,12 @@
  * buy/skip decisions.
  *
  * Usage (from repo root):
- *   pnpm --filter services exec tsx ../../scripts/risk-agent.ts
+ *   npx tsx scripts/risk-agent.ts
  *   make risk-agent          # same thing
  *   make risk-agent-dry      # DRY_RUN=true
  *
  * Env vars:
- *   SERVICES_URL          -- defaults to http://localhost:3001
+ *   API_URL               -- defaults to http://localhost:3000/api
  *   RISK_TOLERANCE        -- conservative | moderate | aggressive (default: moderate)
  *   DRY_RUN               -- true to log decisions without buying on-chain (default: true)
  *   LOOP_INTERVAL_MS      -- ms between cycles, 0 for single run (default: 30000)
@@ -109,7 +109,7 @@ const PAYOUT_MODE_NAMES: Record<number, string> = {
 const YES_OUTCOME = "0x0000000000000000000000000000000000000000000000000000000000000001" as const;
 
 function getConfig() {
-  const servicesUrl = process.env.SERVICES_URL ?? "http://localhost:3001";
+  const servicesUrl = process.env.API_URL ?? "http://localhost:3000/api";
 
   const VALID_TOLERANCES = ["conservative", "moderate", "aggressive"] as const;
   type RiskTolerance = (typeof VALID_TOLERANCES)[number];

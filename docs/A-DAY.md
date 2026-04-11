@@ -38,7 +38,7 @@ Mark tasks `[x]` when done. Don't delete — keeps a log of what shipped vs what
   ```
 - **Do this first.** It's the highest ratio task in the whole doc.
 
-### S-2 — RPC call counter (debug overlay)
+### S-2 — RPC call counter (debug overlay) [x]
 - **Time:** 1 hour
 - **Value:** Medium now, high later. Lets you measure whether subsequent optimizations actually helped. Without this you're flying blind.
 - **Files:** `packages/nextjs/src/lib/hooks.ts` (`useContractClient` at ~line 22), new component `packages/nextjs/src/components/DebugRpcCounter.tsx`

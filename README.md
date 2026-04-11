@@ -447,6 +447,10 @@ make dev-services   # Express API on 3001
 make dev-web        # Next.js on 3000
 ```
 
+### Debug Overlay
+
+Append `?debug=1` to any frontend page to surface a fixed-position counter showing total RPC calls, the count over the last 60 seconds, and an extrapolated calls-per-minute rate — useful for measuring the impact of query/batching changes.
+
 ### Demo Mode
 
 ```bash

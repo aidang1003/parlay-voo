@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useAccount, useReadContract, useWriteContract, usePublicClient } from "wagmi";
+import { useAccount, useReadContract, useReadContracts, useWriteContract, usePublicClient } from "wagmi";
 import { parseUnits, toHex, pad, parseEventLogs } from "viem";
 import { BUILDER_SUFFIX } from "./builder-code";
 import {
@@ -147,46 +147,28 @@ export function useUSDCBalance() {
 }
 
 export function useVaultStats() {
-  const totalAssetsResult = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
-    functionName: "totalAssets",
+  const vault = contractAddresses.houseVault as `0x${string}`;
+  const baseContract = { address: vault, abi: HOUSE_VAULT_ABI } as const;
+
+  const { data, isLoading, refetch } = useReadContracts({
+    contracts: [
+      { ...baseContract, functionName: "totalAssets" },
+      { ...baseContract, functionName: "totalReserved" },
+      { ...baseContract, functionName: "maxUtilizationBps" },
+      { ...baseContract, functionName: "freeLiquidity" },
+      { ...baseContract, functionName: "maxPayout" },
+    ],
     query: { enabled: !!contractAddresses.houseVault, refetchInterval: 10000 },
   });
 
-  const totalReservedResult = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
-    functionName: "totalReserved",
-    query: { enabled: !!contractAddresses.houseVault, refetchInterval: 10000 },
-  });
+  const pick = (i: number) =>
+    data?.[i]?.status === "success" ? (data[i].result as bigint) : undefined;
 
-  const maxUtilResult = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
-    functionName: "maxUtilizationBps",
-    query: { enabled: !!contractAddresses.houseVault },
-  });
-
-  const freeLiquidityResult = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
-    functionName: "freeLiquidity",
-    query: { enabled: !!contractAddresses.houseVault, refetchInterval: 10000 },
-  });
-
-  const maxPayoutResult = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
-    functionName: "maxPayout",
-    query: { enabled: !!contractAddresses.houseVault, refetchInterval: 10000 },
-  });
-
-  const totalAssets = totalAssetsResult.data as bigint | undefined;
-  const totalReserved = totalReservedResult.data as bigint | undefined;
-  const maxUtilBps = maxUtilResult.data as bigint | undefined;
-  const freeLiquidity = freeLiquidityResult.data as bigint | undefined;
-  const maxPayout = maxPayoutResult.data as bigint | undefined;
+  const totalAssets = pick(0);
+  const totalReserved = pick(1);
+  const maxUtilBps = pick(2);
+  const freeLiquidity = pick(3);
+  const maxPayout = pick(4);
 
   const utilization =
     totalAssets && totalAssets > 0n && totalReserved !== undefined
@@ -200,71 +182,40 @@ export function useVaultStats() {
     maxUtilBps,
     maxPayout,
     utilization,
-    isLoading:
-      totalAssetsResult.isLoading ||
-      totalReservedResult.isLoading ||
-      maxUtilResult.isLoading ||
-      freeLiquidityResult.isLoading,
-    refetch: () => {
-      totalAssetsResult.refetch();
-      totalReservedResult.refetch();
-      maxUtilResult.refetch();
-      freeLiquidityResult.refetch();
-      maxPayoutResult.refetch();
-    },
+    isLoading,
+    refetch,
   };
 }
 
 export function useParlayConfig() {
-  const baseFeeResult = useReadContract({
-    address: contractAddresses.parlayEngine as `0x${string}`,
-    abi: PARLAY_ENGINE_ABI,
-    functionName: "baseFee",
+  const engine = contractAddresses.parlayEngine as `0x${string}`;
+  const baseContract = { address: engine, abi: PARLAY_ENGINE_ABI } as const;
+
+  const { data, isLoading, refetch } = useReadContracts({
+    contracts: [
+      { ...baseContract, functionName: "baseFee" },
+      { ...baseContract, functionName: "perLegFee" },
+      { ...baseContract, functionName: "minStake" },
+      { ...baseContract, functionName: "maxLegs" },
+    ],
     query: { enabled: !!contractAddresses.parlayEngine, refetchInterval: 10000 },
   });
 
-  const perLegFeeResult = useReadContract({
-    address: contractAddresses.parlayEngine as `0x${string}`,
-    abi: PARLAY_ENGINE_ABI,
-    functionName: "perLegFee",
-    query: { enabled: !!contractAddresses.parlayEngine, refetchInterval: 10000 },
-  });
+  const pick = (i: number) =>
+    data?.[i]?.status === "success" ? (data[i].result as bigint) : undefined;
 
-  const minStakeResult = useReadContract({
-    address: contractAddresses.parlayEngine as `0x${string}`,
-    abi: PARLAY_ENGINE_ABI,
-    functionName: "minStake",
-    query: { enabled: !!contractAddresses.parlayEngine, refetchInterval: 10000 },
-  });
-
-  const maxLegsResult = useReadContract({
-    address: contractAddresses.parlayEngine as `0x${string}`,
-    abi: PARLAY_ENGINE_ABI,
-    functionName: "maxLegs",
-    query: { enabled: !!contractAddresses.parlayEngine, refetchInterval: 10000 },
-  });
-
-  const baseFee = baseFeeResult.data as bigint | undefined;
-  const perLegFee = perLegFeeResult.data as bigint | undefined;
-  const minStake = minStakeResult.data as bigint | undefined;
-  const maxLegs = maxLegsResult.data as bigint | undefined;
+  const baseFee = pick(0);
+  const perLegFee = pick(1);
+  const minStake = pick(2);
+  const maxLegs = pick(3);
 
   return {
     baseFeeBps: baseFee !== undefined ? Number(baseFee) : undefined,
     perLegFeeBps: perLegFee !== undefined ? Number(perLegFee) : undefined,
     maxLegs: maxLegs !== undefined ? Number(maxLegs) : undefined,
     minStakeUSDC: minStake !== undefined ? Number(minStake) / 1e6 : undefined,
-    isLoading:
-      baseFeeResult.isLoading ||
-      perLegFeeResult.isLoading ||
-      minStakeResult.isLoading ||
-      maxLegsResult.isLoading,
-    refetch: () => {
-      baseFeeResult.refetch();
-      perLegFeeResult.refetch();
-      minStakeResult.refetch();
-      maxLegsResult.refetch();
-    },
+    isLoading,
+    refetch,
   };
 }
 

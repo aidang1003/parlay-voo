@@ -9,10 +9,10 @@ cache/
 dist/
 
 # Foundry
-packages/contracts/out/
-packages/contracts/cache/
-packages/contracts/lib/
-packages/contracts/broadcast/
+packages/foundry/out/
+packages/foundry/cache/
+packages/foundry/lib/
+packages/foundry/broadcast/
 
 # Environment
 .env

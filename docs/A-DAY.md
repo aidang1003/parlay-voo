@@ -45,7 +45,7 @@ Mark tasks `[x]` when done. Don't delete — keeps a log of what shipped vs what
 - **Change:** wrap the viem client's `readContract` so every call increments `window.__rpcCalls`. Add a fixed-position overlay visible only when `?debug=1` query param is set. Show calls/min rolling average.
 - **Why before the big optimizations:** you want a baseline reading on `/`, `/tickets`, `/vault` before touching the hooks.
 
-### S-3 — Batch reads in useVaultStats + useParlayConfig
+### S-3 — Batch reads in useVaultStats + useParlayConfig [x]
 - **Time:** 2 hours
 - **Value:** High. Home page mount drops from ~10 RPC round trips to ~2. Most visible improvement users will feel.
 - **Files:** `packages/nextjs/src/lib/hooks.ts:149-216` (useVaultStats), `packages/nextjs/src/lib/hooks.ts:218-288` (useParlayConfig)

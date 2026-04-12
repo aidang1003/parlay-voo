@@ -90,8 +90,9 @@ function setupConnectedUser(overrides: {
   });
 }
 
-/** Select N legs by clicking their Yes buttons. Returns the Yes buttons. */
-function selectLegs(count: number): HTMLElement[] {
+/** Wait for legs to load from API, then select N legs by clicking their Yes buttons. */
+async function selectLegs(count: number): Promise<HTMLElement[]> {
+  await waitFor(() => { expect(screen.getAllByText("Yes").length).toBeGreaterThan(0); });
   const yesButtons = screen.getAllByText("Yes");
   for (let i = 0; i < count && i < yesButtons.length; i++) {
     fireEvent.click(yesButtons[i]);
@@ -105,15 +106,43 @@ function setStakeInput(value: string) {
   fireEvent.change(input, { target: { value } });
 }
 
+// ── Test market data (replaces MOCK_LEGS) ────────────────────────────────
+
+const TEST_MARKETS = [
+  {
+    id: "test-crypto",
+    title: "Crypto Predictions",
+    description: "Crypto price markets",
+    category: "crypto",
+    legs: [
+      { id: 0, question: "Will ETH hit $5000 by end of March?", sourceRef: "seed:0", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 400000, active: true },
+      { id: 1, question: "Will BTC hit $150k by end of March?", sourceRef: "seed:1", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, active: true },
+      { id: 2, question: "Will SOL hit $300 by end of March?", sourceRef: "seed:2", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, active: true },
+    ],
+  },
+];
+
+/** Leg mapping that marks test legs as on-chain. */
+const TEST_LEG_MAPPING = { chainId: 31337, legs: { "0": 0, "1": 1, "2": 2 } };
+
+/** Default fetch mock: returns TEST_MARKETS for /api/markets, leg mapping, rejects everything else. */
+function defaultFetchMock(url: string | URL | Request): Promise<Response> {
+  const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+  if (urlStr === "/api/markets") {
+    return Promise.resolve(new Response(JSON.stringify(TEST_MARKETS), { status: 200, headers: { "Content-Type": "application/json" } }));
+  }
+  if (urlStr === "/api/leg-mapping") {
+    return Promise.resolve(new Response(JSON.stringify(TEST_LEG_MAPPING), { status: 200, headers: { "Content-Type": "application/json" } }));
+  }
+  return Promise.reject(new Error("no network in test"));
+}
+
 // ── Session storage mock ──────────────────────────────────────────────────
 
 let sessionStore: Record<string, string>;
 
 beforeEach(() => {
-  // Default fetch mock: reject immediately so ParlayBuilder falls back to MOCK_LEGS
-  // without waiting for a network timeout. Tests that need specific fetch behavior
-  // override this with their own vi.stubGlobal("fetch", ...).
-  vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network in test"))));
+  vi.stubGlobal("fetch", vi.fn(defaultFetchMock));
 
   sessionStore = {};
   vi.stubGlobal("sessionStorage", {
@@ -172,23 +201,26 @@ describe("ParlayBuilder", () => {
     });
   });
 
-  it("renders all mock legs", () => {
+  it("renders all legs from API", async () => {
     render(<ParlayBuilder />);
-    expect(screen.getByText("Will ETH hit $5000 by end of March?")).toBeInTheDocument();
-    expect(screen.getByText("Will BTC hit $150k by end of March?")).toBeInTheDocument();
-    expect(screen.getByText("Will SOL hit $300 by end of March?")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Will ETH hit $5000 by end of March?")).toBeInTheDocument();
+      expect(screen.getByText("Will BTC hit $150k by end of March?")).toBeInTheDocument();
+      expect(screen.getByText("Will SOL hit $300 by end of March?")).toBeInTheDocument();
+    });
   });
 
-  it("renders Yes/No buttons for each leg", () => {
+  it("renders Yes/No buttons for each leg", async () => {
     render(<ParlayBuilder />);
-    expect(screen.getAllByText("Yes").length).toBe(3);
-    expect(screen.getAllByText("No").length).toBe(3);
+    await waitFor(() => {
+      expect(screen.getAllByText("Yes").length).toBe(3);
+      expect(screen.getAllByText("No").length).toBe(3);
+    });
   });
 
-  it("updates leg count when selecting legs", () => {
+  it("updates leg count when selecting legs", async () => {
     const { container } = render(<ParlayBuilder />);
-    selectLegs(2);
-    // Leg counter is now numbered squares (rounded-md + gradient-bg when filled)
+    await selectLegs(2);
     const filledDots = container.querySelectorAll(".rounded-md.gradient-bg");
     expect(filledDots.length).toBe(2);
   });
@@ -282,7 +314,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(screen.getByText("Balance: 0.00")).toBeInTheDocument();
       });
-      selectLegs(2);
+      await selectLegs(2);
       setStakeInput("10");
       await waitFor(() => {
         expect(screen.getByText("Insufficient USDC Balance")).toBeInTheDocument();
@@ -299,7 +331,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
       });
-      selectLegs(2);
+      await selectLegs(2);
       setStakeInput(".");
       // stakeNum = parseFloat(".") || 0 = 0, which is < minStakeUSDC=1
       // so button should show "Select at least 2 legs" or min stake message
@@ -316,7 +348,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
       });
-      selectLegs(2);
+      await selectLegs(2);
       // Empty stake = stakeNum 0, below minStake
       const buyBtn = screen.getByText(/Buy Ticket|Select at least/);
       expect(buyBtn.closest("button")).toBeDisabled();
@@ -363,7 +395,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(sessionStorage.setItem).toHaveBeenCalled();
       });
-      selectLegs(2);
+      await selectLegs(2);
       await waitFor(() => {
         // Find the LAST call with the legs key (first calls may be initial empty array)
         const calls = (sessionStorage.setItem as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -409,7 +441,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
       });
-      selectLegs(2);
+      await selectLegs(2);
       setStakeInput("10");
 
       await waitFor(() => {
@@ -470,7 +502,7 @@ describe("ParlayBuilder", () => {
 
     beforeEach(() => {
       setupConnectedUser();
-      vi.useFakeTimers();
+      vi.useFakeTimers({ shouldAdvanceTime: true });
     });
 
     afterEach(() => {
@@ -487,22 +519,36 @@ describe("ParlayBuilder", () => {
       });
     });
 
+    /** Wrap a risk-specific fetch mock so it also serves /api/markets and /api/leg-mapping. */
+    function withMarkets(riskFetch: (...args: unknown[]) => unknown): ReturnType<typeof vi.fn> {
+      return vi.fn((url: string | URL | Request, ...rest: unknown[]) => {
+        const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+        if (urlStr === "/api/markets") {
+          return Promise.resolve(new Response(JSON.stringify(TEST_MARKETS), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        if (urlStr === "/api/leg-mapping") {
+          return Promise.resolve(new Response(JSON.stringify(TEST_LEG_MAPPING), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        return riskFetch(url, ...rest);
+      });
+    }
+
     /** Render, select legs, set stake, advance past 600ms debounce + flush. */
     async function triggerAutoRisk(fetchMock: ReturnType<typeof vi.fn>) {
-      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("fetch", withMarkets(fetchMock));
       render(<ParlayBuilder />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      selectLegs(2);
+      await selectLegs(2);
       setStakeInput("10");
       await act(async () => { await vi.advanceTimersByTimeAsync(700); });
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     }
 
     it("shows risk loading skeleton when 2+ legs selected and stake > 0", async () => {
-      vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {}))); // never resolves
+      vi.stubGlobal("fetch", withMarkets(() => new Promise(() => {}))); // never resolves for non-market URLs
       render(<ParlayBuilder />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      selectLegs(2);
+      await selectLegs(2);
       setStakeInput("10");
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(screen.getByTestId("risk-advisor")).toBeInTheDocument();
@@ -510,20 +556,20 @@ describe("ParlayBuilder", () => {
     });
 
     it("does not show risk section when fewer than 2 legs selected", async () => {
-      vi.stubGlobal("fetch", vi.fn());
+      vi.stubGlobal("fetch", vi.fn(defaultFetchMock));
       render(<ParlayBuilder />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      selectLegs(1);
+      await selectLegs(1);
       setStakeInput("10");
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(screen.queryByTestId("risk-advisor")).not.toBeInTheDocument();
     });
 
     it("does not show risk section when stake is 0", async () => {
-      vi.stubGlobal("fetch", vi.fn());
+      vi.stubGlobal("fetch", vi.fn(defaultFetchMock));
       render(<ParlayBuilder />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      selectLegs(2);
+      await selectLegs(2);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(screen.queryByTestId("risk-advisor")).not.toBeInTheDocument();
     });
@@ -786,8 +832,9 @@ describe("ParlayBuilder", () => {
   // --- Leg toggle behavior ---
 
   describe("leg toggle", () => {
-    it("toggles a leg off when clicking the same outcome again", () => {
+    it("toggles a leg off when clicking the same outcome again", async () => {
       const { container } = render(<ParlayBuilder />);
+      await waitFor(() => { expect(screen.getAllByText("Yes").length).toBe(3); });
       const yesButtons = screen.getAllByText("Yes");
       fireEvent.click(yesButtons[0]);
       expect(container.querySelectorAll(".rounded-md.gradient-bg").length).toBe(1);
@@ -796,8 +843,9 @@ describe("ParlayBuilder", () => {
       expect(container.querySelectorAll(".rounded-md.gradient-bg").length).toBe(0);
     });
 
-    it("switches outcome when clicking No on a Yes-selected leg", () => {
+    it("switches outcome when clicking No on a Yes-selected leg", async () => {
       const { container } = render(<ParlayBuilder />);
+      await waitFor(() => { expect(screen.getAllByText("Yes").length).toBe(3); });
       const yesButtons = screen.getAllByText("Yes");
       const noButtons = screen.getAllByText("No");
       fireEvent.click(yesButtons[0]); // Select first leg Yes
@@ -807,7 +855,7 @@ describe("ParlayBuilder", () => {
       expect(container.querySelectorAll(".rounded-md.gradient-bg").length).toBe(1); // Still 1 leg
     });
 
-    it("enforces max legs limit", () => {
+    it("enforces max legs limit", async () => {
       mockUseParlayConfig.mockReturnValue({
         baseFeeBps: undefined,
         perLegFeeBps: undefined,
@@ -817,6 +865,7 @@ describe("ParlayBuilder", () => {
         refetch: vi.fn(),
       });
       const { container } = render(<ParlayBuilder />);
+      await waitFor(() => { expect(screen.getAllByText("Yes").length).toBe(3); });
       const yesButtons = screen.getAllByText("Yes");
       fireEvent.click(yesButtons[0]);
       fireEvent.click(yesButtons[1]);
@@ -836,7 +885,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
       });
-      selectLegs(2);
+      await selectLegs(2);
       setStakeInput("100");
       // baseFee=100bps + 2*50bps = 200bps = 2%
       expect(screen.getByText("Fee (2.0%)")).toBeInTheDocument();
@@ -849,7 +898,7 @@ describe("ParlayBuilder", () => {
       await waitFor(() => {
         expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
       });
-      selectLegs(3);
+      await selectLegs(3);
       setStakeInput("100");
       // baseFee=100bps + 3*50bps = 250bps = 2.5%
       expect(screen.getByText("Fee (2.5%)")).toBeInTheDocument();

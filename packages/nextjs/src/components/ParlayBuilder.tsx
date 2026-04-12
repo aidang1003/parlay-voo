@@ -11,7 +11,6 @@ import {
   blockNonNumericKeys,
   useSessionState,
 } from "@/lib/utils";
-import { MOCK_LEGS } from "@/lib/mock";
 import { useBuyTicket, useParlayConfig, useUSDCBalance, useVaultStats, useMintTestUSDC } from "@/lib/hooks";
 import { MultiplierClimb } from "./MultiplierClimb";
 
@@ -153,22 +152,6 @@ function apiMarketsToLegs(markets: APIMarket[]): DisplayLeg[] {
   return legs;
 }
 
-/** Convert MOCK_LEGS to DisplayLeg format as fallback. */
-function mockToDisplayLegs(): DisplayLeg[] {
-  return MOCK_LEGS.map((leg) => ({
-    id: leg.id,
-    description: leg.description,
-    odds: leg.odds,
-    resolved: leg.resolved,
-    outcome: leg.outcome,
-    expiresAt: leg.expiresAt,
-    category: "crypto",
-    marketTitle: "Crypto Predictions",
-    onChain: true,
-    sourceRef: "mock",
-  }));
-}
-
 /** Restore SelectedLeg[] from serialized form. */
 function restoreSelections(stored: StoredSelection[], allLegs: DisplayLeg[]): SelectedLeg[] {
   const legMap = new Map(allLegs.map((l) => [l.id.toString(), l]));
@@ -223,8 +206,9 @@ export function ParlayBuilder() {
 
   // ── Market data state ───────────────────────────────────────────────────
 
-  const [allLegs, setAllLegs] = useState<DisplayLeg[]>(mockToDisplayLegs);
-  const [availableCategories, setAvailableCategories] = useState<string[]>(["crypto"]);
+  const [allLegs, setAllLegs] = useState<DisplayLeg[]>([]);
+  const [marketsLoading, setMarketsLoading] = useState(true);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useSessionState<string>(SESSION_KEYS.category, "all");
 
   const [legMapping, setLegMapping] = useState<Record<string, number>>({});
@@ -275,11 +259,7 @@ export function ParlayBuilder() {
     let storedSelections: StoredSelection[] | null = null;
     try {
       const raw = sessionStorage.getItem(SESSION_KEYS.legs);
-      if (raw) {
-        storedSelections = JSON.parse(raw);
-        const restored = restoreSelections(storedSelections!, mockToDisplayLegs());
-        if (restored.length > 0) setSelectedLegs(restored);
-      }
+      if (raw) storedSelections = JSON.parse(raw);
     } catch {
       // parse error or sessionStorage unavailable
     }
@@ -292,18 +272,18 @@ export function ParlayBuilder() {
         if (cancelled || !Array.isArray(markets)) return;
 
         const legs = apiMarketsToLegs(markets);
-        if (legs.length > 0) {
-          setAllLegs(legs);
-          const cats = [...new Set(markets.map((m) => m.category))].sort();
-          setAvailableCategories(cats);
+        setAllLegs(legs);
+        const cats = [...new Set(markets.map((m) => m.category))].sort();
+        setAvailableCategories(cats);
 
-          if (storedSelections && storedSelections.length > 0) {
-            const restored = restoreSelections(storedSelections, legs);
-            if (restored.length > 0) setSelectedLegs(restored);
-          }
+        if (storedSelections && storedSelections.length > 0) {
+          const restored = restoreSelections(storedSelections, legs);
+          if (restored.length > 0) setSelectedLegs(restored);
         }
       } catch {
-        // Keep initial MOCK_LEGS data
+        // API unavailable — allLegs stays empty, UI shows empty state
+      } finally {
+        if (!cancelled) setMarketsLoading(false);
       }
     }
 
@@ -642,6 +622,18 @@ export function ParlayBuilder() {
         </div>
 
         <div className={`space-y-4 ${vaultEmpty ? "pointer-events-none opacity-40" : ""}`}>
+          {marketsLoading && allLegs.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <div className="mb-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-600 border-t-brand-purple" />
+              <p className="text-sm">Loading markets...</p>
+            </div>
+          )}
+          {!marketsLoading && allLegs.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <p className="text-sm">No markets available right now.</p>
+              <p className="mt-1 text-xs text-gray-600">Check back soon — markets are synced from Polymarket.</p>
+            </div>
+          )}
           {[...groupedByMarket.entries()].map(([title, legs]) => (
             <div key={title} className="space-y-2">
               <div className="flex items-center gap-2">

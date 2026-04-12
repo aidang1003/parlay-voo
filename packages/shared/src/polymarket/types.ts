@@ -1,10 +1,13 @@
-export type PolymarketCategory = "crypto" | "sports";
+export type PolymarketCategory = string;
 
 export interface CuratedMarket {
   conditionId: string;
   category: PolymarketCategory;
   displayTitle?: string;
   cutoffOverride?: string;
+  /** When sourced from Gamma, carry prices so sync can skip per-token orderbook. */
+  yesPrice?: number;
+  noPrice?: number;
 }
 
 export interface PolymarketMetadata {

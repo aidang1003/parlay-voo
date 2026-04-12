@@ -112,17 +112,12 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Notes:** Live polymarket data will be used to 1) find real bets with their live odds 2) settle active bets
 - **CRON_SECRET caveat:** the Bearer check on `/api/polymarket/sync` and `/api/db/init` is probably not doing much for security and adds complexity we don't need. The realistic attack is Vercel compute-bill drain, not fund/data loss — sync is idempotent, reads a hand-curated list, and the on-chain writes are gated by `DEPLOYER_PRIVATE_KEY`. If the secret plumbing ever causes friction (local dev, new contributors, CI), drop it and replace with an in-route "skip if last run < 1h ago" idempotency gate.
 
-### F-3 — (your idea here)
-- **Time:**
-- **Value:**
-- **Blockers:**
-- **Notes:**
 
-## Parlay Builder Frontend Fixes
+## Parlay Builder Frontend Fixes ✅ COMPLETE
 1) Doesn't make sense to have a YES market for a parlay with a yes/no option and a NO option with a yes/no selection
- - cut database entries in half and re-make txtsourceref as primaryid by adding a yes odds and no odds column
- - Implement categories using the category pulled back from polymarket
- - Ensure odds are being built from the the correct number. they either display 2x, 20x or 1.05x
+ - [x] cut database entries in half and re-make txtsourceref as primaryid by adding a yes odds and no odds column
+ - [x] Implement categories using the category pulled back from polymarket (Gamma event `category`/`tags` threaded through CuratedMarket)
+ - [x] Ensure odds are being built from the the correct number (now sourced from Gamma `outcomePrices` instead of per-token CLOB mid; midToPpm clamp widened to 1–99%)
 
 ## Bailout rules
 

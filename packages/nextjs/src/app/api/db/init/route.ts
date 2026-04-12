@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SEED_MARKETS } from "@parlaycity/shared";
-import { sql, upsertLegMapping } from "@/lib/db/client";
+import { sql, upsertMarket } from "@/lib/db/client";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const runtime = "nodejs";
@@ -31,14 +31,15 @@ export async function GET(req: Request) {
     let seeded = 0;
     for (const market of SEED_MARKETS) {
       for (const leg of market.legs) {
-        await upsertLegMapping({
+        await upsertMarket({
           sourceRef: `seed:${leg.id}`,
-          side: "na",
           source: "seed",
-          onChainLegId: leg.id - 1, // seed catalog 1..21 → on-chain 0..20
           question: leg.question,
           category: market.category,
-          probabilityPpm: leg.probabilityPPM,
+          yesLegId: leg.id - 1, // seed catalog 1..21 → on-chain 0..20
+          noLegId: null,
+          yesProbabilityPpm: leg.probabilityPPM,
+          noProbabilityPpm: null,
           cutoffTime: leg.cutoffTime,
           earliestResolve: leg.earliestResolve,
           active: leg.active,
@@ -64,4 +65,3 @@ function splitStatements(source: string): string[] {
     .map((s) => s.replace(/^\s*--.*$/gm, "").trim())
     .filter((s) => s.length > 0);
 }
-

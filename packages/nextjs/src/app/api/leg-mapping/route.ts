@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRegisteredActiveLegs } from "@/lib/db/client";
+import { getRegisteredActiveMarkets } from "@/lib/db/client";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -25,11 +25,11 @@ export async function GET() {
   }
 
   try {
-    const rows = await getRegisteredActiveLegs();
+    const rows = await getRegisteredActiveMarkets();
     const mapping: Record<string, number> = {};
     for (const row of rows) {
-      const onChainId = row.intonchainlegid as number; // non-null by helper contract
-      mapping[String(onChainId)] = onChainId;
+      if (row.intyeslegid != null) mapping[String(row.intyeslegid)] = row.intyeslegid;
+      if (row.intnolegid != null) mapping[String(row.intnolegid)] = row.intnolegid;
     }
 
     cached = {

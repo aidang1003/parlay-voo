@@ -30,8 +30,8 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
         legs: [rowToLeg(row, nextSynthetic)],
       });
     } else {
-      // polymarket: needs both sides present to build a yes/no card
-      if (row.yesprobppm == null || row.noprobppm == null) continue;
+      // polymarket: needs no-side prob to render the No button
+      if (row.intnoprobppm == null) continue;
       const conditionId = row.txtsourceref.replace(/^poly:/, "");
       markets.push({
         id: row.txtsourceref,
@@ -47,19 +47,19 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
 }
 
 function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
-  const yesId = row.yeslegid ?? nextSyntheticId();
+  const yesId = row.intyeslegid ?? nextSyntheticId();
   const leg: Leg = {
     id: yesId,
     question: row.txtquestion,
     sourceRef: row.txtsourceref,
     cutoffTime: row.bigcutofftime,
     earliestResolve: row.bigearliestresolve,
-    probabilityPPM: row.yesprobppm ?? 500_000,
+    probabilityPPM: row.intyesprobppm,
     active: true,
   };
-  if (row.txtsource === "polymarket") {
-    leg.noId = row.nolegid ?? nextSyntheticId();
-    leg.noProbabilityPPM = row.noprobppm ?? 500_000;
+  if (row.txtsource === "polymarket" && row.intnoprobppm != null) {
+    leg.noId = row.intnolegid ?? nextSyntheticId();
+    leg.noProbabilityPPM = row.intnoprobppm;
   }
   return leg;
 }
@@ -76,5 +76,5 @@ export function midToPpm(mid: number): number {
     throw new Error(`midToPpm: out-of-range mid ${mid}`);
   }
   const raw = Math.round(mid * PPM);
-  return Math.min(950_000, Math.max(50_000, raw));
+  return Math.min(990_000, Math.max(10_000, raw));
 }

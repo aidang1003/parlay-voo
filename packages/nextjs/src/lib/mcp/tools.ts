@@ -16,7 +16,7 @@ import {
 import type { RiskProfile, Market, Leg } from "@parlaycity/shared";
 import { HOUSE_VAULT_ABI, LEG_REGISTRY_ABI, PARLAY_ENGINE_ABI } from "../contracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
-import { getRegisteredActiveLegs } from "../db/client";
+import { getRegisteredActiveMarkets } from "../db/client";
 
 // ---------------------------------------------------------------------------
 // Chain client
@@ -63,23 +63,36 @@ export async function refreshLegMap(): Promise<void> {
     if (id > SEED_CATALOG_MAX) LEG_MAP.delete(id);
   }
   try {
-    const rows = await getRegisteredActiveLegs();
+    const rows = await getRegisteredActiveMarkets();
     for (const row of rows) {
       if (row.txtsource !== "polymarket") continue;
       const parsed = parsePolySourceRef(row.txtsourceref);
       if (!parsed) continue;
-      const onChainId = row.intonchainlegid as number;
-      const sideLabel = row.txtside === "yes" ? "YES" : row.txtside === "no" ? "NO" : "";
-      LEG_MAP.set(onChainId, {
-        id: onChainId,
-        question: sideLabel ? `${row.txtquestion} — ${sideLabel}` : row.txtquestion,
-        sourceRef: row.txtsourceref,
-        cutoffTime: row.bigcutofftime,
-        earliestResolve: row.bigearliestresolve,
-        probabilityPPM: row.intprobabilityppm,
-        active: row.blnactive,
-        category: row.txtcategory,
-      });
+      // Each market row is a flat pair: emit a LEG_MAP entry per registered side.
+      if (row.intyeslegid != null) {
+        LEG_MAP.set(row.intyeslegid, {
+          id: row.intyeslegid,
+          question: `${row.txtquestion} — YES`,
+          sourceRef: row.txtsourceref,
+          cutoffTime: row.bigcutofftime,
+          earliestResolve: row.bigearliestresolve,
+          probabilityPPM: row.intyesprobppm,
+          active: row.blnactive,
+          category: row.txtcategory,
+        });
+      }
+      if (row.intnolegid != null && row.intnoprobppm != null) {
+        LEG_MAP.set(row.intnolegid, {
+          id: row.intnolegid,
+          question: `${row.txtquestion} — NO`,
+          sourceRef: row.txtsourceref,
+          cutoffTime: row.bigcutofftime,
+          earliestResolve: row.bigearliestresolve,
+          probabilityPPM: row.intnoprobppm,
+          active: row.blnactive,
+          category: row.txtcategory,
+        });
+      }
     }
   } catch (e) {
     // DB unreachable shouldn't break seed-only quoting. Log and fall back.

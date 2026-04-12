@@ -32,6 +32,12 @@ interface GammaMarket {
   endDate?: string;
 }
 
+interface GammaTag {
+  id?: string;
+  label?: string;
+  slug?: string;
+}
+
 interface GammaEvent {
   id: string;
   title: string;
@@ -48,6 +54,8 @@ interface GammaEvent {
   negRisk: boolean;
   markets: GammaMarket[];
   commentCount?: number;
+  tags?: GammaTag[];
+  category?: string;
 }
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -100,20 +108,45 @@ export async function fetchFeaturedMarkets(
 
   for (const event of events) {
     const markets = event.markets ?? [];
+    const eventCategory = resolveCategory(event, cfg.category);
     for (const mkt of markets) {
       if (!isUsable(mkt, cfg)) continue;
+      const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
 
       results.push({
         conditionId: mkt.conditionId,
-        category: cfg.category,
+        category: eventCategory,
         displayTitle: mkt.groupItemTitle
           ? `${event.title}: ${mkt.groupItemTitle}`
           : mkt.question,
+        yesPrice,
+        noPrice,
       });
     }
   }
 
   return results;
+}
+
+/** Derive a category slug from Gamma event metadata. Falls back to the
+ *  provided default if the event carries no usable tag/category. */
+function resolveCategory(event: GammaEvent, fallback: string): string {
+  if (event.category && event.category.trim()) return event.category.toLowerCase();
+  const firstTag = event.tags?.find((t) => t?.slug || t?.label);
+  if (firstTag) {
+    const val = firstTag.slug ?? firstTag.label ?? "";
+    if (val) return val.toLowerCase();
+  }
+  return fallback;
+}
+
+/** Extract [yes, no] prices (0..1 floats) from Gamma outcomePrices. */
+function parsePrices(raw: string[] | string): [number | undefined, number | undefined] {
+  const arr = parseJsonField<string[]>(raw);
+  if (!Array.isArray(arr) || arr.length < 2) return [undefined, undefined];
+  const yes = Number(arr[0]);
+  const no = Number(arr[1]);
+  return [Number.isFinite(yes) ? yes : undefined, Number.isFinite(no) ? no : undefined];
 }
 
 /**
@@ -139,15 +172,21 @@ export async function fetchTopEvent(
   }
 
   const event = events[0];
+  const eventCategory = resolveCategory(event, cfg.category);
   const markets: CuratedMarket[] = (event.markets ?? [])
     .filter((m) => isUsable(m, cfg))
-    .map((mkt) => ({
-      conditionId: mkt.conditionId,
-      category: cfg.category,
-      displayTitle: mkt.groupItemTitle
-        ? `${event.title}: ${mkt.groupItemTitle}`
-        : mkt.question,
-    }));
+    .map((mkt) => {
+      const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
+      return {
+        conditionId: mkt.conditionId,
+        category: eventCategory,
+        displayTitle: mkt.groupItemTitle
+          ? `${event.title}: ${mkt.groupItemTitle}`
+          : mkt.question,
+        yesPrice,
+        noPrice,
+      };
+    });
 
   return {
     event: {

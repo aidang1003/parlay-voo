@@ -51,7 +51,6 @@ export class PolymarketClient {
     const url = `${this.gammaUrl}/markets?condition_ids=${encodeURIComponent(conditionId)}`;
     const raw = await this.request<GammaMarketResponse[] | GammaMarketResponse>(url);
     const market = Array.isArray(raw) ? raw[0] : raw;
-    console.log(`List API response for ${conditionId}:`, JSON.stringify(market, null, 2));
     if (!market) throw new Error(`Polymarket: no market for conditionId ${conditionId}`);
     return normalizeMarket(market);
   }

@@ -7,7 +7,7 @@ import {
 } from "@parlaycity/shared";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { midToPpm } from "@/lib/polymarket/markets";
-import { upsertLegMapping } from "@/lib/db/client";
+import { upsertMarket } from "@/lib/db/client";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const runtime = "nodejs";
@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
  * Deduplicates by conditionId so a market in both lists is only synced once.
  *
  * Re-runs are idempotent: existing rows get their probability/cutoff refreshed
- * but their on_chain_leg_id is preserved (see upsertLegMapping COALESCE).
+ * but their on-chain leg ids are preserved (see upsertMarket COALESCE).
  */
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {
@@ -82,32 +82,37 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
   }
   const earliestResolve = cutoffSec + 48 * 3600;
 
-  const [yesBook, noBook] = await Promise.all([
-    poly.fetchOrderBook(metadata.yesTokenId),
-    poly.fetchOrderBook(metadata.noTokenId),
-  ]);
+  // Prefer Gamma-provided prices (one HTTP round-trip per batch, tighter than
+  // per-token orderbook mid which often clamps against our thin-book bounds).
+  let yesMid: number | undefined = entry.yesPrice;
+  let noMid: number | undefined = entry.noPrice;
 
-  const yesPpm = midToPpm(bookMid(yesBook));
-  const noPpm = midToPpm(bookMid(noBook));
+  if (yesMid == null || noMid == null) {
+    const [yesBook, noBook] = await Promise.all([
+      poly.fetchOrderBook(metadata.yesTokenId),
+      poly.fetchOrderBook(metadata.noTokenId),
+    ]);
+    yesMid = bookMid(yesBook);
+    noMid = bookMid(noBook);
+  }
+
+  const yesPpm = midToPpm(yesMid);
+  const noPpm = midToPpm(noMid);
   const question = entry.displayTitle ?? metadata.question;
 
-  for (const [side, ppm] of [
-    ["yes", yesPpm],
-    ["no", noPpm],
-  ] as const) {
-    await upsertLegMapping({
-      sourceRef: `poly:${entry.conditionId}`,
-      side,
-      source: "polymarket",
-      onChainLegId: null,
-      question,
-      category: entry.category,
-      probabilityPpm: ppm,
-      cutoffTime: cutoffSec,
-      earliestResolve,
-      active: true,
-    });
-  }
+  await upsertMarket({
+    sourceRef: `poly:${entry.conditionId}`,
+    source: "polymarket",
+    question,
+    category: entry.category,
+    yesLegId: null,
+    noLegId: null,
+    yesProbabilityPpm: yesPpm,
+    noProbabilityPpm: noPpm,
+    cutoffTime: cutoffSec,
+    earliestResolve,
+    active: true,
+  });
 }
 
 function bookMid(book: PolymarketOrderBook): number {

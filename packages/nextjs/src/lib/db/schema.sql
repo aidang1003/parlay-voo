@@ -1,20 +1,19 @@
 -- Canonical schema for the parlay-voo Neon Postgres database.
--- Apply with `make db-init` (see packages/nextjs/src/app/api/db/init/route.ts)
--- or by pasting into the Neon SQL editor.
+-- Apply with `make db-init`.
 --
--- Naming convention (S-10):
+-- Naming convention:
 --   Tables:  tb<lowername>           e.g. tblegmapping
---   Columns: <typeprefix><lowername> e.g. txtsourceref, intonchainlegid
+--   Columns: <typeprefix><lowername> e.g. txtsourceref, intyeslegid
 --   All identifiers are lowercase so SQL doesn't require double-quoting.
 --   Type prefixes:
 --     txt = TEXT, int = INTEGER, bln = BOOLEAN, ts = TIMESTAMPTZ, big = BIGINT
 --
--- Shape: one row per (market, side). Polymarket markets have two rows
---   (yes + no) sharing the same txtsourceref. Seed markets have a single
---   row with txtside = 'na'. Grouping in app code pivots (sourceref, side)
---   into a single market object in one query (see getActiveMarkets).
+-- Shape: one row per market. txtsourceref is the primary key. Yes and no
+-- sides live as sibling columns (intyeslegid/intnolegid, intyesprobppm/
+-- intnoprobppm). Seed markets populate only the yes-side columns and leave
+-- the no-side columns null so the UI hides the No button.
 
--- Drop legacy tables from earlier naming iterations.
+-- Drop legacy tables from earlier iterations.
 DROP TABLE IF EXISTS leg_mapping;
 DROP TABLE IF EXISTS polymarket_resolutions;
 DROP TABLE IF EXISTS "tbLegMapping";
@@ -23,26 +22,25 @@ DROP TABLE IF EXISTS tblegmapping;
 DROP TABLE IF EXISTS tbpolymarketresolution;
 
 CREATE TABLE IF NOT EXISTS tblegmapping (
-  txtsourceref       TEXT NOT NULL,           -- "poly:<conditionId>" or "seed:<id>"
-  txtside            TEXT NOT NULL,           -- 'yes' | 'no' | 'na'
+  txtsourceref       TEXT PRIMARY KEY,                         -- "poly:<conditionId>" or "seed:<id>"
   txtsource          TEXT NOT NULL,
-  intonchainlegid    INTEGER,
   txtquestion        TEXT NOT NULL,
   txtcategory        TEXT NOT NULL,
-  intprobabilityppm  INTEGER NOT NULL CHECK (intprobabilityppm BETWEEN 1 AND 1000000),
+  intyeslegid        INTEGER,
+  intnolegid         INTEGER,
+  intyesprobppm      INTEGER NOT NULL CHECK (intyesprobppm BETWEEN 1 AND 1000000),
+  intnoprobppm       INTEGER CHECK (intnoprobppm IS NULL OR intnoprobppm BETWEEN 1 AND 1000000),
   bigcutofftime      BIGINT NOT NULL,
   bigearliestresolve BIGINT NOT NULL,
   blnactive          BOOLEAN NOT NULL DEFAULT true,
-  tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (txtsourceref, txtside),
-  CHECK (txtside IN ('yes', 'no', 'na'))
+  tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
-CREATE INDEX IF NOT EXISTS ixlegmapping_onchainid    ON tblegmapping (intonchainlegid);
+CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);
+CREATE INDEX IF NOT EXISTS ixlegmapping_noid         ON tblegmapping (intnolegid);
 
 -- tbpolymarketresolution: audit log of resolutions relayed to AdminOracleAdapter.
--- Used to debug settlement, re-run failed relays, and feed future analytics.
 CREATE TABLE IF NOT EXISTS tbpolymarketresolution (
   txtconditionid  TEXT PRIMARY KEY,
   txtoutcome      TEXT NOT NULL CHECK (txtoutcome IN ('YES', 'NO', 'VOIDED')),

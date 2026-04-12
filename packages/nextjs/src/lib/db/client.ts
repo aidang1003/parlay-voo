@@ -18,42 +18,24 @@ export function sql() {
 }
 
 // ---------------------------------------------------------------------------
-// Types — field names mirror DB column names (lowercase with type prefix)
+// Types — one row per market, yes/no sides as sibling columns.
 // ---------------------------------------------------------------------------
 
 export type LegSource = "seed" | "polymarket";
-export type LegSide = "yes" | "no" | "na";
 
-export interface LegMappingRow {
-  txtsourceref: string;
-  txtside: LegSide;
-  txtsource: LegSource;
-  intonchainlegid: number | null;
-  txtquestion: string;
-  txtcategory: string;
-  intprobabilityppm: number;
-  bigcutofftime: number;
-  bigearliestresolve: number;
-  blnactive: boolean;
-  tscreatedat: string;
-}
-
-/**
- * Pivoted market shape: one row per txtsourceref, both sides flattened into
- * columns. Produced by the CASE/MAX aggregation in getActiveMarkets so the
- * app fetches all markets in a single round-trip.
- */
 export interface MarketRow {
   txtsourceref: string;
   txtsource: LegSource;
   txtquestion: string;
   txtcategory: string;
+  intyeslegid: number | null;
+  intnolegid: number | null;
+  intyesprobppm: number;
+  intnoprobppm: number | null;
   bigcutofftime: number;
   bigearliestresolve: number;
-  yeslegid: number | null;
-  yesprobppm: number | null;
-  nolegid: number | null;
-  noprobppm: number | null;
+  blnactive: boolean;
+  tscreatedat: string;
 }
 
 export interface ResolutionRow {
@@ -64,37 +46,21 @@ export interface ResolutionRow {
   tsresolvedat: string;
 }
 
-// Neon's HTTP tagged template returns rows as Record<string, unknown>[]. We coerce
-// numeric fields back to JS numbers here because Postgres BIGINT arrives as string.
-function coerceLegRow(r: Record<string, unknown>): LegMappingRow {
+function coerceMarketRow(r: Record<string, unknown>): MarketRow {
+  const toNumOrNull = (v: unknown) => (v == null ? null : Number(v));
   return {
     txtsourceref: r.txtsourceref as string,
-    txtside: r.txtside as LegSide,
     txtsource: r.txtsource as LegSource,
-    intonchainlegid: r.intonchainlegid == null ? null : Number(r.intonchainlegid),
     txtquestion: r.txtquestion as string,
     txtcategory: r.txtcategory as string,
-    intprobabilityppm: Number(r.intprobabilityppm),
+    intyeslegid: toNumOrNull(r.intyeslegid),
+    intnolegid: toNumOrNull(r.intnolegid),
+    intyesprobppm: Number(r.intyesprobppm),
+    intnoprobppm: toNumOrNull(r.intnoprobppm),
     bigcutofftime: Number(r.bigcutofftime),
     bigearliestresolve: Number(r.bigearliestresolve),
     blnactive: r.blnactive as boolean,
     tscreatedat: r.tscreatedat as string,
-  };
-}
-
-function coerceMarketRow(r: Record<string, unknown>): MarketRow {
-  const toNum = (v: unknown) => (v == null ? null : Number(v));
-  return {
-    txtsourceref: r.txtsourceref as string,
-    txtsource: r.txtsource as LegSource,
-    txtquestion: r.txtquestion as string,
-    txtcategory: r.txtcategory as string,
-    bigcutofftime: Number(r.bigcutofftime),
-    bigearliestresolve: Number(r.bigearliestresolve),
-    yeslegid: toNum(r.yeslegid),
-    yesprobppm: toNum(r.yesprobppm),
-    nolegid: toNum(r.nolegid),
-    noprobppm: toNum(r.noprobppm),
   };
 }
 
@@ -103,85 +69,71 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
 // ---------------------------------------------------------------------------
 
 /**
- * Active legs that are also registered on-chain (intonchainlegid IS NOT NULL).
- * Use for operations that need real on-chain IDs (settlement, MCP tools).
- */
-export async function getRegisteredActiveLegs(): Promise<LegMappingRow[]> {
-  const db = sql();
-  const rows = await db`
-    SELECT * FROM tblegmapping
-    WHERE blnactive = true AND intonchainlegid IS NOT NULL
-    ORDER BY intonchainlegid
-  `;
-  return (rows as Record<string, unknown>[]).map(coerceLegRow);
-}
-
-/**
- * All markets, one row per txtsourceref with yes/no sides pivoted into columns.
- * Single round-trip: Postgres does the group-by so the app avoids N+1. For
- * seed legs (side 'na') the "yes" columns carry the single leg data and the
- * "no" columns are null — frontend hides the No button when nolegid is absent.
- * Seed legs now expose their 'na' side via the yes* columns so a single query
- * handles both sources.
+ * All active markets, one row each. Single round-trip.
  */
 export async function getActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();
   const rows = await db`
-    SELECT
-      txtsourceref,
-      MAX(txtsource)                                                                AS txtsource,
-      MAX(txtquestion)                                                              AS txtquestion,
-      MAX(txtcategory)                                                              AS txtcategory,
-      MAX(bigcutofftime)                                                            AS bigcutofftime,
-      MAX(bigearliestresolve)                                                       AS bigearliestresolve,
-      MAX(CASE WHEN txtside IN ('yes', 'na') THEN intonchainlegid   END)            AS yeslegid,
-      MAX(CASE WHEN txtside IN ('yes', 'na') THEN intprobabilityppm END)            AS yesprobppm,
-      MAX(CASE WHEN txtside = 'no'           THEN intonchainlegid   END)            AS nolegid,
-      MAX(CASE WHEN txtside = 'no'           THEN intprobabilityppm END)            AS noprobppm
-    FROM tblegmapping
+    SELECT * FROM tblegmapping
     WHERE blnactive = true
-    GROUP BY txtsourceref
     ORDER BY txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
 
-export interface UpsertLegInput {
+/**
+ * Markets with at least one on-chain-registered leg id. Used by
+ * /api/leg-mapping and MCP tools to know which legs are buyable.
+ */
+export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM tblegmapping
+    WHERE blnactive = true
+      AND (intyeslegid IS NOT NULL OR intnolegid IS NOT NULL)
+    ORDER BY txtsourceref
+  `;
+  return (rows as Record<string, unknown>[]).map(coerceMarketRow);
+}
+
+export interface UpsertMarketInput {
   sourceRef: string;
-  side: LegSide;
   source: LegSource;
-  onChainLegId: number | null;
   question: string;
   category: string;
-  probabilityPpm: number;
+  yesLegId: number | null;
+  noLegId: number | null;
+  yesProbabilityPpm: number;
+  noProbabilityPpm: number | null;
   cutoffTime: number;
   earliestResolve: number;
   active?: boolean;
 }
 
 /**
- * Upsert into tblegmapping. The polymarket sync passes onChainLegId=null for
- * new rows; the registration script later populates it. For seed and registered
- * polymarket rows we pass the real id.
- *
- * NOTE: on conflict we deliberately do NOT overwrite intonchainlegid with NULL
- * -- once a leg is registered on-chain, sync re-runs must not wipe it.
+ * Upsert a market row. On conflict we refresh probs/cutoff/etc. but preserve
+ * any existing on-chain leg ids (sync must never clobber a registered id with
+ * NULL once set).
  */
-export async function upsertLegMapping(input: UpsertLegInput): Promise<void> {
+export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
   await db`
     INSERT INTO tblegmapping (
-      txtsourceref, txtside, txtsource, intonchainlegid, txtquestion, txtcategory,
-      intprobabilityppm, bigcutofftime, bigearliestresolve, blnactive
+      txtsourceref, txtsource, txtquestion, txtcategory,
+      intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
+      bigcutofftime, bigearliestresolve, blnactive
     ) VALUES (
-      ${input.sourceRef}, ${input.side}, ${input.source}, ${input.onChainLegId}, ${input.question}, ${input.category},
-      ${input.probabilityPpm}, ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true}
+      ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
+      ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
+      ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true}
     )
-    ON CONFLICT (txtsourceref, txtside) DO UPDATE SET
-      intonchainlegid    = COALESCE(tblegmapping.intonchainlegid, EXCLUDED.intonchainlegid),
+    ON CONFLICT (txtsourceref) DO UPDATE SET
+      intyeslegid        = COALESCE(tblegmapping.intyeslegid, EXCLUDED.intyeslegid),
+      intnolegid         = COALESCE(tblegmapping.intnolegid,  EXCLUDED.intnolegid),
       txtquestion        = EXCLUDED.txtquestion,
       txtcategory        = EXCLUDED.txtcategory,
-      intprobabilityppm  = EXCLUDED.intprobabilityppm,
+      intyesprobppm      = EXCLUDED.intyesprobppm,
+      intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
       bigearliestresolve = EXCLUDED.bigearliestresolve,
       blnactive          = EXCLUDED.blnactive

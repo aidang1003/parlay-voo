@@ -17,8 +17,9 @@ interface GammaMarket {
   conditionId: string;
   question: string;
   slug: string;
-  outcomes: string[];
-  outcomePrices: string[];
+  /** May arrive as a JSON string (e.g. "[\"Yes\",\"No\"]") or a real array. */
+  outcomes: string[] | string;
+  outcomePrices: string[] | string;
   volume: string;
   liquidity: string;
   active: boolean;
@@ -27,7 +28,7 @@ interface GammaMarket {
   groupItemTitle?: string;
   bestBid: number;
   bestAsk: number;
-  clobTokenIds: string[];
+  clobTokenIds: string[] | string;
   endDate?: string;
 }
 
@@ -173,6 +174,14 @@ function buildEventsUrl(cfg: Required<FeaturedOptions>): string {
   return `${base}/events?${params}`;
 }
 
+/** Gamma sometimes returns JSON-encoded strings instead of arrays. */
+function parseJsonField<T>(raw: T | string): T {
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw) as T; } catch { /* fall through */ }
+  }
+  return raw as T;
+}
+
 function isUsable(
   mkt: GammaMarket,
   cfg: Pick<Required<FeaturedOptions>, "minVolume24hr" | "maxSpread">,
@@ -181,7 +190,8 @@ function isUsable(
   if (!mkt.conditionId) return false;
 
   // Must be a binary (yes/no) market
-  if (!mkt.outcomes || mkt.outcomes.length !== 2) return false;
+  const outcomes = parseJsonField<string[]>(mkt.outcomes);
+  if (!Array.isArray(outcomes) || outcomes.length !== 2) return false;
 
   // Require non-trivial volume
   const vol = Number(mkt.volume);

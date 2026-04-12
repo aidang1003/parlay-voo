@@ -1,6 +1,6 @@
 import type { Market, Leg } from "@parlaycity/shared";
 import { PPM } from "@parlaycity/shared";
-import { getRegisteredActiveLegs, type LegMappingRow } from "@/lib/db/client";
+import { getAllActiveLegs, type LegMappingRow } from "@/lib/db/client";
 
 /**
  * Build Market[] for /api/markets directly from leg_mapping. One DB read,
@@ -9,11 +9,12 @@ import { getRegisteredActiveLegs, type LegMappingRow } from "@/lib/db/client";
  *   - seed legs: each row becomes its own single-leg Market (matches the
  *     legacy seed catalog shape)
  *
- * Pending-registration rows (on_chain_leg_id IS NULL) are filtered upstream
- * by getRegisteredActiveLegs.
+ * Includes legs pending on-chain registration (on_chain_leg_id IS NULL).
+ * Those get synthetic negative IDs so they render on the frontend with an
+ * "Analysis Only" badge until registered on-chain.
  */
 export async function fetchMarketsFromDb(): Promise<Market[]> {
-  const rows = await getRegisteredActiveLegs();
+  const rows = await getAllActiveLegs();
   if (rows.length === 0) return [];
 
   const polyByCid = new Map<string, { yes?: LegMappingRow; no?: LegMappingRow }>();
@@ -32,14 +33,15 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
   }
 
   const markets: Market[] = [];
+  let syntheticId = -1;
 
   for (const row of seedRows) {
     markets.push({
-      id: `seed:${row.on_chain_leg_id}`,
+      id: `seed:${row.on_chain_leg_id ?? row.source_ref}`,
       title: row.question,
       description: row.question,
       category: row.category,
-      legs: [rowToLeg(row)],
+      legs: [rowToLeg(row, undefined, () => syntheticId--)],
     });
   }
 
@@ -50,17 +52,26 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
       title: yes.question,
       description: `Polymarket market ${conditionId.slice(0, 10)}...`,
       category: yes.category,
-      legs: [rowToLeg(yes, "YES"), rowToLeg(no, "NO")],
+      legs: [
+        rowToLeg(yes, "YES", () => syntheticId--),
+        rowToLeg(no, "NO", () => syntheticId--),
+      ],
     });
   }
 
   return markets;
 }
 
-function rowToLeg(row: LegMappingRow, sideLabel?: "YES" | "NO"): Leg {
-  // on_chain_leg_id is non-null here because getRegisteredActiveLegs filters NULLs.
+function rowToLeg(
+  row: LegMappingRow,
+  sideLabel?: "YES" | "NO",
+  nextSyntheticId?: () => number,
+): Leg {
+  // Real on-chain ID if registered, otherwise a synthetic negative ID
+  // so the frontend can display it (negative IDs never collide with real ones).
+  const id = row.on_chain_leg_id ?? nextSyntheticId?.() ?? -1;
   return {
-    id: row.on_chain_leg_id as number,
+    id,
     question: sideLabel ? `${row.question} — ${sideLabel}` : row.question,
     sourceRef: row.source_ref,
     cutoffTime: row.cutoff_time,

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { CURATED, type CuratedMarket, type PolymarketOrderBook } from "@parlaycity/shared";
+import {
+  CURATED,
+  fetchFeaturedMarkets,
+  type CuratedMarket,
+  type PolymarketOrderBook,
+} from "@parlaycity/shared";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { midToPpm } from "@/lib/polymarket/markets";
 import { upsertLegMapping } from "@/lib/db/client";
@@ -11,18 +16,14 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/polymarket/sync
  *
- * Pulls each curated Polymarket market into leg_mapping. That's it. New rows
- * land with on_chain_leg_id = NULL; a separate registration script (run
- * locally with the deployer keystore) populates that field once the legs are
- * registered on-chain. /api/markets hides any leg with NULL on_chain_leg_id,
- * so users never see a market they can't actually bet on.
+ * Syncs Polymarket markets into leg_mapping from two sources:
+ *   1. CURATED -- hand-picked markets (curated.ts)
+ *   2. Featured -- top trending markets by 24h volume (featured.ts / Gamma API)
+ *
+ * Deduplicates by conditionId so a market in both lists is only synced once.
  *
  * Re-runs are idempotent: existing rows get their probability/cutoff refreshed
  * but their on_chain_leg_id is preserved (see upsertLegMapping COALESCE).
- *
- * Resolution relay (calling AdminOracleAdapter.resolve when a market settles)
- * is not in this route -- it's a future forge script using the deployer
- * keystore, same model as registration.
  */
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {
@@ -34,15 +35,33 @@ export async function GET(req: Request) {
     clobUrl: process.env.POLYMARKET_CLOB_URL ?? "https://clob.polymarket.com",
   });
 
-  const result = { upserted: 0, skipped: 0, errors: [] as string[] };
+  // Merge curated + featured, dedup by conditionId
+  let featured: CuratedMarket[] = [];
+  try {
+    featured = await fetchFeaturedMarkets({
+      gammaUrl: process.env.POLYMARKET_GAMMA_URL ?? "https://gamma-api.polymarket.com",
+    });
+  } catch (e) {
+    console.warn("[polymarket/sync] Featured fetch failed, continuing with curated only:", e);
+  }
 
-  for (const entry of CURATED) {
+  const seen = new Set<string>();
+  const allMarkets: CuratedMarket[] = [];
+  for (const entry of [...CURATED, ...featured]) {
+    if (seen.has(entry.conditionId)) continue;
+    seen.add(entry.conditionId);
+    allMarkets.push(entry);
+  }
+
+  const result = { upserted: 0, skipped: 0, errors: [] as string[], total: allMarkets.length };
+
+  for (const entry of allMarkets) {
     try {
       await syncOne(entry, poly);
       result.upserted++;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push(`${entry.conditionId}: ${msg}`);
+      result.errors.push(`${entry.conditionId.slice(0, 10)}: ${msg}`);
       result.skipped++;
     }
   }

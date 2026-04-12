@@ -67,8 +67,7 @@ function coerceLegRow(r: Record<string, unknown>): LegMappingRow {
 
 /**
  * Active legs that are also registered on-chain (on_chain_leg_id IS NOT NULL).
- * This is what /api/markets reads -- pending-registration rows are hidden until
- * the registration script populates their leg ID.
+ * Use for operations that need real on-chain IDs (settlement, MCP tools).
  */
 export async function getRegisteredActiveLegs(): Promise<LegMappingRow[]> {
   const db = sql();
@@ -76,6 +75,21 @@ export async function getRegisteredActiveLegs(): Promise<LegMappingRow[]> {
     SELECT * FROM leg_mapping
     WHERE active = true AND on_chain_leg_id IS NOT NULL
     ORDER BY on_chain_leg_id
+  `;
+  return (rows as Record<string, unknown>[]).map(coerceLegRow);
+}
+
+/**
+ * All active legs -- the catalog for /api/markets. Includes legs pending
+ * on-chain registration so Polymarket data shows up immediately after sync.
+ * Registered legs sort first; unregistered sort by source_ref.
+ */
+export async function getAllActiveLegs(): Promise<LegMappingRow[]> {
+  const db = sql();
+  const rows = await db`
+    SELECT * FROM leg_mapping
+    WHERE active = true
+    ORDER BY on_chain_leg_id NULLS LAST, source_ref
   `;
   return (rows as Record<string, unknown>[]).map(coerceLegRow);
 }

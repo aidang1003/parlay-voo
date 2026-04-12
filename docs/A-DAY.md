@@ -118,8 +118,11 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Blockers:**
 - **Notes:**
 
-## Fixes
+## Parlay Builder Frontend Fixes
 1) Doesn't make sense to have a YES market for a parlay with a yes/no option and a NO option with a yes/no selection
+ - cut database entries in half and re-make txtsourceref as primaryid by adding a yes odds and no odds column
+ - Implement categories using the category pulled back from polymarket
+ - Ensure odds are being built from the the correct number. they either display 2x, 20x or 1.05x
 
 ## Bailout rules
 

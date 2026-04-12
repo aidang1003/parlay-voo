@@ -33,6 +33,7 @@ export async function GET(req: Request) {
       for (const leg of market.legs) {
         await upsertLegMapping({
           sourceRef: `seed:${leg.id}`,
+          side: "na",
           source: "seed",
           onChainLegId: leg.id - 1, // seed catalog 1..21 → on-chain 0..20
           question: leg.question,

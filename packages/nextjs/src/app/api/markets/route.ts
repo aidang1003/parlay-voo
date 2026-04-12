@@ -24,11 +24,13 @@ export async function GET(req: Request) {
     category: m.category,
     legs: m.legs.map((l) => ({
       id: l.id,
+      noId: l.noId,
       question: l.question,
       sourceRef: l.sourceRef,
       cutoffTime: l.cutoffTime,
       earliestResolve: l.earliestResolve,
       probabilityPPM: l.probabilityPPM,
+      noProbabilityPPM: l.noProbabilityPPM,
       active: l.active,
     })),
   }));

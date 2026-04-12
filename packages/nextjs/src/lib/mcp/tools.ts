@@ -69,9 +69,10 @@ export async function refreshLegMap(): Promise<void> {
       const parsed = parsePolySourceRef(row.txtsourceref);
       if (!parsed) continue;
       const onChainId = row.intonchainlegid as number;
+      const sideLabel = row.txtside === "yes" ? "YES" : row.txtside === "no" ? "NO" : "";
       LEG_MAP.set(onChainId, {
         id: onChainId,
-        question: `${row.txtquestion} — ${parsed.side.toUpperCase()}`,
+        question: sideLabel ? `${row.txtquestion} — ${sideLabel}` : row.txtquestion,
         sourceRef: row.txtsourceref,
         cutoffTime: row.bigcutofftime,
         earliestResolve: row.bigearliestresolve,

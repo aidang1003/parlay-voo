@@ -11,12 +11,11 @@ let cachedAt = 0;
 /**
  * GET /api/leg-mapping
  *
- * Maps frontend-facing leg IDs to on-chain leg IDs. For seed legs the catalog
- * ID (1..21 from SEED_MARKETS) maps to on-chain 0..20. For polymarket legs
- * the frontend ID *is* the on-chain ID, so the mapping is identity there.
- *
- * The ParlayBuilder component reads this to translate clicks into buyTicket
- * calldata.
+ * Identity map of every on-chain-registered leg id. With the DB as source of
+ * truth, /api/markets emits on-chain ids directly on legs (leg.id and
+ * leg.noId); this endpoint just tells the frontend which of those ids are
+ * actually registered on-chain so the UI can decide what's buyable. Keyed by
+ * legId (string) → legId (number) for backward compat with ParlayBuilder.
  */
 export async function GET() {
   if (cached && Date.now() - cachedAt < CACHE_TTL_MS) {
@@ -30,14 +29,7 @@ export async function GET() {
     const mapping: Record<string, number> = {};
     for (const row of rows) {
       const onChainId = row.intonchainlegid as number; // non-null by helper contract
-      if (row.txtsource === "seed") {
-        // seed catalog ID (tblegmapping txtsourceref = "seed:{N}") → on_chain N-1
-        const m = row.txtsourceref.match(/^seed:(\d+)$/);
-        if (m) mapping[m[1]] = onChainId;
-      } else {
-        // polymarket: identity (frontend uses intonchainlegid directly)
-        mapping[String(onChainId)] = onChainId;
-      }
+      mapping[String(onChainId)] = onChainId;
     }
 
     cached = {

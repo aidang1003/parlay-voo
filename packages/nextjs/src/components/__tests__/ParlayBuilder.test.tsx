@@ -115,15 +115,18 @@ const TEST_MARKETS = [
     description: "Crypto price markets",
     category: "crypto",
     legs: [
-      { id: 0, question: "Will ETH hit $5000 by end of March?", sourceRef: "seed:0", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 400000, active: true },
-      { id: 1, question: "Will BTC hit $150k by end of March?", sourceRef: "seed:1", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, active: true },
-      { id: 2, question: "Will SOL hit $300 by end of March?", sourceRef: "seed:2", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, active: true },
+      { id: 0, noId: 10, question: "Will ETH hit $5000 by end of March?", sourceRef: "poly:0xeth", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 400000, noProbabilityPPM: 600000, active: true },
+      { id: 1, noId: 11, question: "Will BTC hit $150k by end of March?", sourceRef: "poly:0xbtc", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, noProbabilityPPM: 650000, active: true },
+      { id: 2, noId: 12, question: "Will SOL hit $300 by end of March?", sourceRef: "poly:0xsol", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, noProbabilityPPM: 650000, active: true },
     ],
   },
 ];
 
 /** Leg mapping that marks test legs as on-chain. chainId must match the env the component reads. */
-const TEST_LEG_MAPPING = { chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "31337"), legs: { "0": 0, "1": 1, "2": 2 } };
+const TEST_LEG_MAPPING = {
+  chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "31337"),
+  legs: { "0": 0, "1": 1, "2": 2, "10": 10, "11": 11, "12": 12 },
+};
 
 /** Default fetch mock: returns TEST_MARKETS for /api/markets, leg mapping, rejects everything else. */
 function defaultFetchMock(url: string | URL | Request): Promise<Response> {

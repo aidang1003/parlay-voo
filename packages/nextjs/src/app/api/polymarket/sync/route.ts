@@ -96,7 +96,8 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     ["no", noPpm],
   ] as const) {
     await upsertLegMapping({
-      sourceRef: `poly:${entry.conditionId}:${side}`,
+      sourceRef: `poly:${entry.conditionId}`,
+      side,
       source: "polymarket",
       onChainLegId: null,
       question,

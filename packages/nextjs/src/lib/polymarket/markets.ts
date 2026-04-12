@@ -1,90 +1,73 @@
 import type { Market, Leg } from "@parlaycity/shared";
 import { PPM } from "@parlaycity/shared";
-import { getAllActiveLegs, type LegMappingRow } from "@/lib/db/client";
+import { getActiveMarkets, type MarketRow } from "@/lib/db/client";
 
 /**
- * Build Market[] for /api/markets directly from tblegmapping. One DB read,
- * grouped by source-specific keys:
- *   - polymarket legs: grouped by condition_id (yes + no into one Market)
- *   - seed legs: each row becomes its own single-leg Market (matches the
- *     legacy seed catalog shape)
+ * Build Market[] for /api/markets from the pivoted getActiveMarkets query.
+ * One DB round-trip returns one row per txtsourceref with yes/no sides
+ * flattened into columns. Each Market carries a single Leg whose `id`/`noId`
+ * identify the two on-chain legs (seed markets omit noId so the Yes/No card
+ * renders the No button only when it's meaningful).
  *
- * Includes legs pending on-chain registration (intonchainlegid IS NULL).
- * Those get synthetic negative IDs so they render on the frontend with an
- * "Analysis Only" badge until registered on-chain.
+ * DB rows are the source of truth for display. A price/leg-id verification
+ * runs later at parlay checkout; this layer doesn't gate on on-chain status.
  */
 export async function fetchMarketsFromDb(): Promise<Market[]> {
-  const rows = await getAllActiveLegs();
+  const rows = await getActiveMarkets();
   if (rows.length === 0) return [];
-
-  const polyByCid = new Map<string, { yes?: LegMappingRow; no?: LegMappingRow }>();
-  const seedRows: LegMappingRow[] = [];
-
-  for (const row of rows) {
-    if (row.txtsource === "polymarket") {
-      const parsed = parsePolySourceRef(row.txtsourceref);
-      if (!parsed) continue;
-      const bucket = polyByCid.get(parsed.conditionId) ?? {};
-      bucket[parsed.side] = row;
-      polyByCid.set(parsed.conditionId, bucket);
-    } else {
-      seedRows.push(row);
-    }
-  }
 
   const markets: Market[] = [];
   let syntheticId = -1;
+  const nextSynthetic = () => syntheticId--;
 
-  for (const row of seedRows) {
-    markets.push({
-      id: `seed:${row.intonchainlegid ?? row.txtsourceref}`,
-      title: row.txtquestion,
-      description: row.txtquestion,
-      category: row.txtcategory,
-      legs: [rowToLeg(row, undefined, () => syntheticId--)],
-    });
-  }
-
-  for (const [conditionId, { yes, no }] of polyByCid) {
-    if (!yes || !no) continue; // skip half-synced markets
-    markets.push({
-      id: `poly:${conditionId}`,
-      title: yes.txtquestion,
-      description: `Polymarket market ${conditionId.slice(0, 10)}...`,
-      category: yes.txtcategory,
-      legs: [
-        rowToLeg(yes, "YES", () => syntheticId--),
-        rowToLeg(no, "NO", () => syntheticId--),
-      ],
-    });
+  for (const row of rows) {
+    if (row.txtsource === "seed") {
+      markets.push({
+        id: row.txtsourceref,
+        title: row.txtquestion,
+        description: row.txtquestion,
+        category: row.txtcategory,
+        legs: [rowToLeg(row, nextSynthetic)],
+      });
+    } else {
+      // polymarket: needs both sides present to build a yes/no card
+      if (row.yesprobppm == null || row.noprobppm == null) continue;
+      const conditionId = row.txtsourceref.replace(/^poly:/, "");
+      markets.push({
+        id: row.txtsourceref,
+        title: row.txtquestion,
+        description: `Polymarket market ${conditionId.slice(0, 10)}...`,
+        category: row.txtcategory,
+        legs: [rowToLeg(row, nextSynthetic)],
+      });
+    }
   }
 
   return markets;
 }
 
-function rowToLeg(
-  row: LegMappingRow,
-  sideLabel?: "YES" | "NO",
-  nextSyntheticId?: () => number,
-): Leg {
-  const id = row.intonchainlegid ?? nextSyntheticId?.() ?? -1;
-  return {
-    id,
-    question: sideLabel ? `${row.txtquestion} — ${sideLabel}` : row.txtquestion,
+function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
+  const yesId = row.yeslegid ?? nextSyntheticId();
+  const leg: Leg = {
+    id: yesId,
+    question: row.txtquestion,
     sourceRef: row.txtsourceref,
     cutoffTime: row.bigcutofftime,
     earliestResolve: row.bigearliestresolve,
-    probabilityPPM: row.intprobabilityppm,
-    active: row.blnactive,
+    probabilityPPM: row.yesprobppm ?? 500_000,
+    active: true,
   };
+  if (row.txtsource === "polymarket") {
+    leg.noId = row.nolegid ?? nextSyntheticId();
+    leg.noProbabilityPPM = row.noprobppm ?? 500_000;
+  }
+  return leg;
 }
 
-export function parsePolySourceRef(
-  sourceRef: string,
-): { conditionId: string; side: "yes" | "no" } | null {
-  const m = sourceRef.match(/^poly:(.+):(yes|no)$/);
+export function parsePolySourceRef(sourceRef: string): { conditionId: string } | null {
+  const m = sourceRef.match(/^poly:([^:]+)$/);
   if (!m) return null;
-  return { conditionId: m[1], side: m[2] as "yes" | "no" };
+  return { conditionId: m[1] };
 }
 
 /** Convert a Polymarket mid-price (0..1) to clamped PPM. */

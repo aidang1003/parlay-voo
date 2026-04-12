@@ -47,6 +47,9 @@ interface DisplayLeg {
   marketTitle: string;
   /** Whether this leg has an on-chain counterpart (can be bought). */
   onChain: boolean;
+  /** Raw source reference, e.g. "poly:0xabc:yes" or "price-feed". Used to
+   *  surface "Odds locked" labels for Polymarket markets. */
+  sourceRef: string;
 }
 
 interface SelectedLeg {
@@ -143,6 +146,7 @@ function apiMarketsToLegs(markets: APIMarket[]): DisplayLeg[] {
         category: market.category,
         marketTitle: market.title,
         onChain: false,
+        sourceRef: leg.sourceRef,
       });
     }
   }
@@ -161,6 +165,7 @@ function mockToDisplayLegs(): DisplayLeg[] {
     category: "crypto",
     marketTitle: "Crypto Predictions",
     onChain: true,
+    sourceRef: "mock",
   }));
 }
 
@@ -648,6 +653,14 @@ export function ParlayBuilder() {
                     CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
                   }`}>
                     {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
+                  </span>
+                )}
+                {legs[0]?.sourceRef.startsWith("poly:") && (
+                  <span
+                    title="Odds captured when this market was registered on-chain. They don't update mid-flight."
+                    className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
+                  >
+                    Odds locked
                   </span>
                 )}
                 {legs[0] && !legs[0].onChain && !onChainLegIds.has(legs[0].id) && (

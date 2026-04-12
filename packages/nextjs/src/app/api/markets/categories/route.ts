@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
-import { SEED_MARKETS } from "@/lib/mcp/tools";
-import { fetchNBAMarkets } from "@/lib/bdl";
+import { fetchMarketsFromDb } from "@/lib/polymarket/markets";
 
 /**
  * GET /api/markets/categories -- list available categories with counts.
  */
 export async function GET() {
-  const nbaMarkets = await fetchNBAMarkets();
-  const allMarkets = [...SEED_MARKETS, ...nbaMarkets];
+  const allMarkets = await fetchMarketsFromDb();
 
   const categories: Record<string, { marketCount: number; legCount: number }> = {};
   for (const m of allMarkets) {

@@ -146,32 +146,6 @@ async function main() {
     }
   }
 
-  // Optionally fetch BDL legs from services API
-  try {
-    const apiUrl = process.env.API_URL ?? "http://localhost:3000/api";
-    const res = await fetch(`${apiUrl}/markets?category=nba`);
-    if (res.ok) {
-      const nbaMarkets = await res.json();
-      if (Array.isArray(nbaMarkets)) {
-        for (const market of nbaMarkets) {
-          for (const leg of market.legs) {
-            catalogLegs.push({
-              catalogId: leg.id,
-              question: leg.question,
-              sourceRef: leg.sourceRef ?? `bdl:${leg.id}`,
-              cutoffTime: leg.cutoffTime,
-              earliestResolve: leg.earliestResolve,
-              probabilityPPM: leg.probabilityPPM,
-            });
-          }
-        }
-        console.log(`[register-legs] Fetched ${nbaMarkets.length} NBA markets from services`);
-      }
-    }
-  } catch {
-    console.log("[register-legs] Services not running, skipping NBA legs");
-  }
-
   // Register missing legs
   const mapping: Record<string, number> = {}; // catalogId -> onChainId
   let created = 0;

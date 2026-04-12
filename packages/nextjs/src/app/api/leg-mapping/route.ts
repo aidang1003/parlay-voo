@@ -1,97 +1,58 @@
 import { NextResponse } from "next/server";
-import { createPublicClient, http } from "viem";
-import { baseSepolia, foundry } from "viem/chains";
-import { LEG_REGISTRY_ABI } from "@/lib/contracts";
-import { NBA_LEG_ID_OFFSET } from "@/lib/bdl";
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+import { getRegisteredActiveLegs } from "@/lib/db/client";
+
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
-const chain = chainId === 31337 ? foundry : baseSepolia;
-const rpcUrl =
-  process.env.BASE_SEPOLIA_RPC_URL ??
-  (chainId === 31337 ? "http://127.0.0.1:8545" : "https://sepolia.base.org");
 
-const registryAddr = (process.env.NEXT_PUBLIC_LEG_REGISTRY_ADDRESS ?? "") as `0x${string}`;
-
-let cachedMapping: { generated: string; chainId: number; legs: Record<string, number> } | null = null;
-let cacheTimestamp = 0;
+let cached: { generated: string; chainId: number; legs: Record<string, number> } | null = null;
+let cachedAt = 0;
 
 /**
  * GET /api/leg-mapping
  *
- * Dynamically queries LegRegistry on-chain and builds a catalog-ID -> on-chain-ID mapping.
- * Cached for 5 minutes to avoid excessive RPC calls.
+ * Maps frontend-facing leg IDs to on-chain leg IDs. For seed legs the catalog
+ * ID (1..21 from SEED_MARKETS) maps to on-chain 0..20. For polymarket legs
+ * the frontend ID *is* the on-chain ID, so the mapping is identity there.
+ *
+ * The ParlayBuilder component reads this to translate clicks into buyTicket
+ * calldata.
  */
 export async function GET() {
-  if (cachedMapping && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
-    return NextResponse.json(cachedMapping, {
+  if (cached && Date.now() - cachedAt < CACHE_TTL_MS) {
+    return NextResponse.json(cached, {
       headers: { "Cache-Control": "public, max-age=300" },
     });
   }
 
-  if (!registryAddr) {
-    return NextResponse.json(
-      { error: "LEG_REGISTRY_ADDRESS not configured" },
-      { status: 503 },
-    );
-  }
-
   try {
-    const client = createPublicClient({ chain, transport: http(rpcUrl) });
-
-    const legCount = Number(
-      await client.readContract({
-        address: registryAddr,
-        abi: LEG_REGISTRY_ABI,
-        functionName: "legCount",
-      }),
-    );
-
+    const rows = await getRegisteredActiveLegs();
     const mapping: Record<string, number> = {};
-
-    for (let i = 0; i < legCount; i++) {
-      const leg = (await client.readContract({
-        address: registryAddr,
-        abi: LEG_REGISTRY_ABI,
-        functionName: "getLeg",
-        args: [BigInt(i)],
-      })) as { question: string; sourceRef: string };
-
-      // Seed legs: on-chain 0-20 -> catalog 1-21
-      if (i <= 20) {
-        mapping[String(i + 1)] = i;
-        continue;
-      }
-
-      // NBA legs: derive catalog ID from sourceRef
-      const mlMatch = leg.sourceRef.match(/^bdl:game:(\d+)$/);
-      const ouMatch = leg.sourceRef.match(/^bdl:game:(\d+):ou$/);
-
-      if (mlMatch) {
-        const gameId = parseInt(mlMatch[1]);
-        mapping[String(NBA_LEG_ID_OFFSET + gameId * 2)] = i;
-      } else if (ouMatch) {
-        const gameId = parseInt(ouMatch[1]);
-        mapping[String(NBA_LEG_ID_OFFSET + gameId * 2 + 1)] = i;
+    for (const row of rows) {
+      const onChainId = row.on_chain_leg_id as number; // non-null by helper contract
+      if (row.source === "seed") {
+        // seed catalog ID (leg_mapping source_ref = "seed:{N}") → on_chain N-1
+        const m = row.source_ref.match(/^seed:(\d+)$/);
+        if (m) mapping[m[1]] = onChainId;
       } else {
-        console.warn(`[leg-mapping] Unrecognized sourceRef for leg ${i}: "${leg.sourceRef}"`);
+        // polymarket: identity (frontend uses on_chain_leg_id directly)
+        mapping[String(onChainId)] = onChainId;
       }
     }
 
-    cachedMapping = {
+    cached = {
       generated: new Date().toISOString(),
       chainId,
       legs: mapping,
     };
-    cacheTimestamp = Date.now();
+    cachedAt = Date.now();
 
-    return NextResponse.json(cachedMapping, {
+    return NextResponse.json(cached, {
       headers: { "Cache-Control": "public, max-age=300" },
     });
   } catch (e) {
-    // Fall back to static file if on-chain query fails
     return NextResponse.json(
-      { error: `Failed to query LegRegistry: ${e instanceof Error ? e.message : String(e)}` },
+      { error: `Failed to read leg mapping: ${e instanceof Error ? e.message : String(e)}` },
       { status: 500 },
     );
   }

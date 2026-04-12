@@ -8,11 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:init": "curl -sf http://localhost:3000/api/db/init",
+    "polymarket:sync": "curl -sf http://localhost:3000/api/polymarket/sync"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.12",
     "@ai-sdk/react": "^1.2.12",
+    "@neondatabase/serverless": "^1.0.2",
     "@parlaycity/shared": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "ai": "^4.3.19",

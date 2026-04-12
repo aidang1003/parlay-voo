@@ -88,6 +88,11 @@ Mark tasks `[x]` when done. Don't delete — keeps a log of what shipped vs what
 - **Files:** new forge script `packages/foundry/script/GenerateAbis.s.sol` or a tsx script that reads `packages/foundry/out/**/*.json`, writes `packages/nextjs/src/contracts/deployedContracts.ts`. Update `hooks.ts` imports.
 - **Natural bundling:** do this during S-3 if you find yourself already rewriting how hooks consume ABIs.
 
+### 2-10 - Re-format database naming conventions
+- **Time:** 20 minutes
+- **Value:** low makes hand writing database schema easier
+- **Change:** All table names and columns names should be Camel case i.e. parlayLegs
+
 ## Feature backlog
 
 Add your own below. For each, jot down: time estimate, value, blockers (which scaling task it depends on, if any). Then slot them into the alternation sequence.
@@ -103,6 +108,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Value:** medium, will need this for the launch and settlement
 - **Blockers:** values are hard-coded as of right now, some agent workloads probably depend on this as well. Possible need to remove Kelly and Betty agents to accomplish this. Better data retention needed (Postgres)
 - **Notes:** Live polymarket data will be used to 1) find real bets with their live odds 2) settle active bets
+- **CRON_SECRET caveat:** the Bearer check on `/api/polymarket/sync` and `/api/db/init` is probably not doing much for security and adds complexity we don't need. The realistic attack is Vercel compute-bill drain, not fund/data loss — sync is idempotent, reads a hand-curated list, and the on-chain writes are gated by `DEPLOYER_PRIVATE_KEY`. If the secret plumbing ever causes friction (local dev, new contributors, CI), drop it and replace with an in-route "skip if last run < 1h ago" idempotency gate.
 
 ### F-3 — (your idea here)
 - **Time:**

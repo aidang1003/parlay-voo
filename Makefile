@@ -25,7 +25,7 @@ deploy-local:
 	env -u USDC_ADDRESS ./scripts/sync-env.sh
 
 dev:
-	@echo "Starting ParlayCity dev stack..."
+	@echo "Starting ParlayVoo dev stack..."
 	@mkdir -p $(PID_DIR)
 	@for port in 3000 8545; do lsof -ti :$$port | xargs kill -9 2>/dev/null || true; done
 	@sleep 1
@@ -36,8 +36,8 @@ dev:
 	@cd packages/foundry && env -u USDC_ADDRESS forge script script/Deploy.s.sol --broadcast --rpc-url http://127.0.0.1:8545 > ../../$(PID_DIR)/deploy.log 2>&1
 	@env -u USDC_ADDRESS ./scripts/sync-env.sh
 	@echo "  Contracts deployed, .env.local synced"
-	@npx tsx scripts/register-legs.ts > $(PID_DIR)/register-legs.log 2>&1 || echo "  (register-legs skipped)"
-	@echo "  Catalog legs registered"
+#	@npx tsx scripts/register-legs.ts > $(PID_DIR)/register-legs.log 2>&1 || echo "  (register-legs skipped)"
+#	@echo "  Catalog legs registered"
 	@cd packages/nextjs && nohup pnpm dev > ../../$(PID_DIR)/web.log 2>&1 & echo $$! > $(PID_DIR)/web.pid
 	@echo "  Web started (pid $$(cat $(PID_DIR)/web.pid)) on :3000"
 	@sleep 3
@@ -166,9 +166,6 @@ risk-agent:
 risk-agent-dry:
 	DRY_RUN=true npx tsx scripts/risk-agent.ts
 
-market-agent:
-	npx tsx scripts/market-agent.ts
-
 settler-sepolia:
 	$(eval RPC := $(or $(BASE_SEPOLIA_RPC_URL),https://sepolia.base.org))
 	RPC_URL=$(RPC) PRIVATE_KEY=$$DEPLOYER_PRIVATE_KEY npx tsx scripts/settler-bot.ts
@@ -176,10 +173,6 @@ settler-sepolia:
 risk-agent-sepolia:
 	$(eval RPC := $(or $(BASE_SEPOLIA_RPC_URL),https://sepolia.base.org))
 	RPC_URL=$(RPC) PRIVATE_KEY=$$DEPLOYER_PRIVATE_KEY DRY_RUN=false npx tsx scripts/risk-agent.ts
-
-market-agent-sepolia:
-	$(eval RPC := $(or $(BASE_SEPOLIA_RPC_URL),https://sepolia.base.org))
-	RPC_URL=$(RPC) PRIVATE_KEY=$$DEPLOYER_PRIVATE_KEY BDL_API_KEY=$$BDL_API_KEY npx tsx scripts/market-agent.ts
 
 demo-seed:
 	./scripts/demo-seed.sh
@@ -193,4 +186,4 @@ clean:
 	cd packages/foundry && forge clean
 	cd packages/nextjs && rm -rf .next
 
-.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full register-legs register-legs-sepolia demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env risk-agent risk-agent-dry market-agent settler-sepolia risk-agent-sepolia market-agent-sepolia demo-seed demo-autopilot clean
+.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full register-legs register-legs-sepolia demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env risk-agent risk-agent-dry settler-sepolia risk-agent-sepolia demo-seed demo-autopilot clean

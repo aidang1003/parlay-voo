@@ -88,10 +88,12 @@ Mark tasks `[x]` when done. Don't delete — keeps a log of what shipped vs what
 - **Files:** new forge script `packages/foundry/script/GenerateAbis.s.sol` or a tsx script that reads `packages/foundry/out/**/*.json`, writes `packages/nextjs/src/contracts/deployedContracts.ts`. Update `hooks.ts` imports.
 - **Natural bundling:** do this during S-3 if you find yourself already rewriting how hooks consume ABIs.
 
-### 2-10 - Re-format database naming conventions
+### S-10 - Re-format database naming conventions ✅ COMPLETE
 - **Time:** 20 minutes
 - **Value:** low makes hand writing database schema easier
-- **Change:** All table names and columns names should be Camel case i.e. parlayLegs
+- **Change:** All table names and columns names should be lowercase i.e. parlaylegs so table names don't have to be in quotations
+- **Format:** Designate table with the preceeding letters tb, designate columns with some kind of preceeding syntax, would be great if that said the data type.
+- **Research:** Find an industry norm for this kind of naming with which to base our naming off of.
 
 ## Feature backlog
 
@@ -116,19 +118,8 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Blockers:**
 - **Notes:**
 
-## Suggested Saturday morning order
-
-Assuming no features are blockers yet, the pure-scaling momentum sequence is:
-
-1. **S-1** (5 min) — instant win
-2. **S-2** (1 hr) — measure the baseline *before* more changes
-3. Pick a feature from your F-list
-4. **S-3** (2 hr) — the visible multicall batching improvement
-5. Pick another feature
-6. **S-4** (2-3 hr) — Redis + `/api/markets` cache
-7. **S-5** (1 hr) — rate limiting, bundled with S-4
-8. Feature push through Saturday evening
-9. **S-6** kickoff Sunday (start Ponder; finish next week)
+## Fixes
+1) Doesn't make sense to have a YES market for a parlay with a yes/no option and a NO option with a yes/no selection
 
 ## Bailout rules
 

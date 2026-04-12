@@ -29,13 +29,13 @@ export async function GET() {
     const rows = await getRegisteredActiveLegs();
     const mapping: Record<string, number> = {};
     for (const row of rows) {
-      const onChainId = row.on_chain_leg_id as number; // non-null by helper contract
-      if (row.source === "seed") {
-        // seed catalog ID (leg_mapping source_ref = "seed:{N}") → on_chain N-1
-        const m = row.source_ref.match(/^seed:(\d+)$/);
+      const onChainId = row.intonchainlegid as number; // non-null by helper contract
+      if (row.txtsource === "seed") {
+        // seed catalog ID (tblegmapping txtsourceref = "seed:{N}") → on_chain N-1
+        const m = row.txtsourceref.match(/^seed:(\d+)$/);
         if (m) mapping[m[1]] = onChainId;
       } else {
-        // polymarket: identity (frontend uses on_chain_leg_id directly)
+        // polymarket: identity (frontend uses intonchainlegid directly)
         mapping[String(onChainId)] = onChainId;
       }
     }

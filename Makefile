@@ -158,6 +158,14 @@ fund-wallet:
 sync-env:
 	./scripts/sync-env.sh
 
+# ── Database / Polymarket ────────────────────────────────────────────────────
+
+db-init:
+	cd packages/nextjs && pnpm db:init
+
+db-sync:
+	cd packages/nextjs && pnpm polymarket:sync
+
 # ── Agents ───────────────────────────────────────────────────────────────────
 
 risk-agent:
@@ -186,4 +194,4 @@ clean:
 	cd packages/foundry && forge clean
 	cd packages/nextjs && rm -rf .next
 
-.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full register-legs register-legs-sepolia demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env risk-agent risk-agent-dry settler-sepolia risk-agent-sepolia demo-seed demo-autopilot clean
+.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full register-legs register-legs-sepolia demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env db-init polymarket-sync risk-agent risk-agent-dry settler-sepolia risk-agent-sepolia demo-seed demo-autopilot clean

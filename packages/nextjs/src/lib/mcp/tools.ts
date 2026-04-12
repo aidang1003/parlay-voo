@@ -65,19 +65,19 @@ export async function refreshLegMap(): Promise<void> {
   try {
     const rows = await getRegisteredActiveLegs();
     for (const row of rows) {
-      if (row.source !== "polymarket") continue;
-      const parsed = parsePolySourceRef(row.source_ref);
+      if (row.txtsource !== "polymarket") continue;
+      const parsed = parsePolySourceRef(row.txtsourceref);
       if (!parsed) continue;
-      const onChainId = row.on_chain_leg_id as number;
+      const onChainId = row.intonchainlegid as number;
       LEG_MAP.set(onChainId, {
         id: onChainId,
-        question: `${row.question} — ${parsed.side.toUpperCase()}`,
-        sourceRef: row.source_ref,
-        cutoffTime: row.cutoff_time,
-        earliestResolve: row.earliest_resolve,
-        probabilityPPM: row.probability_ppm,
-        active: row.active,
-        category: row.category,
+        question: `${row.txtquestion} — ${parsed.side.toUpperCase()}`,
+        sourceRef: row.txtsourceref,
+        cutoffTime: row.bigcutofftime,
+        earliestResolve: row.bigearliestresolve,
+        probabilityPPM: row.intprobabilityppm,
+        active: row.blnactive,
+        category: row.txtcategory,
       });
     }
   } catch (e) {

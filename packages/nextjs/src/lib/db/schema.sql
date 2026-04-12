@@ -1,39 +1,46 @@
 -- Canonical schema for the parlay-voo Neon Postgres database.
 -- Apply with `pnpm db:init` (see packages/nextjs/src/app/api/db/init/route.ts)
 -- or by pasting into the Neon SQL editor.
+--
+-- Naming convention (S-10):
+--   Tables:  tb<lowername>           e.g. tblegmapping
+--   Columns: <typeprefix><lowername> e.g. txtsourceref, intonchainlegid
+--   All identifiers are lowercase so SQL doesn't require double-quoting.
+--   Type prefixes:
+--     txt = TEXT, int = INTEGER, bln = BOOLEAN, ts = TIMESTAMPTZ, big = BIGINT
 
--- leg_mapping: catalog of every registered leg. Replaces the old leg-mapping.json.
--- Seed markets are backfilled with source='seed' so /api/markets can merge seed
--- and polymarket legs with a single SELECT.
--- on_chain_leg_id is nullable: rows pulled in by the polymarket sync route start
--- as NULL and get populated later by the registration script (forge keystore).
--- /api/markets hides any leg with on_chain_leg_id IS NULL.
-CREATE TABLE IF NOT EXISTS leg_mapping (
-  source_ref        TEXT PRIMARY KEY,
-  source            TEXT NOT NULL,
-  on_chain_leg_id   INTEGER,
-  question          TEXT NOT NULL,
-  category          TEXT NOT NULL,
-  probability_ppm   INTEGER NOT NULL CHECK (probability_ppm BETWEEN 1 AND 1000000),
-  cutoff_time       BIGINT NOT NULL,
-  earliest_resolve  BIGINT NOT NULL,
-  active            BOOLEAN NOT NULL DEFAULT true,
-  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+-- Drop legacy tables from earlier naming iterations.
+DROP TABLE IF EXISTS leg_mapping;
+DROP TABLE IF EXISTS polymarket_resolutions;
+DROP TABLE IF EXISTS "tbLegMapping";
+DROP TABLE IF EXISTS "tbPolymarketResolution";
+
+-- tblegmapping: catalog of every registered leg. Seed markets and polymarket
+-- legs live in the same table so /api/markets can serve from a single SELECT.
+-- intonchainlegid is nullable: rows pulled in by the polymarket sync route
+-- start as NULL and get populated later by the registration script.
+CREATE TABLE IF NOT EXISTS tblegmapping (
+  txtsourceref       TEXT PRIMARY KEY,
+  txtsource          TEXT NOT NULL,
+  intonchainlegid    INTEGER,
+  txtquestion        TEXT NOT NULL,
+  txtcategory        TEXT NOT NULL,
+  intprobabilityppm  INTEGER NOT NULL CHECK (intprobabilityppm BETWEEN 1 AND 1000000),
+  bigcutofftime      BIGINT NOT NULL,
+  bigearliestresolve BIGINT NOT NULL,
+  blnactive          BOOLEAN NOT NULL DEFAULT true,
+  tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Loosen on_chain_leg_id for tables that were created before it became nullable.
--- Safe to run on a fresh DB too -- the table is already nullable above.
-ALTER TABLE leg_mapping ALTER COLUMN on_chain_leg_id DROP NOT NULL;
+CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
+CREATE INDEX IF NOT EXISTS ixlegmapping_onchainid    ON tblegmapping (intonchainlegid);
 
-CREATE INDEX IF NOT EXISTS leg_mapping_source_active ON leg_mapping (source, active);
-CREATE INDEX IF NOT EXISTS leg_mapping_on_chain ON leg_mapping (on_chain_leg_id);
-
--- polymarket_resolutions: audit log of resolutions we relayed to AdminOracleAdapter.
+-- tbpolymarketresolution: audit log of resolutions relayed to AdminOracleAdapter.
 -- Used to debug settlement, re-run failed relays, and feed future analytics.
-CREATE TABLE IF NOT EXISTS polymarket_resolutions (
-  condition_id      TEXT PRIMARY KEY,
-  outcome           TEXT NOT NULL CHECK (outcome IN ('YES', 'NO', 'VOIDED')),
-  yes_tx_hash       TEXT,
-  no_tx_hash        TEXT,
-  resolved_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS tbpolymarketresolution (
+  txtconditionid  TEXT PRIMARY KEY,
+  txtoutcome      TEXT NOT NULL CHECK (txtoutcome IN ('YES', 'NO', 'VOIDED')),
+  txtyestxhash    TEXT,
+  txtnotxhash     TEXT,
+  tsresolvedat    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

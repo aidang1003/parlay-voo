@@ -18,46 +18,46 @@ export function sql() {
 }
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — field names mirror DB column names (lowercase with type prefix)
 // ---------------------------------------------------------------------------
 
 export type LegSource = "seed" | "polymarket";
 
 export interface LegMappingRow {
-  source_ref: string;
-  source: LegSource;
-  on_chain_leg_id: number | null;
-  question: string;
-  category: string;
-  probability_ppm: number;
-  cutoff_time: number;
-  earliest_resolve: number;
-  active: boolean;
-  created_at: string;
+  txtsourceref: string;
+  txtsource: LegSource;
+  intonchainlegid: number | null;
+  txtquestion: string;
+  txtcategory: string;
+  intprobabilityppm: number;
+  bigcutofftime: number;
+  bigearliestresolve: number;
+  blnactive: boolean;
+  tscreatedat: string;
 }
 
 export interface ResolutionRow {
-  condition_id: string;
-  outcome: "YES" | "NO" | "VOIDED";
-  yes_tx_hash: string | null;
-  no_tx_hash: string | null;
-  resolved_at: string;
+  txtconditionid: string;
+  txtoutcome: "YES" | "NO" | "VOIDED";
+  txtyestxhash: string | null;
+  txtnotxhash: string | null;
+  tsresolvedat: string;
 }
 
 // Neon's HTTP tagged template returns rows as Record<string, unknown>[]. We coerce
 // numeric fields back to JS numbers here because Postgres BIGINT arrives as string.
 function coerceLegRow(r: Record<string, unknown>): LegMappingRow {
   return {
-    source_ref: r.source_ref as string,
-    source: r.source as LegSource,
-    on_chain_leg_id: r.on_chain_leg_id == null ? null : Number(r.on_chain_leg_id),
-    question: r.question as string,
-    category: r.category as string,
-    probability_ppm: Number(r.probability_ppm),
-    cutoff_time: Number(r.cutoff_time),
-    earliest_resolve: Number(r.earliest_resolve),
-    active: r.active as boolean,
-    created_at: r.created_at as string,
+    txtsourceref: r.txtsourceref as string,
+    txtsource: r.txtsource as LegSource,
+    intonchainlegid: r.intonchainlegid == null ? null : Number(r.intonchainlegid),
+    txtquestion: r.txtquestion as string,
+    txtcategory: r.txtcategory as string,
+    intprobabilityppm: Number(r.intprobabilityppm),
+    bigcutofftime: Number(r.bigcutofftime),
+    bigearliestresolve: Number(r.bigearliestresolve),
+    blnactive: r.blnactive as boolean,
+    tscreatedat: r.tscreatedat as string,
   };
 }
 
@@ -66,15 +66,15 @@ function coerceLegRow(r: Record<string, unknown>): LegMappingRow {
 // ---------------------------------------------------------------------------
 
 /**
- * Active legs that are also registered on-chain (on_chain_leg_id IS NOT NULL).
+ * Active legs that are also registered on-chain (intonchainlegid IS NOT NULL).
  * Use for operations that need real on-chain IDs (settlement, MCP tools).
  */
 export async function getRegisteredActiveLegs(): Promise<LegMappingRow[]> {
   const db = sql();
   const rows = await db`
-    SELECT * FROM leg_mapping
-    WHERE active = true AND on_chain_leg_id IS NOT NULL
-    ORDER BY on_chain_leg_id
+    SELECT * FROM tblegmapping
+    WHERE blnactive = true AND intonchainlegid IS NOT NULL
+    ORDER BY intonchainlegid
   `;
   return (rows as Record<string, unknown>[]).map(coerceLegRow);
 }
@@ -82,14 +82,14 @@ export async function getRegisteredActiveLegs(): Promise<LegMappingRow[]> {
 /**
  * All active legs -- the catalog for /api/markets. Includes legs pending
  * on-chain registration so Polymarket data shows up immediately after sync.
- * Registered legs sort first; unregistered sort by source_ref.
+ * Registered legs sort first; unregistered sort by txtsourceref.
  */
 export async function getAllActiveLegs(): Promise<LegMappingRow[]> {
   const db = sql();
   const rows = await db`
-    SELECT * FROM leg_mapping
-    WHERE active = true
-    ORDER BY on_chain_leg_id NULLS LAST, source_ref
+    SELECT * FROM tblegmapping
+    WHERE blnactive = true
+    ORDER BY intonchainlegid NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceLegRow);
 }
@@ -107,31 +107,30 @@ export interface UpsertLegInput {
 }
 
 /**
- * Upsert into leg_mapping. The polymarket sync passes onChainLegId=null for new
- * rows; the registration script later populates it. For seed and registered
+ * Upsert into tblegmapping. The polymarket sync passes onChainLegId=null for
+ * new rows; the registration script later populates it. For seed and registered
  * polymarket rows we pass the real id.
  *
- * NOTE: on conflict we deliberately do NOT overwrite on_chain_leg_id with NULL
+ * NOTE: on conflict we deliberately do NOT overwrite intonchainlegid with NULL
  * -- once a leg is registered on-chain, sync re-runs must not wipe it.
  */
 export async function upsertLegMapping(input: UpsertLegInput): Promise<void> {
   const db = sql();
   await db`
-    INSERT INTO leg_mapping (
-      source_ref, source, on_chain_leg_id, question, category,
-      probability_ppm, cutoff_time, earliest_resolve, active
+    INSERT INTO tblegmapping (
+      txtsourceref, txtsource, intonchainlegid, txtquestion, txtcategory,
+      intprobabilityppm, bigcutofftime, bigearliestresolve, blnactive
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.onChainLegId}, ${input.question}, ${input.category},
       ${input.probabilityPpm}, ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true}
     )
-    ON CONFLICT (source_ref) DO UPDATE SET
-      on_chain_leg_id  = COALESCE(leg_mapping.on_chain_leg_id, EXCLUDED.on_chain_leg_id),
-      question         = EXCLUDED.question,
-      category         = EXCLUDED.category,
-      probability_ppm  = EXCLUDED.probability_ppm,
-      cutoff_time      = EXCLUDED.cutoff_time,
-      earliest_resolve = EXCLUDED.earliest_resolve,
-      active           = EXCLUDED.active
+    ON CONFLICT (txtsourceref) DO UPDATE SET
+      intonchainlegid    = COALESCE(tblegmapping.intonchainlegid, EXCLUDED.intonchainlegid),
+      txtquestion        = EXCLUDED.txtquestion,
+      txtcategory        = EXCLUDED.txtcategory,
+      intprobabilityppm  = EXCLUDED.intprobabilityppm,
+      bigcutofftime      = EXCLUDED.bigcutofftime,
+      bigearliestresolve = EXCLUDED.bigearliestresolve,
+      blnactive          = EXCLUDED.blnactive
   `;
 }
-

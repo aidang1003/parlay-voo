@@ -122,8 +122,8 @@ const TEST_MARKETS = [
   },
 ];
 
-/** Leg mapping that marks test legs as on-chain. */
-const TEST_LEG_MAPPING = { chainId: 31337, legs: { "0": 0, "1": 1, "2": 2 } };
+/** Leg mapping that marks test legs as on-chain. chainId must match the env the component reads. */
+const TEST_LEG_MAPPING = { chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "31337"), legs: { "0": 0, "1": 1, "2": 2 } };
 
 /** Default fetch mock: returns TEST_MARKETS for /api/markets, leg mapping, rejects everything else. */
 function defaultFetchMock(url: string | URL | Request): Promise<Response> {
@@ -374,20 +374,7 @@ describe("ParlayBuilder", () => {
       });
     });
 
-    it("persists payoutMode to sessionStorage on change", async () => {
-      setupConnectedUser();
-      render(<ParlayBuilder />);
-      await waitFor(() => {
-        expect(screen.getByText("Progressive")).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByText("Progressive"));
-      await waitFor(() => {
-        expect(sessionStorage.setItem).toHaveBeenCalledWith(
-          "parlay:payoutMode",
-          "1"
-        );
-      });
-    });
+    // payoutMode selector is currently hidden (fixed to Classic=0), so no UI toggle to test.
 
     it("persists selectedLegs to sessionStorage on selection", async () => {
       render(<ParlayBuilder />);
@@ -701,22 +688,8 @@ describe("ParlayBuilder", () => {
   });
 
   // --- Payout mode ---
-
-  describe("payout mode", () => {
-    it("renders all three payout mode options", () => {
-      render(<ParlayBuilder />);
-      expect(screen.getByText("Classic")).toBeInTheDocument();
-      expect(screen.getByText("Progressive")).toBeInTheDocument();
-      expect(screen.getByText("Cashout")).toBeInTheDocument();
-    });
-
-    it("defaults to Classic mode (value 0)", () => {
-      render(<ParlayBuilder />);
-      // Classic should have the active styling (ring class)
-      const classicBtn = screen.getByText("Classic").closest("button")!;
-      expect(classicBtn.className).toContain("brand-purple");
-    });
-  });
+  // Payout mode selector is currently hidden (fixed to Classic=0).
+  // Re-enable these tests when the selector is restored.
 
   // --- Transaction state ---
 

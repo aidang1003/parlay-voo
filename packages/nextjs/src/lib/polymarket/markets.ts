@@ -3,13 +3,13 @@ import { PPM } from "@parlaycity/shared";
 import { getAllActiveLegs, type LegMappingRow } from "@/lib/db/client";
 
 /**
- * Build Market[] for /api/markets directly from leg_mapping. One DB read,
+ * Build Market[] for /api/markets directly from tblegmapping. One DB read,
  * grouped by source-specific keys:
  *   - polymarket legs: grouped by condition_id (yes + no into one Market)
  *   - seed legs: each row becomes its own single-leg Market (matches the
  *     legacy seed catalog shape)
  *
- * Includes legs pending on-chain registration (on_chain_leg_id IS NULL).
+ * Includes legs pending on-chain registration (intonchainlegid IS NULL).
  * Those get synthetic negative IDs so they render on the frontend with an
  * "Analysis Only" badge until registered on-chain.
  */
@@ -21,8 +21,8 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
   const seedRows: LegMappingRow[] = [];
 
   for (const row of rows) {
-    if (row.source === "polymarket") {
-      const parsed = parsePolySourceRef(row.source_ref);
+    if (row.txtsource === "polymarket") {
+      const parsed = parsePolySourceRef(row.txtsourceref);
       if (!parsed) continue;
       const bucket = polyByCid.get(parsed.conditionId) ?? {};
       bucket[parsed.side] = row;
@@ -37,10 +37,10 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
 
   for (const row of seedRows) {
     markets.push({
-      id: `seed:${row.on_chain_leg_id ?? row.source_ref}`,
-      title: row.question,
-      description: row.question,
-      category: row.category,
+      id: `seed:${row.intonchainlegid ?? row.txtsourceref}`,
+      title: row.txtquestion,
+      description: row.txtquestion,
+      category: row.txtcategory,
       legs: [rowToLeg(row, undefined, () => syntheticId--)],
     });
   }
@@ -49,9 +49,9 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
     if (!yes || !no) continue; // skip half-synced markets
     markets.push({
       id: `poly:${conditionId}`,
-      title: yes.question,
+      title: yes.txtquestion,
       description: `Polymarket market ${conditionId.slice(0, 10)}...`,
-      category: yes.category,
+      category: yes.txtcategory,
       legs: [
         rowToLeg(yes, "YES", () => syntheticId--),
         rowToLeg(no, "NO", () => syntheticId--),
@@ -67,17 +67,15 @@ function rowToLeg(
   sideLabel?: "YES" | "NO",
   nextSyntheticId?: () => number,
 ): Leg {
-  // Real on-chain ID if registered, otherwise a synthetic negative ID
-  // so the frontend can display it (negative IDs never collide with real ones).
-  const id = row.on_chain_leg_id ?? nextSyntheticId?.() ?? -1;
+  const id = row.intonchainlegid ?? nextSyntheticId?.() ?? -1;
   return {
     id,
-    question: sideLabel ? `${row.question} — ${sideLabel}` : row.question,
-    sourceRef: row.source_ref,
-    cutoffTime: row.cutoff_time,
-    earliestResolve: row.earliest_resolve,
-    probabilityPPM: row.probability_ppm,
-    active: row.active,
+    question: sideLabel ? `${row.txtquestion} — ${sideLabel}` : row.txtquestion,
+    sourceRef: row.txtsourceref,
+    cutoffTime: row.bigcutofftime,
+    earliestResolve: row.bigearliestresolve,
+    probabilityPPM: row.intprobabilityppm,
+    active: row.blnactive,
   };
 }
 

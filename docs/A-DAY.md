@@ -2,7 +2,7 @@
 
 Backlog for the weekend heads-down session. Target: get parlay-voo from "hackathon build that feels slow" to "production-ready for 250 users, with a clear path to 1000."
 
-Full analysis and evidence lives in `~/.claude/plans/agile-crafting-lightning.md`. This doc is the working checklist.
+This doc is the working checklist. Feel free to ingest this doc into the real documentation.
 
 ## How to use this list
 
@@ -13,15 +13,15 @@ Don't just run top-to-bottom. Alternate **scaling work** (S-#) and **feature wor
 - If a scaling task becomes a prerequisite for a feature you want to ship (e.g. need the indexer before the leaderboard feature), promote it.
 - If two tasks tie, pick the one you'll actually finish — momentum matters more than optimality.
 
-Mark tasks `[x]` when done. Don't delete — keeps a log of what shipped vs what got deferred.
+Mark tasks `✅ COMPLETE` when done. Don't delete — keeps a log of what shipped vs what got deferred.
 
 ## Already done (Friday night)
 
-- [x] **Alchemy private RPC swap.** `packages/nextjs/src/lib/wagmi.ts` now uses a `fallback` transport: Alchemy primary, public Base Sepolia as backup. Reads `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL` from env. `scripts/sync-env.sh` preserves the var across deploys so `make deploy-*` won't wipe it. Add `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=<alchemy-url>` to `packages/nextjs/.env.local` and restart `next dev`.
+- ✅ COMPLETE **Alchemy private RPC swap.** `packages/nextjs/src/lib/wagmi.ts` now uses a `fallback` transport: Alchemy primary, public Base Sepolia as backup. Reads `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL` from env. `scripts/sync-env.sh` preserves the var across deploys so `make deploy-*` won't wipe it. Add `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=<alchemy-url>` to `packages/nextjs/.env.local` and restart `next dev`.
 
 ## Scaling backlog
 
-### S-1 — Tune React Query defaults [x]
+### S-1 — Tune React Query defaults ✅ COMPLETE
 - **Time:** 5 minutes
 - **Value:** High. Halves background-tab RPC load and kills redundant refetches on route navigation. Whole app feels snappier with zero risk.
 - **Files:** `packages/nextjs/src/components/providers.tsx`
@@ -38,38 +38,18 @@ Mark tasks `[x]` when done. Don't delete — keeps a log of what shipped vs what
   ```
 - **Do this first.** It's the highest ratio task in the whole doc.
 
-### S-2 — RPC call counter (debug overlay) [x]
+### S-2 — RPC call counter (debug overlay) ✅ COMPLETE
 - **Time:** 1 hour
 - **Value:** Medium now, high later. Lets you measure whether subsequent optimizations actually helped. Without this you're flying blind.
 - **Files:** `packages/nextjs/src/lib/hooks.ts` (`useContractClient` at ~line 22), new component `packages/nextjs/src/components/DebugRpcCounter.tsx`
 - **Change:** wrap the viem client's `readContract` so every call increments `window.__rpcCalls`. Add a fixed-position overlay visible only when `?debug=1` query param is set. Show calls/min rolling average.
 - **Why before the big optimizations:** you want a baseline reading on `/`, `/tickets`, `/vault` before touching the hooks.
 
-### S-3 — Batch reads in useVaultStats + useParlayConfig [x]
+### S-3 — Batch reads in useVaultStats + useParlayConfig ✅ COMPLETE
 - **Time:** 2 hours
 - **Value:** High. Home page mount drops from ~10 RPC round trips to ~2. Most visible improvement users will feel.
 - **Files:** `packages/nextjs/src/lib/hooks.ts:149-216` (useVaultStats), `packages/nextjs/src/lib/hooks.ts:218-288` (useParlayConfig)
 - **Change:** replace clusters of `useReadContract` with a single `useReadContracts` per hook. wagmi auto-batches into Multicall3 (already deployed on Base Sepolia at `0xcA11bde05977b3631167028862bE2a173976CA11`). Preserve the same return shape so callers don't need to change.
-
-### S-4 — Upstash Redis + cache `/api/markets`
-- **Time:** 2-3 hours
-- **Value:** High. Kills the broken module-level cache in `bdl.ts` that blows up on Vercel serverless cold starts. Also protects your BDL quota.
-- **Files:** new env vars (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`), `packages/nextjs/src/lib/redis.ts` (new), `packages/nextjs/src/app/api/markets/route.ts`, later `/api/agent-stats` and `/api/quote`
-- **Change:** install `@upstash/redis`. Wrap each cacheable route with `redis.get → fallback fetch → redis.set(..., { ex: TTL })`. TTLs: markets 300s, agent-stats 60s, quote 600s keyed on `sha256(sortedLegIds + stake)`. Leave `/api/chat` uncached.
-- **Bonus:** rip the broken in-memory cache out of `bdl.ts:36-42` while you're there so nobody gets confused later.
-
-### S-5 — Rate limiting on expensive API routes
-- **Time:** 1 hour (after S-4, shares the Redis dependency)
-- **Value:** Medium. Protects your Claude API spend and BDL quota from a single abusive client. Not urgent before you have public users, but trivially cheap once Redis is in.
-- **Files:** `packages/nextjs/src/lib/ratelimit.ts` (new), `/api/chat`, `/api/premium/agent-quote`
-- **Change:** `@upstash/ratelimit` with sliding-window limits. Start at 10 req/min per IP. Return 429 with `Retry-After`.
-
-### S-6 — Ponder indexer + Neon Postgres (the big one)
-- **Time:** 3-5 days (won't fit in a 48-hour window — start it, finish next week)
-- **Value:** Very high, but only after the smaller wins. This is the thing that lets you actually hit 1000 users. Without it, `/tickets` breaks around 30-50 concurrent users because of the O(N) scan in `hooks.ts:308-397`.
-- **Files:** new package `packages/indexer/` (Ponder), new `/api/tickets` route, rewrite of `useUserTickets` (`hooks.ts:308-397`) and `useLockPositions` (`hooks.ts:1034-1120`)
-- **Change:** Ponder schema for `Ticket`, `LockPosition`, event handlers for `TicketPurchased`, `TicketSettled`, `LockCreated`, etc. Deploy Ponder on Railway (not Vercel — needs continuous uptime and a websocket RPC). Replace client-side chain scans with `SELECT ... WHERE owner = $1` via new `/api/tickets?owner=` route.
-- **Priority hint:** if the weekend's goal is "shippable feel" rather than "1000-user load," this is a Sunday-night start, not a Saturday-morning start. Everything above will already make the app feel great to the handful of users you actually have.
 
 ### S-7 — Move cache into `/api/quote` + `/api/agent-stats`
 - **Time:** 30 minutes each (after S-4)
@@ -115,9 +95,9 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 
 ## Parlay Builder Frontend Fixes ✅ COMPLETE
 1) Doesn't make sense to have a YES market for a parlay with a yes/no option and a NO option with a yes/no selection
- - [x] cut database entries in half and re-make txtsourceref as primaryid by adding a yes odds and no odds column
- - [x] Implement categories using the category pulled back from polymarket (Gamma event `category`/`tags` threaded through CuratedMarket)
- - [x] Ensure odds are being built from the the correct number (now sourced from Gamma `outcomePrices` instead of per-token CLOB mid; midToPpm clamp widened to 1–99%)
+ - ✅ COMPLETE cut database entries in half and re-make txtsourceref as primaryid by adding a yes odds and no odds column
+ - ✅ COMPLETE Implement categories using the category pulled back from polymarket (Gamma event `category`/`tags` threaded through CuratedMarket)
+ - ✅ COMPLETE Ensure odds are being built from the the correct number (now sourced from Gamma `outcomePrices` instead of per-token CLOB mid; midToPpm clamp widened to 1–99%)
 
 ## Bailout rules
 

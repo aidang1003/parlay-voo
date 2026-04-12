@@ -299,7 +299,43 @@ export const LEG_REGISTRY_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
   },
+  {
+    name: "createLeg",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "question", type: "string" },
+      { name: "sourceRef", type: "string" },
+      { name: "cutoffTime", type: "uint256" },
+      { name: "earliestResolve", type: "uint256" },
+      { name: "oracleAdapter", type: "address" },
+      { name: "probabilityPPM", type: "uint256" },
+    ],
+    outputs: [{ name: "legId", type: "uint256" }],
+  },
 ] as const;
+
+export const ADMIN_ORACLE_ABI = [
+  {
+    name: "resolve",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "legId", type: "uint256" },
+      { name: "status", type: "uint8" },
+      { name: "outcome", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/** LegStatus enum from IOracleAdapter.sol */
+export const LEG_STATUS = {
+  Unresolved: 0,
+  Won: 1,
+  Lost: 2,
+  Voided: 3,
+} as const;
 
 export const LOCK_VAULT_ABI = [
   {

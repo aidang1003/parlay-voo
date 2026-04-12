@@ -11,7 +11,6 @@ import {
   blockNonNumericKeys,
   useSessionState,
 } from "@/lib/utils";
-import { MOCK_LEGS } from "@/lib/mock";
 import { useBuyTicket, useParlayConfig, useUSDCBalance, useVaultStats, useMintTestUSDC } from "@/lib/hooks";
 import { MultiplierClimb } from "./MultiplierClimb";
 
@@ -19,11 +18,13 @@ import { MultiplierClimb } from "./MultiplierClimb";
 
 interface APILeg {
   id: number;
+  noId?: number;
   question: string;
   sourceRef: string;
   cutoffTime: number;
   earliestResolve: number;
   probabilityPPM: number;
+  noProbabilityPPM?: number;
   active: boolean;
 }
 
@@ -35,11 +36,18 @@ interface APIMarket {
   category: string;
 }
 
-/** Display-ready leg combining API data with UI state. */
+/** Display-ready leg combining API data with UI state. One DisplayLeg now
+ *  represents an entire market (both yes/no sides collapsed). For seed markets
+ *  noId is undefined so the UI hides the No button. */
 interface DisplayLeg {
+  /** Yes-side on-chain leg id (used when outcomeChoice === 1). */
   id: bigint;
+  /** No-side on-chain leg id (used when outcomeChoice === 2). Absent for
+   *  single-sided seed markets. */
+  noId?: bigint;
   description: string;
-  odds: number; // decimal multiplier
+  yesOdds: number; // decimal multiplier for yes side
+  noOdds?: number; // decimal multiplier for no side (poly only)
   resolved: boolean;
   outcome: number;
   expiresAt: number;
@@ -47,6 +55,8 @@ interface DisplayLeg {
   marketTitle: string;
   /** Whether this leg has an on-chain counterpart (can be bought). */
   onChain: boolean;
+  /** Raw source reference, e.g. "poly:0xabc" or "seed:3". */
+  sourceRef: string;
 }
 
 interface SelectedLeg {
@@ -118,50 +128,42 @@ function ppmToOdds(ppm: number): number {
   return 1_000_000 / ppm;
 }
 
-/** Yes odds from display data. No odds = complement: yesOdds / (yesOdds - 1). */
+/** Pick the odds for the selected side. Falls back to complement if the no-side
+ *  odds weren't supplied (single-sided seed markets clicked as "no" shouldn't
+ *  happen because the No button is hidden, but we guard anyway). */
 function effectiveOdds(leg: DisplayLeg, outcome: number): number {
   if (outcome === 2) {
-    if (leg.odds <= 1) return leg.odds;
-    return leg.odds / (leg.odds - 1);
+    if (leg.noOdds !== undefined) return leg.noOdds;
+    if (leg.yesOdds <= 1) return leg.yesOdds;
+    return leg.yesOdds / (leg.yesOdds - 1);
   }
-  return leg.odds;
+  return leg.yesOdds;
 }
 
-/** Transform API markets into DisplayLeg array. All API legs start as off-chain;
- *  the live onChainLegIds set (from leg-mapping.json) determines on-chain status reactively. */
+/** Transform API markets into DisplayLeg array — one leg per market. Both
+ *  yes/no sides get collapsed into a single card; the noId/noOdds fields
+ *  carry the second side when present. */
 function apiMarketsToLegs(markets: APIMarket[]): DisplayLeg[] {
   const legs: DisplayLeg[] = [];
   for (const market of markets) {
     for (const leg of market.legs) {
       legs.push({
         id: BigInt(leg.id),
+        noId: leg.noId !== undefined ? BigInt(leg.noId) : undefined,
         description: leg.question,
-        odds: ppmToOdds(leg.probabilityPPM),
+        yesOdds: ppmToOdds(leg.probabilityPPM),
+        noOdds: leg.noProbabilityPPM !== undefined ? ppmToOdds(leg.noProbabilityPPM) : undefined,
         resolved: false,
         outcome: 0,
         expiresAt: leg.cutoffTime,
         category: market.category,
         marketTitle: market.title,
         onChain: false,
+        sourceRef: leg.sourceRef,
       });
     }
   }
   return legs;
-}
-
-/** Convert MOCK_LEGS to DisplayLeg format as fallback. */
-function mockToDisplayLegs(): DisplayLeg[] {
-  return MOCK_LEGS.map((leg) => ({
-    id: leg.id,
-    description: leg.description,
-    odds: leg.odds,
-    resolved: leg.resolved,
-    outcome: leg.outcome,
-    expiresAt: leg.expiresAt,
-    category: "crypto",
-    marketTitle: "Crypto Predictions",
-    onChain: true,
-  }));
 }
 
 /** Restore SelectedLeg[] from serialized form. */
@@ -218,8 +220,9 @@ export function ParlayBuilder() {
 
   // ── Market data state ───────────────────────────────────────────────────
 
-  const [allLegs, setAllLegs] = useState<DisplayLeg[]>(mockToDisplayLegs);
-  const [availableCategories, setAvailableCategories] = useState<string[]>(["crypto"]);
+  const [allLegs, setAllLegs] = useState<DisplayLeg[]>([]);
+  const [marketsLoading, setMarketsLoading] = useState(true);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useSessionState<string>(SESSION_KEYS.category, "all");
 
   const [legMapping, setLegMapping] = useState<Record<string, number>>({});
@@ -270,11 +273,7 @@ export function ParlayBuilder() {
     let storedSelections: StoredSelection[] | null = null;
     try {
       const raw = sessionStorage.getItem(SESSION_KEYS.legs);
-      if (raw) {
-        storedSelections = JSON.parse(raw);
-        const restored = restoreSelections(storedSelections!, mockToDisplayLegs());
-        if (restored.length > 0) setSelectedLegs(restored);
-      }
+      if (raw) storedSelections = JSON.parse(raw);
     } catch {
       // parse error or sessionStorage unavailable
     }
@@ -287,18 +286,18 @@ export function ParlayBuilder() {
         if (cancelled || !Array.isArray(markets)) return;
 
         const legs = apiMarketsToLegs(markets);
-        if (legs.length > 0) {
-          setAllLegs(legs);
-          const cats = [...new Set(markets.map((m) => m.category))].sort();
-          setAvailableCategories(cats);
+        setAllLegs(legs);
+        const cats = [...new Set(markets.map((m) => m.category))].sort();
+        setAvailableCategories(cats);
 
-          if (storedSelections && storedSelections.length > 0) {
-            const restored = restoreSelections(storedSelections, legs);
-            if (restored.length > 0) setSelectedLegs(restored);
-          }
+        if (storedSelections && storedSelections.length > 0) {
+          const restored = restoreSelections(storedSelections, legs);
+          if (restored.length > 0) setSelectedLegs(restored);
         }
       } catch {
-        // Keep initial MOCK_LEGS data
+        // API unavailable — allLegs stays empty, UI shows empty state
+      } finally {
+        if (!cancelled) setMarketsLoading(false);
       }
     }
 
@@ -411,9 +410,15 @@ export function ParlayBuilder() {
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
   const insufficientBalance = stakeNum > 0 && usdcBalance !== undefined && stakeNum > usdcBalanceNum;
 
-  const allSelectedOnChain = selectedLegs.every(
-    (s) => s.leg.onChain || onChainLegIds.has(s.leg.id),
-  );
+  /** Pick the on-chain leg id corresponding to the user's side selection.
+   *  outcomeChoice 1 → yes-side (leg.id); 2 → no-side (leg.noId). */
+  const pickedLegId = (s: SelectedLeg): bigint | undefined =>
+    s.outcomeChoice === 2 ? s.leg.noId : s.leg.id;
+
+  const allSelectedOnChain = selectedLegs.every((s) => {
+    const id = pickedLegId(s);
+    return id !== undefined && (s.leg.onChain || onChainLegIds.has(id));
+  });
 
   const canBuy =
     mounted &&
@@ -452,13 +457,11 @@ export function ParlayBuilder() {
 
   const handleBuy = async () => {
     if (!canBuy) return;
-    const legIds = selectedLegs.map((s) => {
-      if (s.leg.onChain) return s.leg.id;
-      const catalogId = s.leg.id.toString();
-      if (Object.hasOwn(legMapping, catalogId)) return BigInt(legMapping[catalogId]);
-      return s.leg.id;
-    });
-    const outcomes = selectedLegs.map((s) => s.outcomeChoice);
+    // Always send outcome=1: the correct on-chain leg id (yes-token or no-token)
+    // is selected via pickedLegId, so the user's side choice is encoded in
+    // which leg we buy, not via the outcomes array.
+    const legIds = selectedLegs.map((s) => pickedLegId(s) ?? s.leg.id);
+    const outcomes = selectedLegs.map(() => 1);
     const success = await buyTicket(legIds, outcomes, stakeNum, payoutMode);
     if (success) {
       setSelectedLegs([]);
@@ -637,6 +640,18 @@ export function ParlayBuilder() {
         </div>
 
         <div className={`space-y-4 ${vaultEmpty ? "pointer-events-none opacity-40" : ""}`}>
+          {marketsLoading && allLegs.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <div className="mb-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-600 border-t-brand-purple" />
+              <p className="text-sm">Loading markets...</p>
+            </div>
+          )}
+          {!marketsLoading && allLegs.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <p className="text-sm">No markets available right now.</p>
+              <p className="mt-1 text-xs text-gray-600">Check back soon — markets are synced from Polymarket.</p>
+            </div>
+          )}
           {[...groupedByMarket.entries()].map(([title, legs]) => (
             <div key={title} className="space-y-2">
               <div className="flex items-center gap-2">
@@ -650,18 +665,19 @@ export function ParlayBuilder() {
                     {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
                   </span>
                 )}
-                {legs[0] && !legs[0].onChain && !onChainLegIds.has(legs[0].id) && (
-                  <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] text-yellow-400">
-                    Analysis Only
+                {legs[0]?.sourceRef.startsWith("poly:") && (
+                  <span
+                    title="Odds captured when this market was registered on-chain. They don't update mid-flight."
+                    className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
+                  >
+                    Odds locked
                   </span>
                 )}
               </div>
               <div className="space-y-2">
                 {legs.map((leg, legIdx) => {
                   const selected = selectedLegs.find((s) => s.leg.id === leg.id);
-                  const currentOdds = selected
-                    ? effectiveOdds(leg, selected.outcomeChoice)
-                    : effectiveOdds(leg, 1);
+                  const hasNo = leg.noId !== undefined;
                   return (
                     <div
                       key={leg.id.toString()}
@@ -675,41 +691,43 @@ export function ParlayBuilder() {
                       }`}
                       style={{ animationDelay: `${legIdx * 50}ms` }}
                     >
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="min-w-0 flex-1 text-sm text-gray-200">
-                          {leg.description}
-                          {!leg.onChain && !onChainLegIds.has(leg.id) && (
-                            <span className="ml-1 text-[10px] text-gray-500">(off-chain)</span>
-                          )}
-                        </span>
-                        <span className="flex-shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-xs font-bold tabular-nums text-brand-gold">
-                          {currentOdds.toFixed(2)}x
-                        </span>
-                      </div>
-                      {/* Full-width YES/NO buttons */}
-                      <div className="grid grid-cols-2">
+                      {/* Yes / Question / No — question centered, sides flanking */}
+                      <div className="flex items-stretch">
                         <button
                           disabled={vaultEmpty}
                           onClick={() => toggleLeg(leg, 1)}
-                          className={`py-2 text-xs font-bold uppercase tracking-wider transition-all ${
+                          className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
                             selected?.outcomeChoice === 1
                               ? "bg-brand-green/20 text-brand-green"
-                              : "bg-white/[0.02] text-gray-500 hover:bg-brand-green/10 hover:text-brand-green/70"
+                              : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
                           }`}
                         >
-                          Yes
+                          <span>Yes</span>
+                          <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
+                            {leg.yesOdds.toFixed(2)}x
+                          </span>
                         </button>
-                        <button
-                          disabled={vaultEmpty}
-                          onClick={() => toggleLeg(leg, 2)}
-                          className={`border-l border-white/5 py-2 text-xs font-bold uppercase tracking-wider transition-all ${
-                            selected?.outcomeChoice === 2
-                              ? "bg-brand-amber/20 text-brand-amber"
-                              : "bg-white/[0.02] text-gray-500 hover:bg-brand-amber/10 hover:text-brand-amber/70"
-                          }`}
-                        >
-                          No
-                        </button>
+                        <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
+                          <span className="min-w-0 text-sm text-gray-200">
+                            {leg.description}
+                          </span>
+                        </div>
+                        {hasNo && (
+                          <button
+                            disabled={vaultEmpty}
+                            onClick={() => toggleLeg(leg, 2)}
+                            className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                              selected?.outcomeChoice === 2
+                                ? "bg-brand-amber/20 text-brand-amber"
+                                : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                            }`}
+                          >
+                            <span>No</span>
+                            <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
+                              {(leg.noOdds ?? effectiveOdds(leg, 2)).toFixed(2)}x
+                            </span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

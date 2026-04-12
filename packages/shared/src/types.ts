@@ -25,12 +25,20 @@ export enum LegStatus {
 }
 
 export interface Leg {
+  /** On-chain leg id for the "yes" side. For polymarket markets this is the
+   *  yes-token leg; for seed markets (single-sided) this is the only leg. */
   id: number;
+  /** On-chain leg id for the "no" side. Only present for polymarket markets;
+   *  seed markets omit this so the frontend hides the No button. */
+  noId?: number;
   question: string;
   sourceRef: string;
   cutoffTime: number;
   earliestResolve: number;
+  /** Yes-side probability in PPM. */
   probabilityPPM: number;
+  /** No-side probability in PPM (polymarket only). */
+  noProbabilityPPM?: number;
   active: boolean;
 }
 

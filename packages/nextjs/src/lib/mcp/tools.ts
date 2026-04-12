@@ -15,7 +15,8 @@ import {
 } from "@parlaycity/shared";
 import type { RiskProfile, Market, Leg } from "@parlaycity/shared";
 import { HOUSE_VAULT_ABI, LEG_REGISTRY_ABI, PARLAY_ENGINE_ABI } from "../contracts";
-import { fetchNBAMarkets, NBA_LEG_ID_OFFSET } from "../bdl";
+import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
+import { getRegisteredActiveMarkets } from "../db/client";
 
 // ---------------------------------------------------------------------------
 // Chain client
@@ -43,7 +44,9 @@ const addr = {
 // SEED_MARKETS imported from @parlaycity/shared
 export { SEED_MARKETS } from "@parlaycity/shared";
 
-// Build a leg lookup map (seed legs are static, NBA legs are added lazily)
+// Seed legs are static, keyed by catalog ID 1..21. Polymarket legs are merged
+// in on demand via refreshLegMap() — they're keyed by their on-chain leg ID,
+// which is disjoint from the seed catalog range.
 export const LEG_MAP = new Map<number, Leg & { category: string }>();
 for (const m of SEED_MARKETS) {
   for (const leg of m.legs) {
@@ -51,18 +54,49 @@ for (const m of SEED_MARKETS) {
   }
 }
 
-/** Refresh LEG_MAP with NBA legs from BDL. Call before tool execution.
- *  Clears stale NBA legs (>= NBA_LEG_ID_OFFSET) before repopulating. */
+/** Refresh LEG_MAP with Polymarket legs from the DB. Clears stale polymarket
+ *  entries before repopulating so deactivated markets disappear. Seed legs
+ *  (IDs < SEED_CATALOG_MAX) are immutable and never removed. */
+const SEED_CATALOG_MAX = 21;
 export async function refreshLegMap(): Promise<void> {
-  // Remove stale NBA entries to prevent unbounded growth (lesson #36-adjacent)
   for (const id of LEG_MAP.keys()) {
-    if (id >= NBA_LEG_ID_OFFSET) LEG_MAP.delete(id);
+    if (id > SEED_CATALOG_MAX) LEG_MAP.delete(id);
   }
-  const nbaMarkets = await fetchNBAMarkets();
-  for (const m of nbaMarkets) {
-    for (const leg of m.legs) {
-      LEG_MAP.set(leg.id, { ...leg, category: m.category });
+  try {
+    const rows = await getRegisteredActiveMarkets();
+    for (const row of rows) {
+      if (row.txtsource !== "polymarket") continue;
+      const parsed = parsePolySourceRef(row.txtsourceref);
+      if (!parsed) continue;
+      // Each market row is a flat pair: emit a LEG_MAP entry per registered side.
+      if (row.intyeslegid != null) {
+        LEG_MAP.set(row.intyeslegid, {
+          id: row.intyeslegid,
+          question: `${row.txtquestion} — YES`,
+          sourceRef: row.txtsourceref,
+          cutoffTime: row.bigcutofftime,
+          earliestResolve: row.bigearliestresolve,
+          probabilityPPM: row.intyesprobppm,
+          active: row.blnactive,
+          category: row.txtcategory,
+        });
+      }
+      if (row.intnolegid != null && row.intnoprobppm != null) {
+        LEG_MAP.set(row.intnolegid, {
+          id: row.intnolegid,
+          question: `${row.txtquestion} — NO`,
+          sourceRef: row.txtsourceref,
+          cutoffTime: row.bigcutofftime,
+          earliestResolve: row.bigearliestresolve,
+          probabilityPPM: row.intnoprobppm,
+          active: row.blnactive,
+          category: row.txtcategory,
+        });
+      }
     }
+  } catch (e) {
+    // DB unreachable shouldn't break seed-only quoting. Log and fall back.
+    console.warn("[refreshLegMap] polymarket DB read failed:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -90,8 +124,7 @@ export async function listMarkets(input: { category?: string }): Promise<{
   }>;
   totalLegs: number;
 }> {
-  const nbaMarkets = await fetchNBAMarkets();
-  let markets: Market[] = [...SEED_MARKETS, ...nbaMarkets];
+  let markets: Market[] = await fetchMarketsFromDb().catch(() => [...SEED_MARKETS] as Market[]);
   if (input.category) {
     markets = markets.filter((m) => m.category === input.category);
   }

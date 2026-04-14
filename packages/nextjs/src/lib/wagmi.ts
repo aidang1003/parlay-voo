@@ -1,5 +1,5 @@
 import { createConfig, http } from "wagmi";
-import { baseSepolia, foundry } from "wagmi/chains";
+import { baseSepolia, foundry, mainnet } from "wagmi/chains";
 import { fallback, type Transport } from "viem";
 import { getDefaultConfig } from "connectkit";
 import { CHAIN_CONFIG } from "./config";
@@ -34,6 +34,9 @@ export const config = createConfig(
         ? counted(fallback([http(primarySepoliaRpc), http(CHAIN_CONFIG.baseSepolia.rpcUrl)]))
         : counted(http(CHAIN_CONFIG.baseSepolia.rpcUrl)),
       [foundry.id]: counted(http(CHAIN_CONFIG.localhost.rpcUrl)),
+      // ConnectKit uses an Ethereum L1 client for ENS resolution; without an
+      // explicit transport it falls back to eth.merkle.io, which blocks CORS.
+      [mainnet.id]: http("https://cloudflare-eth.com"),
     },
   }),
 );

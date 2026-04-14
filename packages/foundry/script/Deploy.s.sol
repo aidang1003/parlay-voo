@@ -10,6 +10,7 @@ import {LockVault} from "../src/core/LockVault.sol";
 import {MockYieldAdapter} from "../src/yield/MockYieldAdapter.sol";
 import {AdminOracleAdapter} from "../src/oracle/AdminOracleAdapter.sol";
 import {OptimisticOracleAdapter} from "../src/oracle/OptimisticOracleAdapter.sol";
+import {SetTrustedSigner} from "./SetTrustedSigner.s.sol";
 import {IYieldAdapter} from "../src/interfaces/IYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -56,12 +57,12 @@ contract Deploy is Script {
         uint256 bootstrapDays = vm.envOr("BOOTSTRAP_DAYS", uint256(7));
         uint256 bootstrapEndsAt = block.timestamp + bootstrapDays * 1 days;
         ParlayEngine engine = new ParlayEngine(vault, registry, usdc, bootstrapEndsAt);
-        console.log("Bootstrap days:         ", bootstrapDays);
         console.log("ParlayEngine:           ", address(engine));
 
-        // 7. Authorize ParlayEngine on HouseVault
+        // 7. Authorize ParlayEngine on HouseVault and LegRegistry
         vault.setEngine(address(engine));
-        console.log("Engine authorized on vault");
+        registry.setEngine(address(engine));
+        console.log("Engine authorized on vault + registry");
 
         // 7b. Deploy LockVault and wire fee routing
         LockVault lockVault = new LockVault(vault);
@@ -73,7 +74,6 @@ contract Deploy is Script {
         // TODO: Replace with real SafetyModule address in PR2
         vault.setSafetyModule(deployer);
         lockVault.setFeeDistributor(address(vault));
-        console.log("Fee routing wired (90/5/5)");
 
         // 7c. Deploy MockYieldAdapter (fine for testnet too)
         MockYieldAdapter yieldAdapter = new MockYieldAdapter(usdc, address(vault));
@@ -95,5 +95,10 @@ contract Deploy is Script {
         }
 
         vm.stopBroadcast();
+
+        // Delegate trusted-signer wiring to the dedicated script so the two
+        // deploy paths (initial deploy vs. rotate signer) share one codepath.
+        vm.setEnv("NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS", vm.toString(address(engine)));
+        new SetTrustedSigner().run();
     }
 }

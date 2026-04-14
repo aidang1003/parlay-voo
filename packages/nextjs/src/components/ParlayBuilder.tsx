@@ -122,7 +122,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 const SESSION_KEYS = {
   legs: "parlay:selectedLegs",
   stake: "parlay:stake",
-  payoutMode: "parlay:payoutMode",
   category: "parlay:category",
 } as const;
 
@@ -233,45 +232,13 @@ export function ParlayBuilder() {
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useSessionState<string>(SESSION_KEYS.category, "all");
 
-  const [legMapping, setLegMapping] = useState<Record<string, number>>({});
-  const [onChainLegIds, setOnChainLegIds] = useState<Set<bigint>>(new Set());
 
   // ── Input state (persisted to sessionStorage) ──────────────────────────
 
   const [selectedLegs, setSelectedLegs] = useState<SelectedLeg[]>([]);
   const [stake, setStake] = useSessionState<string>(SESSION_KEYS.stake, "");
-  const [payoutMode, setPayoutMode] = useSessionState<0 | 1 | 2>(SESSION_KEYS.payoutMode, 0);
   const [mounted, setMounted] = useState(false);
 
-  // Fetch leg mapping (dynamic API, falls back to static file)
-  useEffect(() => {
-    (async () => {
-      try {
-        // Try dynamic API first (auto-discovers newly registered legs)
-        let r = await fetch("/api/leg-mapping");
-        if (!r?.ok) {
-          // Fall back to static file
-          r = await fetch("/leg-mapping.json");
-        }
-        if (!r?.ok) return;
-        const data = await r.json();
-        if (data?.legs && typeof data.legs === "object") {
-          const expectedChainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "31337");
-          if (data.chainId && data.chainId !== expectedChainId) {
-            console.warn(`[leg-mapping] Chain mismatch: mapping=${data.chainId}, app=${expectedChainId}. Ignoring.`);
-            return;
-          }
-          setLegMapping(data.legs);
-          const catalogIds = new Set<bigint>(
-            Object.keys(data.legs as Record<string, number>).map((k) => BigInt(k)),
-          );
-          setOnChainLegIds(catalogIds);
-        }
-      } catch {
-        /* leg-mapping not available */
-      }
-    })();
-  }, []);
 
   // Fetch markets from API
   useEffect(() => {
@@ -369,7 +336,7 @@ export function ParlayBuilder() {
     setRiskLoading(false);
     setAiInsightExpanded(false);
     riskFetchIdRef.current++;
-  }, [selectedLegs, stake, payoutMode]);
+  }, [selectedLegs, stake]);
   */
 
   // ── Derived values ─────────────────────────────────────────────────────
@@ -415,25 +382,17 @@ export function ParlayBuilder() {
 
   const freeLiquidityNum = freeLiquidity !== undefined ? parseFloat(formatUnits(freeLiquidity, 6)) : 0;
   const maxPayoutNum = maxPayout !== undefined ? parseFloat(formatUnits(maxPayout, 6)) : 0;
-  const insufficientLiquidity = potentialPayout > 0 && potentialPayout > freeLiquidityNum;
+  // Disabled: vault liquidity is no longer gated in the UI so users can explore the
+  // builder before depositing. The contract still reverts if the vault can't reserve
+  // the payout, so the real check remains on-chain.
+  const insufficientLiquidity = false;
   const exceedsMaxPayout = potentialPayout > 0 && maxPayout !== undefined && potentialPayout > maxPayoutNum;
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
   const insufficientBalance = stakeNum > 0 && usdcBalance !== undefined && stakeNum > usdcBalanceNum;
 
-  /** Pick the on-chain leg id corresponding to the user's side selection.
-   *  outcomeChoice 1 → yes-side (leg.id); 2 → no-side (leg.noId). */
-  const pickedLegId = (s: SelectedLeg): bigint | undefined =>
-    s.outcomeChoice === 2 ? s.leg.noId : s.leg.id;
-
-  const allSelectedOnChain = selectedLegs.every((s) => {
-    const id = pickedLegId(s);
-    return id !== undefined && (s.leg.onChain || onChainLegIds.has(id));
-  });
-
   const canBuy =
     mounted &&
     isConnected &&
-    allSelectedOnChain &&
     selectedLegs.length >= PARLAY_CONFIG.minLegs &&
     selectedLegs.length <= effectiveMaxLegs &&
     stakeNum >= effectiveMinStake &&
@@ -441,7 +400,7 @@ export function ParlayBuilder() {
     !exceedsMaxPayout &&
     !insufficientBalance;
 
-  const vaultEmpty = mounted && freeLiquidity !== undefined && freeLiquidity === 0n;
+  const vaultEmpty = false;
 
   // ── Handlers ───────────────────────────────────────────────────────────
 
@@ -467,16 +426,14 @@ export function ParlayBuilder() {
 
   const handleBuy = async () => {
     if (!canBuy) return;
-    // Always send outcome=1: the correct on-chain leg id (yes-token or no-token)
-    // is selected via pickedLegId, so the user's side choice is encoded in
-    // which leg we buy, not via the outcomes array.
-    const legIds = selectedLegs.map((s) => pickedLegId(s) ?? s.leg.id);
-    const outcomes = selectedLegs.map(() => 1);
-    const success = await buyTicket(legIds, outcomes, stakeNum, payoutMode);
+    const quoteLegs = selectedLegs.map((s) => ({
+      sourceRef: s.leg.sourceRef,
+      side: (s.outcomeChoice === 2 ? "no" : "yes") as "yes" | "no",
+    }));
+    const success = await buyTicket(quoteLegs, stakeNum);
     if (success) {
       setSelectedLegs([]);
       setStake("");
-      setPayoutMode(0);
     }
   };
 
@@ -559,7 +516,7 @@ export function ParlayBuilder() {
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLegs, stake, payoutMode]);
+  }, [selectedLegs, stake]);
   */
 
   // ── Derived display ────────────────────────────────────────────────────
@@ -579,7 +536,6 @@ export function ParlayBuilder() {
     if (isSuccess) return "Ticket Bought!";
     if (vaultEmpty) return "No Vault Liquidity";
     if (selectedLegs.length < PARLAY_CONFIG.minLegs) return `Select at least ${PARLAY_CONFIG.minLegs} legs`;
-    if (!allSelectedOnChain) return "Some legs not yet on-chain";
     if (insufficientBalance) return "Insufficient USDC Balance";
     if (exceedsMaxPayout) return `Max Payout $${maxPayoutNum.toFixed(0)}`;
     if (insufficientLiquidity) return "Insufficient Vault Liquidity";
@@ -837,8 +793,6 @@ export function ParlayBuilder() {
             </div>
           </div>
 
-          {/* Payout mode selector hidden: payoutMode is fixed to Classic (0) via initial state */}
-
           {/* Payout breakdown */}
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-400">
@@ -865,13 +819,6 @@ export function ParlayBuilder() {
               legs and a positive stake. DISABLED: no longer rendered by the
               application. The corresponding state and fetch logic above is
               commented out but preserved so this UI can be re-enabled later. */}
-
-          {/* Off-chain warning */}
-          {selectedLegs.length > 0 && !allSelectedOnChain && (
-            <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-400">
-              Some selected legs are off-chain (analysis only). Remove them to buy a ticket.
-            </div>
-          )}
 
           {/* Buy button */}
           <button

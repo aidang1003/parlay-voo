@@ -9,6 +9,12 @@ const nextConfig = {
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js", ".jsx"],
     };
+    // MetaMask SDK (pulled in by @wagmi/connectors) imports a React Native-only
+    // module. Stub it out in the browser build so webpack stops failing.
+    config.resolve.fallback = {
+      ...(config.resolve.fallback ?? {}),
+      "@react-native-async-storage/async-storage": false,
+    };
     return config;
   },
 };

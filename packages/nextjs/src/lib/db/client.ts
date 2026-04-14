@@ -82,8 +82,8 @@ export async function getActiveMarkets(): Promise<MarketRow[]> {
 }
 
 /**
- * Markets with at least one on-chain-registered leg id. Used by
- * /api/leg-mapping and MCP tools to know which legs are buyable.
+ * Markets with at least one on-chain-registered leg id. Used by MCP tools
+ * to know which legs have already been materialized on-chain.
  */
 export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();

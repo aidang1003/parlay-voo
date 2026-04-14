@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
 import {MockUSDC} from "../../src/MockUSDC.sol";
 import {HouseVault} from "../../src/core/HouseVault.sol";
 import {LegRegistry} from "../../src/core/LegRegistry.sol";
@@ -10,8 +9,9 @@ import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
 import {FeeRouterSetup} from "../helpers/FeeRouterSetup.sol";
+import {SignedBuy} from "../helpers/SignedBuy.sol";
 
-contract EarlyCashoutTest is FeeRouterSetup {
+contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
     MockUSDC usdc;
     HouseVault vault;
     LegRegistry registry;
@@ -23,6 +23,9 @@ contract EarlyCashoutTest is FeeRouterSetup {
     address bob = makeAddr("bob");
 
     uint256 constant BOOTSTRAP_ENDS = 1_000_000;
+    uint256 constant CUTOFF = 600_000;
+    uint256 constant RESOLVE = 700_000;
+    uint256 constant DEADLINE = 550_000;
 
     function setUp() public {
         vm.warp(500_000);
@@ -34,91 +37,66 @@ contract EarlyCashoutTest is FeeRouterSetup {
         engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
 
         vault.setEngine(address(engine));
+        registry.setEngine(address(engine));
+        engine.setTrustedQuoteSigner(_signerAddr());
 
         _wireFeeRouter(vault);
 
-        // Seed vault with liquidity
         usdc.mint(owner, 10_000e6);
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(10_000e6, owner);
 
-        // Fund alice
         usdc.mint(alice, 1_000e6);
         vm.prank(alice);
         usdc.approve(address(engine), type(uint256).max);
 
-        // Fund bob (for ownership tests)
         usdc.mint(bob, 1_000e6);
         vm.prank(bob);
         usdc.approve(address(engine), type(uint256).max);
-
-        // Create legs: cutoff at ts=600_000, resolve at ts=700_000
-        _createLeg("ETH > $5000?", 500_000); // leg 0: 50%
-        _createLeg("BTC > $150k?", 250_000); // leg 1: 25%
-        _createLeg("SOL > $300?", 200_000); // leg 2: 20%
     }
 
-    function _createLeg(string memory question, uint256 probPPM) internal returns (uint256) {
-        return registry.createLeg(question, "source", 600_000, 700_000, address(oracle), probPPM);
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    function _yesLeg(string memory ref, uint256 ppm) internal view returns (ParlayEngine.SourceLeg memory) {
+        return _mkLeg(ref, bytes32(uint256(1)), ppm, address(oracle), CUTOFF, RESOLVE);
     }
 
-    // Helper: buy a 3-leg EARLY_CASHOUT ticket (legs 0+1+2, 50%+25%+20%) with 10 USDC
-    function _buyCashout3Leg() internal returns (uint256 ticketId) {
-        uint256[] memory legs = new uint256[](3);
-        legs[0] = 0; // 50%
-        legs[1] = 1; // 25%
-        legs[2] = 2; // 20%
-
-        bytes32[] memory outcomes = new bytes32[](3);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-        outcomes[2] = keccak256("yes");
-
-        vm.prank(alice);
-        ticketId = engine.buyTicketWithMode(legs, outcomes, 10e6, ParlayEngine.PayoutMode.EARLY_CASHOUT);
+    /// @dev Buy a 3-leg ticket (50%+25%+20%). Legs 0,1,2 are created on first
+    ///      call.
+    function _buy3Leg() internal returns (uint256 ticketId) {
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](3);
+        legs[0] = _yesLeg("leg:eth", 500_000);
+        legs[1] = _yesLeg("leg:btc", 250_000);
+        legs[2] = _yesLeg("leg:sol", 200_000);
+        ticketId = _buySigned(engine, alice, legs, 10e6, DEADLINE);
     }
 
-    // Helper: buy a 5-leg EARLY_CASHOUT ticket with 10 USDC
-    function _buyCashout5Leg() internal returns (uint256 ticketId) {
-        // Need 2 extra legs with higher probabilities to keep payout within vault cap
-        uint256 leg3 = _createLeg("DOGE > $1?", 400_000); // 40%
-        uint256 leg4 = _createLeg("AVAX > $100?", 500_000); // 50%
-
-        // Need more vault liquidity for 5-leg multiplier (MockUSDC caps at 10k per mint)
+    function _buy5Leg() internal returns (uint256 ticketId) {
+        // Need more vault liquidity for 5-leg multiplier
         for (uint256 j = 0; j < 9; j++) {
             usdc.mint(owner, 10_000e6);
         }
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(90_000e6, owner);
 
-        uint256[] memory legs = new uint256[](5);
-        legs[0] = 0; // 50%
-        legs[1] = 1; // 25%
-        legs[2] = 2; // 20%
-        legs[3] = leg3; // 40%
-        legs[4] = leg4; // 50%
-
-        bytes32[] memory outcomes = new bytes32[](5);
-        for (uint256 i = 0; i < 5; i++) outcomes[i] = keccak256("yes");
-
-        vm.prank(alice);
-        ticketId = engine.buyTicketWithMode(legs, outcomes, 10e6, ParlayEngine.PayoutMode.EARLY_CASHOUT);
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](5);
+        legs[0] = _yesLeg("leg:eth", 500_000);
+        legs[1] = _yesLeg("leg:btc", 250_000);
+        legs[2] = _yesLeg("leg:sol", 200_000);
+        legs[3] = _yesLeg("leg:doge", 400_000);
+        legs[4] = _yesLeg("leg:avax", 500_000);
+        ticketId = _buySigned(engine, alice, legs, 10e6, DEADLINE);
     }
 
-    // ── 1. Basic cashout: 3-leg, 1 won, 2 unresolved ─────────────────────
+    // ── 1. Basic cashout ─────────────────────────────────────────────────
 
     function test_cashoutEarly_basic() public {
-        uint256 ticketId = _buyCashout3Leg();
+        uint256 ticketId = _buy3Leg();
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        // 3-leg fee: 100 + 50*3 = 250 bps = 2.5%
-        // feePaid = 10_000_000 * 250 / 10_000 = 250_000
-        // effectiveStake = 9_750_000
         assertEq(t.feePaid, 250_000);
-        uint256 effectiveStake = t.stake - t.feePaid;
-        assertEq(effectiveStake, 9_750_000);
+        assertEq(t.stake - t.feePaid, 9_750_000);
 
-        // Resolve leg 0 (50%) as Won
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         uint256 aliceBefore = usdc.balanceOf(alice);
@@ -127,78 +105,49 @@ contract EarlyCashoutTest is FeeRouterSetup {
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
-        // wonMultiplier = PPM^2 / 500_000 = 2_000_000 (2x)
-        // wonValue = fairValue = 9_750_000 * 2_000_000 / 1_000_000 = 19_500_000
-        // (no discount by unresolved probs — wonValue IS the EV given won legs)
-        // penaltyBps = 1500 * 2 / 3 = 1000 (10%)
-        // cashoutValue = 19_500_000 * 9_000 / 10_000 = 17_550_000
         uint256 expectedCashout = 17_550_000;
-
         assertEq(usdc.balanceOf(alice), aliceBefore + expectedCashout, "alice received cashout");
 
-        // Ticket marked Claimed
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed));
-
-        // Vault reserve fully released
         assertEq(vault.totalReserved(), reservedBefore - t.potentialPayout, "vault reserve released");
     }
 
-    // ── 2. Two of three won: higher cashout, lower penalty ────────────────
+    // ── 2. Two of three won ──────────────────────────────────────────────
 
     function test_cashoutEarly_twoOfThreeWon() public {
-        uint256 ticketId = _buyCashout3Leg();
-
-        // Resolve legs 0 (50%) and 1 (25%) as Won
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
 
         uint256 aliceBefore = usdc.balanceOf(alice);
-
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
-        // wonMultiplier = PPM^3 / (500_000 * 250_000) = 8_000_000 (8x)
-        // wonValue = fairValue = 9_750_000 * 8_000_000 / 1_000_000 = 78_000_000
-        // penaltyBps = 1500 * 1 / 3 = 500 (5%)
-        // cashoutValue = 78_000_000 * 9_500 / 10_000 = 74_100_000
         uint256 expectedCashout = 74_100_000;
-
         assertEq(usdc.balanceOf(alice), aliceBefore + expectedCashout, "alice received higher cashout");
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed));
     }
 
-    // ── 3. Five-leg parlay, 3 won, 2 unresolved ──────────────────────────
+    // ── 3. Five-leg parlay ───────────────────────────────────────────────
 
     function test_cashoutEarly_fiveLegParlay() public {
-        uint256 ticketId = _buyCashout5Leg();
+        uint256 ticketId = _buy5Leg();
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        // 5-leg fee: 100 + 50*5 = 350 bps = 3.5%
-        // feePaid = 10_000_000 * 350 / 10_000 = 350_000
-        // effectiveStake = 9_650_000
         assertEq(t.feePaid, 350_000);
 
-        // Resolve legs 0 (50%), 1 (25%), 2 (20%) as Won
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         oracle.resolve(2, LegStatus.Won, keccak256("yes"));
 
         uint256 aliceBefore = usdc.balanceOf(alice);
-
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
-        // wonMultiplier = PPM^4 / (500_000 * 250_000 * 200_000) = 40_000_000 (40x)
-        // wonValue = fairValue = 9_650_000 * 40_000_000 / 1_000_000 = 386_000_000
-        // penaltyBps = 1500 * 2 / 5 = 600 (6%)
-        // cashoutValue = 386_000_000 * 9_400 / 10_000 = 362_840_000
-
         uint256 received = usdc.balanceOf(alice) - aliceBefore;
-        // Verify penalty was 600 bps (6%)
-        // We trust the math library; just verify it's in a sensible range
         assertGt(received, 0, "received positive cashout");
         assertTrue(received < t.potentialPayout, "cashout < potential payout");
 
@@ -206,26 +155,21 @@ contract EarlyCashoutTest is FeeRouterSetup {
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed));
     }
 
-    // ── 4. Slippage protection ────────────────────────────────────────────
+    // ── 4. Slippage protection ───────────────────────────────────────────
 
     function test_cashoutEarly_slippageProtection() public {
-        uint256 ticketId = _buyCashout3Leg();
-
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
-        // The cashout value for 1-of-3 won is 17_550_000.
-        // Set minOut above that to trigger revert.
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: below min cashout");
         engine.cashoutEarly(ticketId, 17_550_001);
     }
 
-    // ── 5. Leg lost reverts ───────────────────────────────────────────────
+    // ── 5. Leg lost reverts ──────────────────────────────────────────────
 
     function test_cashoutEarly_legLost_reverts() public {
-        uint256 ticketId = _buyCashout3Leg();
-
-        // Resolve one won, one lost
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Lost, keccak256("no"));
 
@@ -234,23 +178,20 @@ contract EarlyCashoutTest is FeeRouterSetup {
         engine.cashoutEarly(ticketId, 0);
     }
 
-    // ── 6. No won legs reverts ────────────────────────────────────────────
+    // ── 6. No won legs reverts ───────────────────────────────────────────
 
     function test_cashoutEarly_noWonLegs_reverts() public {
-        uint256 ticketId = _buyCashout3Leg();
+        uint256 ticketId = _buy3Leg();
 
-        // No legs resolved at all
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: need at least 1 won leg");
         engine.cashoutEarly(ticketId, 0);
     }
 
-    // ── 7. All resolved -> use settleTicket instead ───────────────────────
+    // ── 7. All resolved -> use settleTicket ──────────────────────────────
 
     function test_cashoutEarly_allResolved_reverts() public {
-        uint256 ticketId = _buyCashout3Leg();
-
-        // Resolve all legs as Won
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         oracle.resolve(2, LegStatus.Won, keccak256("yes"));
@@ -260,34 +201,10 @@ contract EarlyCashoutTest is FeeRouterSetup {
         engine.cashoutEarly(ticketId, 0);
     }
 
-    // ── 8. CLASSIC ticket can't use cashoutEarly ──────────────────────────
-
-    function test_cashoutEarly_notEarlyCashout_reverts() public {
-        // Buy CLASSIC ticket
-        uint256[] memory legs = new uint256[](3);
-        legs[0] = 0;
-        legs[1] = 1;
-        legs[2] = 2;
-        bytes32[] memory outcomes = new bytes32[](3);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-        outcomes[2] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
-        oracle.resolve(0, LegStatus.Won, keccak256("yes"));
-
-        vm.prank(alice);
-        vm.expectRevert("ParlayEngine: not early cashout");
-        engine.cashoutEarly(ticketId, 0);
-    }
-
-    // ── 9. Not owner reverts ──────────────────────────────────────────────
+    // ── 8. Not owner reverts ─────────────────────────────────────────────
 
     function test_cashoutEarly_notOwner_reverts() public {
-        uint256 ticketId = _buyCashout3Leg();
-
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         vm.prank(bob);
@@ -295,12 +212,10 @@ contract EarlyCashoutTest is FeeRouterSetup {
         engine.cashoutEarly(ticketId, 0);
     }
 
-    // ── 10. Not active reverts ────────────────────────────────────────────
+    // ── 9. Not active reverts ────────────────────────────────────────────
 
     function test_cashoutEarly_notActive_reverts() public {
-        uint256 ticketId = _buyCashout3Leg();
-
-        // Resolve all and settle to make ticket Won
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         oracle.resolve(2, LegStatus.Won, keccak256("yes"));
@@ -311,161 +226,82 @@ contract EarlyCashoutTest is FeeRouterSetup {
         engine.cashoutEarly(ticketId, 0);
     }
 
-    // ── 11. Vault accounting after cashout ────────────────────────────────
+    // ── 10. Vault accounting ─────────────────────────────────────────────
 
     function test_cashoutEarly_vaultAccounting() public {
         uint256 vaultAssetsBefore = vault.totalAssets();
         uint256 aliceBalBefore = usdc.balanceOf(alice);
 
-        uint256 ticketId = _buyCashout3Leg();
-
+        uint256 ticketId = _buy3Leg();
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         uint256 potentialPayout = t.potentialPayout;
 
-        // After buy: vault received 10 USDC stake, routed fees out (90% lockers + 5% safety)
-        // Fee = stake * (baseFee + perLegFee * 3) / 10_000 = 10e6 * 250 / 10_000 = 250000
-        // Routed out = 90% to lockers + 5% to safety = 95% of 250000 = 237500
         assertEq(vault.totalReserved(), potentialPayout);
         assertEq(vault.totalAssets(), vaultAssetsBefore + 10e6 - 237500);
 
-        // Resolve leg 0 as Won
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
         uint256 cashoutPaid = usdc.balanceOf(alice) - (aliceBalBefore - 10e6);
-
-        // Vault reserve fully released
         assertEq(vault.totalReserved(), 0, "all reserves released");
-
-        // Vault assets decreased by cashout amount (relative to post-buy balance)
         assertEq(vault.totalAssets(), vaultAssetsBefore + 10e6 - 237500 - cashoutPaid, "vault assets correct");
-
-        // Cashout is capped at potentialPayout; verify the penalty reduced the value
         assertTrue(cashoutPaid < potentialPayout, "cashout less than potential payout");
         assertEq(cashoutPaid, 17_550_000, "cashout matches expected value");
     }
 
-    // ── 12. Voided leg treated as unresolved ──────────────────────────────
+    // ── 11. Voided leg treated as unresolved ─────────────────────────────
 
     function test_cashoutEarly_voidedLegTreatedAsUnresolved() public {
-        uint256 ticketId = _buyCashout3Leg();
-
-        // Resolve leg 0 as Won, leg 1 as Voided (treated as unresolved)
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Voided, bytes32(0));
 
-        // Leg 2 stays unresolved
-        // So: 1 won, 2 "unresolved" (1 voided + 1 actually unresolved)
-        // penaltyBps = 1500 * 2 / 3 = 1000 bps (same as basic test)
-
         uint256 aliceBefore = usdc.balanceOf(alice);
-
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
         uint256 received = usdc.balanceOf(alice) - aliceBefore;
-
-        // Should be same as basic test (1 won, 2 unresolved)
-        // wonMultiplier = 2x, fairValue = wonValue = 19_500_000
-        // Voided leg counts toward unresolved count (affects penalty) but
-        // doesn't affect fairValue (no discount loop)
         assertEq(received, 17_550_000, "voided leg treated as unresolved");
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed));
     }
 
-    // ── 13. Admin can change baseCashoutPenaltyBps ────────────────────────
+    // ── 12. Admin can change cashoutPenaltyBps ───────────────────────────
 
     function test_cashoutEarly_penaltyAdmin() public {
-        // Default is 1500
-        assertEq(engine.baseCashoutPenaltyBps(), 1500);
+        assertEq(engine.cashoutPenaltyBps(), 1500);
 
-        // Owner sets new penalty
-        engine.setBaseCashoutPenalty(2000);
-        assertEq(engine.baseCashoutPenaltyBps(), 2000);
+        engine.setCashoutPenalty(2000);
+        assertEq(engine.cashoutPenaltyBps(), 2000);
 
-        // Buy and cashout with updated penalty
-        uint256 ticketId = _buyCashout3Leg();
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         uint256 aliceBefore = usdc.balanceOf(alice);
-
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
         // penaltyBps = 2000 * 2 / 3 = 1333 (13.33%)
-        // fairValue = 19_500_000 (same as basic test)
-        // cashoutValue = 19_500_000 * (10_000 - 1333) / 10_000 = 19_500_000 * 8667 / 10_000 = 16_900_650
-        uint256 expectedCashout = 16_900_650;
-        assertEq(usdc.balanceOf(alice), aliceBefore + expectedCashout, "updated penalty applied");
+        // cashoutValue = 19_500_000 * 8667 / 10_000 = 16_900_650
+        assertEq(usdc.balanceOf(alice), aliceBefore + 16_900_650, "updated penalty applied");
 
-        // Revert on too high
         vm.expectRevert("ParlayEngine: penalty too high");
-        engine.setBaseCashoutPenalty(5001);
+        engine.setCashoutPenalty(5001);
 
-        // Non-owner can't set
         vm.prank(alice);
         vm.expectRevert();
-        engine.setBaseCashoutPenalty(1000);
+        engine.setCashoutPenalty(1000);
     }
 
-    // ── 13b. Penalty snapshot: owner change after buy doesn't affect ticket ─
-
-    function test_cashoutEarly_penaltySnapshotted() public {
-        // Buy at default penalty (1500 bps)
-        uint256 ticketId = _buyCashout3Leg();
-
-        // Verify snapshot stored in ticket
-        ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        assertEq(t.cashoutPenaltyBps, 1500, "penalty snapshotted at 1500");
-
-        // Owner changes penalty to 3000 AFTER ticket was bought
-        engine.setBaseCashoutPenalty(3000);
-        assertEq(engine.baseCashoutPenaltyBps(), 3000);
-
-        oracle.resolve(0, LegStatus.Won, keccak256("yes"));
-
-        uint256 aliceBefore = usdc.balanceOf(alice);
-        vm.prank(alice);
-        engine.cashoutEarly(ticketId, 0);
-
-        // Should use 1500 (snapshotted), NOT 3000 (current)
-        // penaltyBps = 1500 * 2 / 3 = 1000 (10%)
-        // cashoutValue = 19_500_000 * 9_000 / 10_000 = 17_550_000
-        assertEq(usdc.balanceOf(alice), aliceBefore + 17_550_000, "uses snapshotted penalty");
-    }
-
-    // ── 13c. CLASSIC and PROGRESSIVE tickets store zero penalty ───────────
-
-    function test_cashoutPenaltyBps_zeroForNonCashoutModes() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 classicId = engine.buyTicket(legs, outcomes, 10e6);
-        assertEq(engine.getTicket(classicId).cashoutPenaltyBps, 0, "classic: no penalty stored");
-
-        usdc.mint(alice, 10e6);
-        vm.prank(alice);
-        uint256 progressiveId = engine.buyTicketWithMode(legs, outcomes, 10e6, ParlayEngine.PayoutMode.PROGRESSIVE);
-        assertEq(engine.getTicket(progressiveId).cashoutPenaltyBps, 0, "progressive: no penalty stored");
-    }
-
-    // ── 14. EarlyCashout event emitted ────────────────────────────────────
+    // ── 13. EarlyCashout event emitted ───────────────────────────────────
 
     function test_cashoutEarly_emitsEvent() public {
-        uint256 ticketId = _buyCashout3Leg();
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
-        // penaltyBps = 1500 * 2 / 3 = 1000
-        // cashoutValue = 17_550_000
         vm.expectEmit(true, true, false, true);
         emit ParlayEngine.EarlyCashout(ticketId, alice, 17_550_000, 1000);
 
@@ -473,39 +309,25 @@ contract EarlyCashoutTest is FeeRouterSetup {
         engine.cashoutEarly(ticketId, 0);
     }
 
-    // ── 15. Zero cashout value reverts ─────────────────────────────────────
+    // ── 14. Zero cashout value reverts (min cashout) ─────────────────────
 
     function test_cashoutEarly_zeroPayout_reverts() public {
-        // Create a 2-leg cashout ticket with very low probability won leg
-        // to produce a cashoutValue that rounds to 0 after penalty
-        uint256 lowProbLeg = registry.createLeg("Unlikely?", "src", 600_000, 700_000, address(oracle), 10_000); // 1%
-        uint256 normalLeg = registry.createLeg("Normal?", "src", 600_000, 700_000, address(oracle), 500_000); // 50%
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
+        legs[0] = _yesLeg("leg:unlikely", 10_000); // 1%
+        legs[1] = _yesLeg("leg:normal", 500_000); // 50%
+        uint256 ticketId = _buySigned(engine, alice, legs, 1e6, DEADLINE);
 
-        uint256[] memory legIds = new uint256[](2);
-        legIds[0] = lowProbLeg;
-        legIds[1] = normalLeg;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
-        // Use minimum stake to maximize chance of zero rounding
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicketWithMode(legIds, outcomes, 1e6, ParlayEngine.PayoutMode.EARLY_CASHOUT);
-
-        // Resolve the low-prob leg as Won
-        oracle.resolve(lowProbLeg, LegStatus.Won, keccak256("yes"));
-
-        // If cashoutValue rounds to 0, the require(payout > 0) should catch it
-        // Even if it doesn't round to 0 in this case, verify minOut > 0 is respected
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: below min cashout");
-        engine.cashoutEarly(ticketId, type(uint256).max); // impossible minOut
+        engine.cashoutEarly(ticketId, type(uint256).max);
     }
 
-    // ── 16. Cashout paused ────────────────────────────────────────────────
+    // ── 15. Cashout paused ───────────────────────────────────────────────
 
     function test_cashoutEarly_whenPaused_reverts() public {
-        uint256 ticketId = _buyCashout3Leg();
+        uint256 ticketId = _buy3Leg();
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         engine.pause();

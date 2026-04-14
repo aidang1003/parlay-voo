@@ -3,6 +3,7 @@
 PID_DIR := .pids
 
 -include .env
+-include packages/nextjs/.env.local
 export
 
 # ── Setup ────────────────────────────────────────────────────────────────────
@@ -36,8 +37,6 @@ dev:
 	@cd packages/foundry && env -u USDC_ADDRESS forge script script/Deploy.s.sol --broadcast --rpc-url http://127.0.0.1:8545 > ../../$(PID_DIR)/deploy.log 2>&1
 	@env -u USDC_ADDRESS ./scripts/sync-env.sh
 	@echo "  Contracts deployed, .env.local synced"
-#	@npx tsx scripts/register-legs.ts > $(PID_DIR)/register-legs.log 2>&1 || echo "  (register-legs skipped)"
-#	@echo "  Catalog legs registered"
 	@cd packages/nextjs && nohup pnpm dev > ../../$(PID_DIR)/web.log 2>&1 & echo $$! > $(PID_DIR)/web.pid
 	@echo "  Web started (pid $$(cat $(PID_DIR)/web.pid)) on :3000"
 	@sleep 3
@@ -114,14 +113,7 @@ deploy-sepolia:
 			--broadcast --rpc-url $(RPC) $(VERIFY_FLAG) --slow
 	$(if $(USDC_ADDRESS),USDC_ADDRESS=$(USDC_ADDRESS)) ./scripts/sync-env.sh sepolia
 
-deploy-sepolia-full: deploy-sepolia register-legs-sepolia demo-seed-sepolia
-
-register-legs:
-	npx tsx scripts/register-legs.ts
-
-register-legs-sepolia:
-	$(eval RPC := $(or $(BASE_SEPOLIA_RPC_URL),https://sepolia.base.org))
-	RPC_URL=$(RPC) PRIVATE_KEY=$$DEPLOYER_PRIVATE_KEY npx tsx scripts/register-legs.ts
+deploy-sepolia-full: deploy-sepolia demo-seed-sepolia
 
 demo-seed-sepolia:
 	USDC_ADDRESS=$(USDC_ADDRESS) \
@@ -157,6 +149,14 @@ fund-wallet:
 
 sync-env:
 	./scripts/sync-env.sh
+
+# TODO: Add support for other chains (e.g. Sepolia, Base Mainnet) later on
+# Gets called in deply script as well
+# Don't need to call in make script anymore
+set-trusted-signer:
+	@echo "Setting trusted quote signer..."
+	@test -f packages/nextjs/.env.local || (echo "Error: packages/nextjs/.env.local not found" && exit 1)
+	@bash -c 'set -a; source packages/nextjs/.env.local; set +a; cd packages/foundry && forge script script/SetTrustedSigner.s.sol:SetTrustedSigner --rpc-url http://127.0.0.1:8545 --broadcast'
 
 # ── Database / Polymarket ────────────────────────────────────────────────────
 
@@ -194,4 +194,5 @@ clean:
 	cd packages/foundry && forge clean
 	cd packages/nextjs && rm -rf .next
 
-.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full register-legs register-legs-sepolia demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env db-init polymarket-sync risk-agent risk-agent-dry settler-sepolia risk-agent-sepolia demo-seed demo-autopilot clean
+.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env db-init polymarket-sync risk-agent risk-agent-dry settler-sepolia risk-agent-sepolia demo-seed demo-autopilot clean
+.PHONY: bootstrap setup chain deploy-local dev dev-stop dev-status test-contracts test-web test-all test-e2e gate typecheck build build-contracts coverage snapshot deploy-sepolia deploy-sepolia-full demo-seed-sepolia create-pool-sepolia fund-deployer fund-wallet sync-env set-trusted-signer db-init polymarket-sync risk-agent risk-agent-dry settler-sepolia risk-agent-sepolia demo-seed demo-autopilot clean

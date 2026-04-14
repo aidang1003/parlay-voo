@@ -33,7 +33,8 @@ const TIER_MULTIPLIERS = ["1.1x", "1.25x", "1.5x"];
 type Tab = "deposit" | "withdraw" | "lock";
 
 export function VaultDashboard() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chain } = useAccount();
+  const noUsdcWarning = `Your wallet needs USDC on ${chain?.name ?? "the connected"} network`;
   const vaultStats = useVaultStats();
   const { balance: usdcBalance } = useUSDCBalance();
   const depositHook = useDepositVault();
@@ -416,7 +417,7 @@ export function VaultDashboard() {
               {mintHook.error && (
                 <p className="text-center text-xs text-red-400">{mintHook.error}</p>
               )}
-              <div className="relative">
+              <div className="relative" title={!hasUSDC ? noUsdcWarning : undefined}>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -425,6 +426,7 @@ export function VaultDashboard() {
                   onChange={(e) => setDepositAmountAndReset(sanitizeNumericInput(e.target.value))}
                   placeholder="Min 1 USDC"
                   disabled={!hasUSDC}
+                  title={!hasUSDC ? noUsdcWarning : undefined}
                   className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-16 text-white placeholder-gray-600 outline-none transition-colors focus:border-brand-pink/50 disabled:cursor-not-allowed disabled:opacity-50"
                 />
                 {hasUSDC && (
@@ -448,6 +450,7 @@ export function VaultDashboard() {
               <button
                 onClick={handleDeposit}
                 disabled={!isConnected || !hasUSDC || !depositAmount || depositNotANumber || depositNegative || depositBelowMinimum || depositExceedsBalance || depositHook.isPending || depositHook.isConfirming}
+                title={isConnected && !hasUSDC ? noUsdcWarning : undefined}
                 className="btn-gradient w-full rounded-xl py-3 text-sm font-bold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:!bg-none disabled:!bg-gray-800 disabled:!text-gray-500 disabled:!shadow-none"
               >
                 {depositButtonLabel()}

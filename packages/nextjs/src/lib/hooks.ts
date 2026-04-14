@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAccount, useReadContract, useReadContracts, useWriteContract, usePublicClient } from "wagmi";
-import { parseUnits, toHex, pad, parseEventLogs } from "viem";
+import { parseUnits, parseEventLogs } from "viem";
 import { BUILDER_SUFFIX } from "./builder-code";
 import {
   USDC_ABI,
@@ -231,10 +231,6 @@ export interface OnChainTicket {
   mode: number;
   status: number;
   createdAt: bigint;
-  /** Payout mode: 0=CLASSIC, 1=PROGRESSIVE, 2=EARLY_CASHOUT */
-  payoutMode: number;
-  claimedAmount: bigint;
-  cashoutPenaltyBps: bigint;
 }
 
 export function useTicket(ticketId: bigint | undefined) {
@@ -412,10 +408,8 @@ export function useBuyTicket() {
   };
 
   const buyTicket = async (
-    legIds: bigint[],
-    outcomes: number[],
-    stakeUsdc: number,
-    payoutMode: number = 0
+    legs: Array<{ sourceRef: string; side: "yes" | "no" }>,
+    stakeUsdc: number
   ): Promise<boolean> => {
     if (!address || !publicClient) return false;
 
@@ -426,6 +420,39 @@ export function useBuyTicket() {
 
     try {
       const stakeAmount = parseUnits(stakeUsdc.toString(), 6);
+
+      // Fetch a fresh EIP-712 signed Quote from our backend. Short TTL (60s)
+      // bounds price staleness; the engine verifies sig+nonce+deadline+buyer.
+      const quoteRes = await fetch("/api/quote-sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyer: address,
+          stake: stakeAmount.toString(),
+          legs,
+        }),
+      });
+      if (!quoteRes.ok) {
+        const msg = await quoteRes.text();
+        throw new Error(`Quote sign failed: ${msg}`);
+      }
+      const { quote, signature } = (await quoteRes.json()) as {
+        quote: {
+          buyer: `0x${string}`;
+          stake: string;
+          legs: Array<{
+            sourceRef: string;
+            outcome: `0x${string}`;
+            probabilityPPM: string;
+            cutoffTime: string;
+            earliestResolve: string;
+            oracleAdapter: `0x${string}`;
+          }>;
+          deadline: string;
+          nonce: string;
+        };
+        signature: `0x${string}`;
+      };
 
       // Approve exact amount
       const approveHash = await writeContractAsync({
@@ -440,19 +467,29 @@ export function useBuyTicket() {
         throw new Error("Approve transaction reverted on-chain");
       }
 
-      // Encode outcomes as bytes32[]
-      const outcomesBytes32 = outcomes.map((o) => pad(toHex(o), { size: 32 })) as `0x${string}`[];
-
-      // Buy ticket (use mode-aware function when non-classic)
       setIsPending(false);
       setIsConfirming(true);
+
+      const quoteArg = {
+        buyer: quote.buyer,
+        stake: BigInt(quote.stake),
+        legs: quote.legs.map((l) => ({
+          sourceRef: l.sourceRef,
+          outcome: l.outcome,
+          probabilityPPM: BigInt(l.probabilityPPM),
+          cutoffTime: BigInt(l.cutoffTime),
+          earliestResolve: BigInt(l.earliestResolve),
+          oracleAdapter: l.oracleAdapter,
+        })),
+        deadline: BigInt(quote.deadline),
+        nonce: BigInt(quote.nonce),
+      };
+
       const buyHash = await writeContractAsync({
         address: contractAddresses.parlayEngine as `0x${string}`,
         abi: PARLAY_ENGINE_ABI,
-        functionName: payoutMode === 0 ? "buyTicket" : "buyTicketWithMode",
-        args: payoutMode === 0
-          ? [legIds, outcomesBytes32, stakeAmount]
-          : [legIds, outcomesBytes32, stakeAmount, payoutMode],
+        functionName: "buyTicketSigned",
+        args: [quoteArg, signature],
         dataSuffix: BUILDER_SUFFIX,
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
@@ -728,57 +765,6 @@ export function useClaimPayout() {
   };
 
   return { claim, hash, isPending, isConfirming, isSuccess, error };
-}
-
-export function useClaimProgressive() {
-  const publicClient = useContractClient();
-  const { writeContractAsync } = useWriteContract();
-  const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
-  const [isPending, setIsPending] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const claimProgressive = async (ticketId: bigint): Promise<boolean> => {
-    if (!publicClient) return false;
-
-    setIsPending(true);
-    setIsConfirming(false);
-    setIsSuccess(false);
-    setError(null);
-    setHash(undefined);
-
-    try {
-      const txHash = await writeContractAsync({
-        address: contractAddresses.parlayEngine as `0x${string}`,
-        abi: PARLAY_ENGINE_ABI,
-        functionName: "claimProgressive",
-        args: [ticketId],
-        dataSuffix: BUILDER_SUFFIX,
-      });
-      setHash(txHash);
-
-      setIsPending(false);
-      setIsConfirming(true);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status === "reverted") {
-        throw new Error("Progressive claim reverted on-chain");
-      }
-
-      setIsConfirming(false);
-      setIsSuccess(true);
-      return true;
-    } catch (err) {
-      console.error("Progressive claim failed:", err);
-      setError(err instanceof Error ? err : new Error(String(err)));
-      return false;
-    } finally {
-      setIsPending(false);
-      setIsConfirming(false);
-    }
-  };
-
-  return { claimProgressive, hash, isPending, isConfirming, isSuccess, error };
 }
 
 export function useCashoutEarly() {

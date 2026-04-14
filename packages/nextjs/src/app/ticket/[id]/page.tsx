@@ -101,8 +101,7 @@ export default function TicketPage() {
 
   const multiplier = Number(onChainTicket.multiplierX1e6) / PPM;
   const effectiveStake = onChainTicket.stake - onChainTicket.feePaid;
-  const rawPenalty = Number(onChainTicket.cashoutPenaltyBps);
-  const penaltyBps = Number.isFinite(rawPenalty) ? rawPenalty : BASE_CASHOUT_PENALTY_BPS;
+  const penaltyBps = BASE_CASHOUT_PENALTY_BPS;
 
   const wonProbsPPM: number[] = [];
   let unresolvedCount = 0;
@@ -137,7 +136,7 @@ export default function TicketPage() {
     };
   });
 
-  const cashoutValue = onChainTicket.payoutMode === 2
+  const cashoutValue = unresolvedCount > 0
     ? computeClientCashoutValue(effectiveStake, wonProbsPPM, unresolvedCount, legs.length, onChainTicket.potentialPayout, penaltyBps)
     : undefined;
 
@@ -149,9 +148,6 @@ export default function TicketPage() {
     legs,
     status: mapStatus(onChainTicket.status),
     createdAt: Number(onChainTicket.createdAt),
-    payoutMode: onChainTicket.payoutMode,
-    claimedAmount: onChainTicket.claimedAmount,
-    cashoutPenaltyBps: penaltyBps,
     cashoutValue,
   };
 
@@ -236,7 +232,7 @@ export default function TicketPage() {
             </div>
             <div className="text-center">
               <p className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                {ticket.payoutMode === 2 && !crashed ? "Cashout" : "Potential"}
+                {cashoutValue !== undefined && !crashed ? "Cashout" : "Potential"}
               </p>
               <p className="text-lg font-bold tabular-nums text-brand-gold">
                 {cashoutValue !== undefined && !crashed

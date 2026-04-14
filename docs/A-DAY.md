@@ -85,12 +85,18 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Blockers:** currect lock functionality has return periods and values hard-coded 
 - **Notes:**
 
-### F-2 — Add live polymarket data
+### F-2 — Add live polymarket data ✅ COMPLETE
 - **Time:** 2 days
 - **Value:** medium, will need this for the launch and settlement
 - **Blockers:** values are hard-coded as of right now, some agent workloads probably depend on this as well. Possible need to remove Kelly and Betty agents to accomplish this. Better data retention needed (Postgres)
 - **Notes:** Live polymarket data will be used to 1) find real bets with their live odds 2) settle active bets
 - **CRON_SECRET caveat:** the Bearer check on `/api/polymarket/sync` and `/api/db/init` is probably not doing much for security and adds complexity we don't need. The realistic attack is Vercel compute-bill drain, not fund/data loss — sync is idempotent, reads a hand-curated list, and the on-chain writes are gated by `DEPLOYER_PRIVATE_KEY`. If the secret plumbing ever causes friction (local dev, new contributors, CI), drop it and replace with an in-route "skip if last run < 1h ago" idempotency gate.
+
+### F-3 - Just in time parlay engine
+- **Time:** days
+- **Value:** medium
+- **Blockers:** Huge overhaul of entire stack
+- **Notes:** Instead of registering all possible legs in the smart contract they need to be registered at acceptance time for accurate pricing data
 
 
 ## Parlay Builder Frontend Fixes ✅ COMPLETE
@@ -98,6 +104,14 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
  - ✅ COMPLETE cut database entries in half and re-make txtsourceref as primaryid by adding a yes odds and no odds column
  - ✅ COMPLETE Implement categories using the category pulled back from polymarket (Gamma event `category`/`tags` threaded through CuratedMarket)
  - ✅ COMPLETE Ensure odds are being built from the the correct number (now sourced from Gamma `outcomePrices` instead of per-token CLOB mid; midToPpm clamp widened to 1–99%)
+
+## Structure
+1) The foundry/e2e folder need not exist
+- All solidity tests and scripting can be done within foundry's framework
+- Any tests verifying E2E i.e. calling an action with typescript to verify the frontend works should be done in the nextjs folder structure
+2) Too many .env files, commit to one root level .env if possible
+3) Makefile too hard to read
+4) The /scripts folder is oddd
 
 ## Bailout rules
 

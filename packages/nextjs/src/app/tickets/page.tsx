@@ -38,8 +38,7 @@ function toTicketData(
 ): TicketData {
   const multiplier = Number(t.multiplierX1e6) / PPM;
   const effectiveStake = t.stake - t.feePaid;
-  const rawPenalty = Number(t.cashoutPenaltyBps);
-  const penaltyBps = Number.isFinite(rawPenalty) ? rawPenalty : BASE_CASHOUT_PENALTY_BPS;
+  const penaltyBps = BASE_CASHOUT_PENALTY_BPS;
   const wonProbsPPM: number[] = [];
   let unresolvedCount = 0;
 
@@ -71,7 +70,7 @@ function toTicketData(
     };
   });
 
-  const cashoutValue = t.payoutMode === 2
+  const cashoutValue = unresolvedCount > 0
     ? computeClientCashoutValue(effectiveStake, wonProbsPPM, unresolvedCount, legs.length, t.potentialPayout, penaltyBps)
     : undefined;
 
@@ -83,9 +82,6 @@ function toTicketData(
     legs,
     status: mapStatus(t.status),
     createdAt: Number(t.createdAt),
-    payoutMode: t.payoutMode,
-    claimedAmount: t.claimedAmount,
-    cashoutPenaltyBps: penaltyBps,
     cashoutValue,
   };
 }

@@ -111,7 +111,9 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Any tests verifying E2E i.e. calling an action with typescript to verify the frontend works should be done in the nextjs folder structure
 2) Too many .env files, commit to one root level .env if possible
 3) Makefile too hard to read
-4) The /scripts folder is oddd
+4) The /scripts folder is odd
+5) Modularize the deploy scripts into their own file
+6) write solidity test for all deploy scripts? - bit overkill, but maybe I'll let haiku step up to the plate just to see what happens
 
 ## Bailout rules
 

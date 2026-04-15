@@ -105,15 +105,41 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
  - ✅ COMPLETE Implement categories using the category pulled back from polymarket (Gamma event `category`/`tags` threaded through CuratedMarket)
  - ✅ COMPLETE Ensure odds are being built from the the correct number (now sourced from Gamma `outcomePrices` instead of per-token CLOB mid; midToPpm clamp widened to 1–99%)
 
-## Structure
-1) The foundry/e2e folder need not exist
-- All solidity tests and scripting can be done within foundry's framework
-- Any tests verifying E2E i.e. calling an action with typescript to verify the frontend works should be done in the nextjs folder structure
-2) Too many .env files, commit to one root level .env if possible
-3) Makefile too hard to read
-4) The /scripts folder is odd
-5) Modularize the deploy scripts into their own file
-6) write solidity test for all deploy scripts? - bit overkill, but maybe I'll let haiku step up to the plate just to see what happens
+## Structure Changes — Round 2 ✅ COMPLETE
+
+1) ✅ **Deleted `scripts/gate.sh`.** `pnpm gate` is the single entrypoint; no shell wrapper left behind.
+2) ✅ **HelperConfig pattern (mirrored from `eth-stable-ptf`).** New `packages/foundry/script/HelperConfig.s.sol` centralizes per-chain config: USDC address, bootstrap window, optimistic oracle liveness/bond, Uniswap NFPM/WETH, deployer key. `NetworkConfig` keyed by `block.chainid` (31337 / 84532 / 8453). `Deploy.s.sol` now calls `helperConfig.getConfig()` instead of reading envs inline. `DemoSeed.s.sol` uses the same helper so its LP broadcasts come from whichever key Deploy used. Reverts `HelperConfig__InvalidChainId` on unknown chains.
+3) ✅ **Deploy flow: shell → pure forge + pnpm.** Deleted `scripts/deploy-local.sh`, `scripts/deploy-sepolia.sh`, `scripts/demo-seed.sh`, `scripts/fund-wallet.sh`. Replaced with pure `forge script` invocations wrapped in `dotenv-cli`:
+   - `pnpm deploy:local` → `forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast` + `tsx scripts/sync-env.ts`
+   - `pnpm deploy:sepolia` → same against `base-sepolia` RPC + `tsx scripts/sync-env.ts sepolia`
+   - `pnpm fund-wallet WALLET=0x... AMOUNT=N` → new `script/FundWallet.s.sol` (mints MockUSDC on Sepolia)
+   - `pnpm demo:seed` / `demo:seed:sepolia` → new `script/DemoSeed.s.sol` (LP + 5 legs; ticket creation omitted because the JIT engine now requires signed quotes — use the frontend or `scripts/risk-agent.ts`)
+4) ✅ **`SetTrustedSigner.s.sol` is composable.** Added `run(uint256 ownerKey, address engineAddress)` so `Deploy.s.sol` can pass its own `cfg.deployerKey` (fixes OwnableUnauthorizedAccount when the deploy key and `DEPLOYER_PRIVATE_KEY` env differ on local anvil). Standalone `run()` still reads env.
+5) ✅ **294/294 forge tests pass** after the refactor. `pnpm deploy:local` + `pnpm demo:seed` verified end-to-end against a fresh Anvil.
+6) ✅ **Guiding question applied: "can this be a solidity script called via pnpm?"** Remaining `/scripts/` entries are kept because they genuinely aren't solidity:
+   - `sync-env.ts` — writes `.env.local`, needs Node FS + string munging
+   - `settler-bot.ts` / `risk-agent.ts` / `demo-autopilot.ts` — long-running workers that call the Next.js API and read DB state
+   - `bootstrap.sh` / `dev.sh` / `dev-stop.sh` — process orchestration (installs, multi-daemon dev loop)
+   - `lib/env.ts`, `lib/builder-code.ts` — shared helpers for the above
+
+## Structure Changes ✅ COMPLETE
+1) ✅ **Deleted `packages/e2e/`.** CI job removed, CLAUDE.md updated. The five vitest specs (deploy, registration, api-consistency, lifecycle, vault-flow) were Anvil-backed smoke tests redundant with forge's unit/fuzz/invariant coverage and the Next.js API tests. If we want browser-level E2E later, that belongs in `packages/nextjs/` with Playwright.
+2) ✅ **Replaced `scripts/sync-env.sh` with `scripts/sync-env.ts`.** Reads `packages/foundry/broadcast/Deploy.s.sol/<chainId>/run-latest.json` directly. Removed `HOUSE_VAULT_ADDRESS / PARLAY_ENGINE_ADDRESS / LEG_REGISTRY_ADDRESS / MOCK_USDC_ADDRESS / NEXT_PUBLIC_*_ADDRESS` from root `.env` + `.env.example`. Caveat on original note: `StdJson.sol` is Solidity-only; a tsx script is the right tool to write `.env.local`. Output format preserved so Next.js reads are unchanged.
+3) ✅ **Makefile → pnpm scripts.** Deleted `Makefile`. All 20+ targets now live in root `package.json` (`pnpm dev / deploy:local / gate / test / fund-wallet / ...`). Multi-process dev startup moved to `scripts/dev.sh`. Sepolia/fund-wallet logic moved to `scripts/deploy-sepolia.sh` and `scripts/fund-wallet.sh`. Tab-indent fragility and the duplicate `.PHONY` line are gone.
+4) ✅ **Env consolidation.** Root `.env` is now the single hand-edited source of truth. `sync-env.ts` reads secrets (`DATABASE_URL`, `CRON_SECRET`, `DEPLOYER_PRIVATE_KEY`, `QUOTE_SIGNER_PRIVATE_KEY`, `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL`, `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`) from root `.env` and forwards them into the auto-generated `packages/nextjs/.env.local`. Deleted `packages/nextjs/.env.example` (merged into root). Next.js still needs `.env.local` in its own dir (framework constraint) but it's now purely derived — never hand-edited.
+5) ✅ **Modularized `Deploy.s.sol`.** Split into `script/steps/CoreStep.sol` (USDC/vault/registry/oracles/engine + wiring), `LockVaultStep.sol`, `YieldStep.sol`, `FaucetStep.sol`. Top-level `Deploy.s.sol` now inherits all four abstract step contracts and composes them inside one broadcast. 283/283 forge tests still green. No deploy-script solidity tests added (overkill as you called out).
+6) ✅ **`/scripts/` folder — what's in it (kept, not bloat):**
+   - **`bootstrap.sh`** — one-shot dev-environment installer: node, pnpm, foundry, forge deps. Used on first clone.
+   - **`demo-autopilot.ts`** — background worker for demos: watches for active tickets, resolves their legs one at a time with a configurable delay, auto-settles. `pnpm demo:autopilot`.
+   - **`demo-seed.sh`** — seeds a deployed stack with 5 legs, LP deposits, and 4 sample tickets across 2 wallets in Classic/Progressive/EarlyCashout modes. `pnpm demo:seed`.
+   - **`gate.sh`** — old CI-gate wrapper (pre-pnpm-scripts). Safe to delete once `pnpm gate` replaces it everywhere; currently kept for anyone with muscle memory.
+   - **`risk-agent.ts`** — autonomous betting agent. Discovers markets, builds candidate parlays, requests x402-paid AI risk assessment, makes sized decisions. `pnpm risk-agent` / `pnpm risk-agent:dry`.
+   - **`settler-bot.ts`** — permissionless ticket settlement loop. Polls for tickets whose legs are all oracle-resolved and calls `settleTicket()`. Runs as a cron on Vercel or `pnpm settler:sepolia` locally.
+   - **`sync-env.ts`** — (new) reads forge broadcast JSON, writes `packages/nextjs/.env.local`. Replaces `sync-env.sh`.
+   - **`lib/env.ts`** — shared env loader for the agent scripts (reads `.env.local`).
+   - **`lib/builder-code.ts`** — ERC-8021 builder-code attribution suffix for agent transactions (Node mirror of the frontend's `builder-code.ts`).
+   - **New shell helpers** (`dev.sh`, `dev-stop.sh`, `deploy-local.sh`, `deploy-sepolia.sh`, `fund-wallet.sh`) — extracted from the old Makefile so `package.json` scripts stay readable.
+
 
 ## Bailout rules
 

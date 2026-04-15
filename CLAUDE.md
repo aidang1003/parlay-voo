@@ -13,7 +13,7 @@ ParlayVoo (protocol name: ParlayCity) -- Crash-Parlay AMM on Base. Users buy 2-5
 5. **No owner drains.** Owner manages parameters, never user/LP funds.
 6. **Fee arithmetic in BPS (1e4).** Probability in PPM (1e6). Never mix.
 7. **SafeERC20 on ALL token ops.** No raw `.transfer()`.
-8. **`make gate` before commit.** Gate = test-all + typecheck + build.
+8. **`pnpm gate` before commit.** Gate = test + typecheck + build.
 
 ## Monorepo Layout
 
@@ -28,23 +28,23 @@ packages/shared/       Shared math, types, schemas (consumed by nextjs + scripts
 ## Commands
 
 ```bash
-make setup             # pnpm install + forge install
-make dev               # Full stack: anvil + deploy + web (3000)
-make dev-stop          # Tear down dev services
-make chain             # Anvil only (8545)
-make deploy-local      # Deploy contracts to Anvil, sync .env.local
+pnpm setup                    # pnpm install + forge install
+pnpm dev                      # Full stack: anvil + deploy + web (3000)
+pnpm dev:stop                 # Tear down dev services
+pnpm chain                    # Anvil only (8545)
+pnpm deploy:local             # Deploy to Anvil, sync .env.local
 
-make test-contracts    # forge test -vvv
-make test-web          # vitest (nextjs)
-make test-all          # All tests
-make gate              # test-all + typecheck + build (CI quality gate)
-make typecheck         # tsc --noEmit
-make build             # next build
-make clean             # forge clean + .next
+pnpm test:contracts           # forge test -vvv
+pnpm test:web                 # vitest (nextjs)
+pnpm test                     # Both
+pnpm gate                     # test + typecheck + build (CI quality gate)
+pnpm typecheck                # tsc --noEmit
+pnpm build                    # next build
+pnpm clean                    # forge clean + .next
 
-make deploy-sepolia          # Deploy to Base Sepolia
-make deploy-sepolia-full     # Deploy + register legs + seed
-make fund-wallet WALLET=0x...  # Mint MockUSDC on Base Sepolia
+pnpm deploy:sepolia           # Deploy to Base Sepolia
+pnpm demo:seed:sepolia        # Seed LP + sample legs on Sepolia
+pnpm fund-wallet 0x... 1000   # Mint MockUSDC on Base Sepolia
 ```
 
 ## Key Files (read these first)
@@ -84,12 +84,19 @@ make fund-wallet WALLET=0x...  # Mint MockUSDC on Base Sepolia
 - `seed.ts` -- static seed markets (IDs 1-21, 7 categories)
 
 **Scripts (`scripts/`):**
-- `market-agent.ts` -- autonomous NBA market discovery + on-chain registration + game resolution
 - `risk-agent.ts` -- autonomous betting agent (Kelly criterion sizing, 0G AI inference)
 - `settler-bot.ts` -- permissionless ticket settlement loop
-- `register-legs.ts` -- register seed catalog legs on-chain
-- `sync-env.sh` -- extract deployed addresses to packages/nextjs/.env.local
+- `demo-autopilot.ts` -- auto-resolves legs on a running ticket for demos
+- `sync-env.ts` -- read forge broadcast JSON, write packages/nextjs/.env.local
+- `dev.sh` / `dev-stop.sh` / `bootstrap.sh` -- process orchestration
 - `lib/env.ts` -- shared env loading for scripts (reads .env.local)
+
+**Foundry scripts (`packages/foundry/script/`):**
+- `HelperConfig.s.sol` -- per-chain config (USDC, oracle params, deployer key)
+- `Deploy.s.sol` -- composes `steps/*` under one broadcast; also runs SetTrustedSigner
+- `DemoSeed.s.sol` -- LP deposits + 5 sample legs (no ticket creation; JIT engine needs signed quotes)
+- `FundWallet.s.sol` -- mint MockUSDC on Sepolia
+- `SetTrustedSigner.s.sol` -- register JIT quote signer; composable + standalone
 
 ## Architecture
 
@@ -130,7 +137,6 @@ packages/foundry/test/fuzz/        # Fuzz tests (vault, math)
 packages/foundry/test/invariant/   # Invariant tests (totalReserved <= totalAssets)
 packages/foundry/test/Integration.t.sol
 packages/nextjs/src/*/__tests__/   # Frontend + API tests (vitest)
-packages/e2e/test/                 # E2E (Anvil-backed): deploy, registration, consistency, lifecycle, vault
 ```
 
 ## Tech Stack (versions that matter)

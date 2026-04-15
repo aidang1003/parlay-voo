@@ -4,16 +4,17 @@
 
 ```bash
 git clone <repo>
-cd hackathon
-make setup
-# Terminal 1:
-make chain
-# Terminal 2:
-make deploy-local
-# Terminal 3:
-make dev-web
-# Terminal 4 (optional):
-make dev-services
+cd parlay-voo
+pnpm setup
+pnpm dev              # anvil + deploy + web on :3000 (single command)
+```
+
+Or, for manual control:
+
+```bash
+pnpm chain            # terminal 1: anvil on :8545
+pnpm deploy:local     # terminal 2: deploy + sync .env.local
+pnpm --filter web dev # terminal 3: frontend on :3000
 ```
 
 ## Common Operations
@@ -62,8 +63,9 @@ Leg's betting window has closed. Create legs with future cutoff times.
 ### Anvil reset
 ```bash
 # Kill anvil and restart
-make chain
-make deploy-local
+pnpm dev:stop
+pnpm chain
+pnpm deploy:local
 ```
 
 ## Monitoring

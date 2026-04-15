@@ -70,6 +70,11 @@ interface StoredSelection {
   outcomeChoice: number;
 }
 
+// Kelly AI Risk Advisor — calls /api/premium/agent-quote to return Kelly-sized
+// stake suggestions, EV/edge metrics, and an optional 0G AI insight.
+// DISABLED: no longer called by the application. Kept here so we can re-enable
+// the feature later without rebuilding the typings/validator from scratch.
+/*
 interface RiskAdviceData {
   action: string;
   suggestedStake: string;
@@ -85,6 +90,7 @@ interface RiskAdviceData {
   warnings: string[];
   aiInsight?: { analysis: string; model: string; provider: string; verified: boolean };
 }
+*/
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -116,7 +122,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 const SESSION_KEYS = {
   legs: "parlay:selectedLegs",
   stake: "parlay:stake",
-  payoutMode: "parlay:payoutMode",
   category: "parlay:category",
 } as const;
 
@@ -179,7 +184,9 @@ function restoreSelections(stored: StoredSelection[], allLegs: DisplayLeg[]): Se
   return result;
 }
 
-/** Validate that a parsed risk response has the required shape (lesson #22: exhaustive). */
+// Risk advisor response validator. DISABLED along with the Kelly AI Risk
+// Advisor feature — no longer called by the application.
+/*
 function isValidRiskResponse(data: unknown): data is RiskAdviceData {
   if (!data || typeof data !== "object") return false;
   const d = data as Record<string, unknown>;
@@ -199,13 +206,13 @@ function isValidRiskResponse(data: unknown): data is RiskAdviceData {
     Array.isArray(d.warnings) &&
     d.warnings.every((w: unknown) => typeof w === "string");
   if (!baseValid) return false;
-  // aiInsight is optional; validate shape if present
   if (d.aiInsight !== undefined && d.aiInsight !== null) {
     const ai = d.aiInsight as Record<string, unknown>;
     if (typeof ai.analysis !== "string" || typeof ai.model !== "string" || typeof ai.provider !== "string") return false;
   }
   return true;
 }
+*/
 
 // ── Component ────────────────────────────────────────────────────────────
 
@@ -225,45 +232,13 @@ export function ParlayBuilder() {
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useSessionState<string>(SESSION_KEYS.category, "all");
 
-  const [legMapping, setLegMapping] = useState<Record<string, number>>({});
-  const [onChainLegIds, setOnChainLegIds] = useState<Set<bigint>>(new Set());
 
   // ── Input state (persisted to sessionStorage) ──────────────────────────
 
   const [selectedLegs, setSelectedLegs] = useState<SelectedLeg[]>([]);
   const [stake, setStake] = useSessionState<string>(SESSION_KEYS.stake, "");
-  const [payoutMode, setPayoutMode] = useSessionState<0 | 1 | 2>(SESSION_KEYS.payoutMode, 0);
   const [mounted, setMounted] = useState(false);
 
-  // Fetch leg mapping (dynamic API, falls back to static file)
-  useEffect(() => {
-    (async () => {
-      try {
-        // Try dynamic API first (auto-discovers newly registered legs)
-        let r = await fetch("/api/leg-mapping");
-        if (!r?.ok) {
-          // Fall back to static file
-          r = await fetch("/leg-mapping.json");
-        }
-        if (!r?.ok) return;
-        const data = await r.json();
-        if (data?.legs && typeof data.legs === "object") {
-          const expectedChainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "31337");
-          if (data.chainId && data.chainId !== expectedChainId) {
-            console.warn(`[leg-mapping] Chain mismatch: mapping=${data.chainId}, app=${expectedChainId}. Ignoring.`);
-            return;
-          }
-          setLegMapping(data.legs);
-          const catalogIds = new Set<bigint>(
-            Object.keys(data.legs as Record<string, number>).map((k) => BigInt(k)),
-          );
-          setOnChainLegIds(catalogIds);
-        }
-      } catch {
-        /* leg-mapping not available */
-      }
-    })();
-  }, []);
 
   // Fetch markets from API
   useEffect(() => {
@@ -346,21 +321,23 @@ export function ParlayBuilder() {
   }, [mounted, selectedLegs]);
 
   // ── Risk advisor state ─────────────────────────────────────────────────
-
+  // Kelly AI Risk Advisor state + stale-data reset.
+  // DISABLED: no longer called by the application. Kept for future re-enable.
+  /*
   const [riskAdvice, setRiskAdvice] = useState<RiskAdviceData | null>(null);
   const [riskLoading, setRiskLoading] = useState(false);
   const [riskError, setRiskError] = useState<string | null>(null);
   const riskFetchIdRef = useRef(0);
   const [aiInsightExpanded, setAiInsightExpanded] = useState(false);
 
-  // Clear stale risk data when inputs change
   useEffect(() => {
     setRiskAdvice(null);
     setRiskError(null);
     setRiskLoading(false);
     setAiInsightExpanded(false);
     riskFetchIdRef.current++;
-  }, [selectedLegs, stake, payoutMode]);
+  }, [selectedLegs, stake]);
+  */
 
   // ── Derived values ─────────────────────────────────────────────────────
 
@@ -405,25 +382,17 @@ export function ParlayBuilder() {
 
   const freeLiquidityNum = freeLiquidity !== undefined ? parseFloat(formatUnits(freeLiquidity, 6)) : 0;
   const maxPayoutNum = maxPayout !== undefined ? parseFloat(formatUnits(maxPayout, 6)) : 0;
-  const insufficientLiquidity = potentialPayout > 0 && potentialPayout > freeLiquidityNum;
+  // Disabled: vault liquidity is no longer gated in the UI so users can explore the
+  // builder before depositing. The contract still reverts if the vault can't reserve
+  // the payout, so the real check remains on-chain.
+  const insufficientLiquidity = false;
   const exceedsMaxPayout = potentialPayout > 0 && maxPayout !== undefined && potentialPayout > maxPayoutNum;
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
   const insufficientBalance = stakeNum > 0 && usdcBalance !== undefined && stakeNum > usdcBalanceNum;
 
-  /** Pick the on-chain leg id corresponding to the user's side selection.
-   *  outcomeChoice 1 → yes-side (leg.id); 2 → no-side (leg.noId). */
-  const pickedLegId = (s: SelectedLeg): bigint | undefined =>
-    s.outcomeChoice === 2 ? s.leg.noId : s.leg.id;
-
-  const allSelectedOnChain = selectedLegs.every((s) => {
-    const id = pickedLegId(s);
-    return id !== undefined && (s.leg.onChain || onChainLegIds.has(id));
-  });
-
   const canBuy =
     mounted &&
     isConnected &&
-    allSelectedOnChain &&
     selectedLegs.length >= PARLAY_CONFIG.minLegs &&
     selectedLegs.length <= effectiveMaxLegs &&
     stakeNum >= effectiveMinStake &&
@@ -431,7 +400,7 @@ export function ParlayBuilder() {
     !exceedsMaxPayout &&
     !insufficientBalance;
 
-  const vaultEmpty = mounted && freeLiquidity !== undefined && freeLiquidity === 0n;
+  const vaultEmpty = false;
 
   // ── Handlers ───────────────────────────────────────────────────────────
 
@@ -457,20 +426,23 @@ export function ParlayBuilder() {
 
   const handleBuy = async () => {
     if (!canBuy) return;
-    // Always send outcome=1: the correct on-chain leg id (yes-token or no-token)
-    // is selected via pickedLegId, so the user's side choice is encoded in
-    // which leg we buy, not via the outcomes array.
-    const legIds = selectedLegs.map((s) => pickedLegId(s) ?? s.leg.id);
-    const outcomes = selectedLegs.map(() => 1);
-    const success = await buyTicket(legIds, outcomes, stakeNum, payoutMode);
+    const quoteLegs = selectedLegs.map((s) => ({
+      sourceRef: s.leg.sourceRef,
+      side: (s.outcomeChoice === 2 ? "no" : "yes") as "yes" | "no",
+    }));
+    const success = await buyTicket(quoteLegs, stakeNum);
     if (success) {
       setSelectedLegs([]);
       setStake("");
-      setPayoutMode(0);
-      setRiskAdvice(null);
     }
   };
 
+  // Kelly AI Risk Advisor fetch + 600ms debounced auto-trigger.
+  // Posts the current parlay to /api/premium/agent-quote and renders Kelly
+  // sizing, EV/edge, and optional 0G AI insight in the builder.
+  // DISABLED: no longer called by the application. Retained so we can turn
+  // the feature back on later without re-deriving the fetch/validation logic.
+  /*
   const fetchRiskAdvice = useCallback(async () => {
     const localFetchId = ++riskFetchIdRef.current;
     setRiskLoading(true);
@@ -507,7 +479,6 @@ export function ParlayBuilder() {
       const raw: unknown = await res.json();
       if (localFetchId !== riskFetchIdRef.current) return;
 
-      // Agent-quote returns { quote, risk, aiInsight? }
       const envelope = raw as Record<string, unknown>;
       const riskObj = envelope.risk;
       if (!riskObj || typeof riskObj !== "object") {
@@ -534,11 +505,9 @@ export function ParlayBuilder() {
     if (localFetchId === riskFetchIdRef.current) setRiskLoading(false);
   }, [selectedLegs, stake, usdcBalance]);
 
-  // Stable ref for auto-trigger (avoids re-debouncing on usdcBalance polls)
   const fetchRiskAdviceRef = useRef(fetchRiskAdvice);
   fetchRiskAdviceRef.current = fetchRiskAdvice;
 
-  // Auto-trigger risk analysis when conditions are met (600ms debounce)
   useEffect(() => {
     if (selectedLegs.length < PARLAY_CONFIG.minLegs || !(parseFloat(stake) > 0)) return;
     setRiskLoading(true);
@@ -547,7 +516,8 @@ export function ParlayBuilder() {
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLegs, stake, payoutMode]);
+  }, [selectedLegs, stake]);
+  */
 
   // ── Derived display ────────────────────────────────────────────────────
 
@@ -566,7 +536,6 @@ export function ParlayBuilder() {
     if (isSuccess) return "Ticket Bought!";
     if (vaultEmpty) return "No Vault Liquidity";
     if (selectedLegs.length < PARLAY_CONFIG.minLegs) return `Select at least ${PARLAY_CONFIG.minLegs} legs`;
-    if (!allSelectedOnChain) return "Some legs not yet on-chain";
     if (insufficientBalance) return "Insufficient USDC Balance";
     if (exceedsMaxPayout) return `Max Payout $${maxPayoutNum.toFixed(0)}`;
     if (insufficientLiquidity) return "Insufficient Vault Liquidity";
@@ -824,8 +793,6 @@ export function ParlayBuilder() {
             </div>
           </div>
 
-          {/* Payout mode selector hidden: payoutMode is fixed to Classic (0) via initial state */}
-
           {/* Payout breakdown */}
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-400">
@@ -846,134 +813,12 @@ export function ParlayBuilder() {
             </div>
           </div>
 
-          {/* Kelly AI Risk Advisor */}
-          {selectedLegs.length >= PARLAY_CONFIG.minLegs && stakeNum > 0 && (
-            <div className="space-y-2" data-testid="risk-advisor">
-              {/* Loading skeleton */}
-              {riskLoading && (
-                <div className="space-y-2 rounded-lg border border-brand-purple-1/20 bg-brand-purple/5 p-3 animate-pulse" data-testid="risk-loading">
-                  <div className="flex items-center justify-between">
-                    <div className="h-4 w-24 rounded bg-white/10" />
-                    <div className="h-4 w-16 rounded bg-white/10" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="h-8 rounded bg-white/10" />
-                    <div className="h-8 rounded bg-white/10" />
-                    <div className="h-8 rounded bg-white/10" />
-                    <div className="h-8 rounded bg-white/10" />
-                  </div>
-                  <div className="h-3 w-3/4 rounded bg-white/5" />
-                </div>
-              )}
-
-              {/* Error with retry */}
-              {riskError && !riskLoading && (
-                <div className="rounded-lg border border-neon-red/20 bg-neon-red/5 px-3 py-2 text-xs text-neon-red animate-fade-in">
-                  {riskError}
-                  <button onClick={fetchRiskAdvice} className="ml-2 underline hover:no-underline">
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              {/* Rich results card */}
-              {riskAdvice && !riskLoading && (
-                <div className={`rounded-lg border px-3 py-3 text-xs animate-fade-in ${
-                  riskAdvice.action === "BUY" ? "border-neon-green/20 bg-neon-green/5" :
-                  riskAdvice.action === "REDUCE_STAKE" ? "border-yellow-500/20 bg-yellow-500/5" :
-                  "border-neon-red/20 bg-neon-red/5"
-                }`}>
-                  {/* Header: action badge + refresh */}
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                      riskAdvice.action === "BUY" ? "bg-neon-green/20 text-neon-green" :
-                      riskAdvice.action === "REDUCE_STAKE" ? "bg-yellow-500/20 text-yellow-400" :
-                      "bg-neon-red/20 text-neon-red"
-                    }`}>
-                      {riskAdvice.action}
-                    </span>
-                    <button
-                      onClick={fetchRiskAdvice}
-                      disabled={riskLoading}
-                      className="text-[10px] text-gray-500 hover:text-gray-300 disabled:opacity-50"
-                    >
-                      Refresh
-                    </button>
-                  </div>
-
-                  {/* Stats grid */}
-                  <div className="mb-2 grid grid-cols-2 gap-x-4 gap-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Kelly</span>
-                      <span className="font-semibold text-white">{(riskAdvice.kellyFraction * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Win Prob</span>
-                      <span className="font-semibold text-white">{(riskAdvice.winProbability * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">EV</span>
-                      <span className={`font-semibold ${riskAdvice.expectedValue >= 0 ? "text-neon-green" : "text-neon-red"}`}>
-                        {riskAdvice.expectedValue >= 0 ? "+" : ""}{riskAdvice.expectedValue.toFixed(2)} USDC
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Edge</span>
-                      <span className="font-semibold text-white">{riskAdvice.edgeBps}bps</span>
-                    </div>
-                  </div>
-
-                  {/* Reasoning */}
-                  <p className="mb-1.5 text-gray-300">{riskAdvice.reasoning}</p>
-
-                  {/* Warnings */}
-                  {riskAdvice.warnings.length > 0 && (
-                    <div className="mb-1.5 space-y-0.5">
-                      {riskAdvice.warnings.map((w, i) => (
-                        <p key={i} className="text-yellow-400/80">! {w}</p>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Suggested stake */}
-                  {riskAdvice.suggestedStake && riskAdvice.suggestedStake !== stake && (
-                    <button
-                      onClick={() => setStake(sanitizeNumericInput(riskAdvice!.suggestedStake))}
-                      className="mb-1.5 rounded bg-brand-pink/20 px-2 py-0.5 text-brand-pink hover:bg-brand-pink/30"
-                    >
-                      Use suggested: ${riskAdvice.suggestedStake}
-                    </button>
-                  )}
-
-                  {/* AI Insight (collapsible, from 0G) */}
-                  {riskAdvice.aiInsight && (
-                    <div className="mt-2 border-t border-white/5 pt-2">
-                      <button
-                        onClick={() => setAiInsightExpanded(!aiInsightExpanded)}
-                        className="flex w-full items-center justify-between text-[10px] text-gray-500 hover:text-gray-300"
-                        data-testid="ai-insight-toggle"
-                      >
-                        <span>AI Insight ({riskAdvice.aiInsight.provider})</span>
-                        <span>{aiInsightExpanded ? "\u2212" : "+"}</span>
-                      </button>
-                      {aiInsightExpanded && (
-                        <p className="mt-1 text-[11px] leading-relaxed text-gray-400" data-testid="ai-insight-content">
-                          {riskAdvice.aiInsight.analysis}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Off-chain warning */}
-          {selectedLegs.length > 0 && !allSelectedOnChain && (
-            <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-400">
-              Some selected legs are off-chain (analysis only). Remove them to buy a ticket, or use AI Risk Analysis to evaluate the parlay.
-            </div>
-          )}
+          {/* Kelly AI Risk Advisor UI — rendered the risk-advisor card
+              (action badge, Kelly/EV/edge stats, reasoning, suggested stake,
+              and collapsible 0G AI insight) whenever the parlay had enough
+              legs and a positive stake. DISABLED: no longer rendered by the
+              application. The corresponding state and fetch logic above is
+              commented out but preserved so this UI can be re-enabled later. */}
 
           {/* Buy button */}
           <button

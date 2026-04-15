@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
 import {HouseVault} from "../src/core/HouseVault.sol";
 import {LegRegistry} from "../src/core/LegRegistry.sol";
@@ -13,9 +12,10 @@ import {IYieldAdapter} from "../src/interfaces/IYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LegStatus} from "../src/interfaces/IOracleAdapter.sol";
 import {FeeRouterSetup} from "./helpers/FeeRouterSetup.sol";
+import {SignedBuy} from "./helpers/SignedBuy.sol";
 
 /// @notice Full lifecycle integration test: deploy, deposit, bet, settle, claim, withdraw.
-contract IntegrationTest is FeeRouterSetup {
+contract IntegrationTest is FeeRouterSetup, SignedBuy {
     MockUSDC usdc;
     HouseVault vault;
     LegRegistry registry;
@@ -28,6 +28,10 @@ contract IntegrationTest is FeeRouterSetup {
     address lp = makeAddr("lp");
     address bettor = makeAddr("bettor");
 
+    uint256 constant CUTOFF = 200_000;
+    uint256 constant RESOLVE = 300_000;
+    uint256 constant DEADLINE = 150_000;
+
     function setUp() public {
         vm.warp(100_000);
 
@@ -39,10 +43,11 @@ contract IntegrationTest is FeeRouterSetup {
         yieldAdapter = new MockYieldAdapter(IERC20(address(usdc)), address(vault));
 
         vault.setEngine(address(engine));
+        registry.setEngine(address(engine));
+        engine.setTrustedQuoteSigner(_signerAddr());
         lockVault = _wireFeeRouter(vault);
         vault.setYieldAdapter(IYieldAdapter(address(yieldAdapter)));
 
-        // Fund LP: deposit 10k USDC to vault
         usdc.mint(lp, 10_000e6);
         vm.startPrank(lp);
         usdc.approve(address(vault), type(uint256).max);
@@ -50,45 +55,40 @@ contract IntegrationTest is FeeRouterSetup {
         IERC20(address(vault)).approve(address(lockVault), type(uint256).max);
         vm.stopPrank();
 
-        // Fund bettor
         usdc.mint(bettor, 1_000e6);
         vm.prank(bettor);
         usdc.approve(address(engine), type(uint256).max);
-
-        // Create 3 legs
-        registry.createLeg("ETH > 5k?", "src", 200_000, 300_000, address(oracle), 500_000);
-        registry.createLeg("BTC > 150k?", "src", 200_000, 300_000, address(oracle), 250_000);
-        registry.createLeg("SOL > 300?", "src", 200_000, 300_000, address(oracle), 200_000);
     }
 
-    // ── Lifecycle 1: Win and Claim ────────────────────────────────────────
+    function _twoLegs() internal view returns (ParlayEngine.SourceLeg[] memory l) {
+        l = new ParlayEngine.SourceLeg[](2);
+        l[0] = _mkLeg("src:eth", bytes32(uint256(1)), 500_000, address(oracle), CUTOFF, RESOLVE);
+        l[1] = _mkLeg("src:btc", bytes32(uint256(1)), 250_000, address(oracle), CUTOFF, RESOLVE);
+    }
+
+    function _threeLegs() internal view returns (ParlayEngine.SourceLeg[] memory l) {
+        l = new ParlayEngine.SourceLeg[](3);
+        l[0] = _mkLeg("src:eth", bytes32(uint256(1)), 500_000, address(oracle), CUTOFF, RESOLVE);
+        l[1] = _mkLeg("src:btc", bytes32(uint256(1)), 250_000, address(oracle), CUTOFF, RESOLVE);
+        l[2] = _mkLeg("src:sol", bytes32(uint256(1)), 200_000, address(oracle), CUTOFF, RESOLVE);
+    }
+
+    // ── Lifecycle 1: Win and Claim ───────────────────────────────────────
 
     function test_lifecycle_winAndClaim() public {
         uint256 vaultBefore = vault.totalAssets();
 
-        // Buy 2-leg parlay
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(bettor);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
+        uint256 ticketId = _buySigned(engine, bettor, _twoLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertTrue(t.potentialPayout > 0, "payout > 0");
         assertTrue(vault.totalReserved() > 0, "reserved > 0");
 
-        // Resolve both legs as won
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
 
         engine.settleTicket(ticketId);
         assertEq(uint8(engine.getTicket(ticketId).status), uint8(ParlayEngine.TicketStatus.Won));
 
-        // Claim payout
         uint256 bettorBefore = usdc.balanceOf(bettor);
         vm.prank(bettor);
         engine.claimPayout(ticketId);
@@ -96,42 +96,30 @@ contract IntegrationTest is FeeRouterSetup {
         assertEq(usdc.balanceOf(bettor), bettorBefore + t.potentialPayout);
         assertEq(uint8(engine.getTicket(ticketId).status), uint8(ParlayEngine.TicketStatus.Claimed));
 
-        // Vault balance = initial + stake - payout - fees routed out (90% + 5%)
         uint256 feeToLockers = (t.feePaid * 9000) / 10_000;
         uint256 feeToSafety = (t.feePaid * 500) / 10_000;
         assertEq(vault.totalAssets(), vaultBefore + 10e6 - t.potentialPayout - feeToLockers - feeToSafety);
         assertEq(vault.totalReserved(), 0);
 
-        // LP withdraws shares
         uint256 lpShares = vault.balanceOf(lp);
         vm.prank(lp);
         uint256 assets = vault.withdraw(lpShares, lp);
         assertTrue(assets > 0, "LP gets assets back");
     }
 
-    // ── Lifecycle 2: Loss (house wins) ────────────────────────────────────
+    // ── Lifecycle 2: Loss (house wins) ───────────────────────────────────
 
     function test_lifecycle_loss_houseWins() public {
         uint256 vaultBefore = vault.totalAssets();
 
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        uint256 ticketId = _buySigned(engine, bettor, _twoLegs(), 10e6, DEADLINE);
 
-        vm.prank(bettor);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
-        // One leg lost
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Lost, keccak256("no"));
 
         engine.settleTicket(ticketId);
         assertEq(uint8(engine.getTicket(ticketId).status), uint8(ParlayEngine.TicketStatus.Lost));
 
-        // Vault balance increased by stake minus fees routed out (90% + 5%)
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         uint256 feeToLockers = (t.feePaid * 9000) / 10_000;
         uint256 feeToSafety = (t.feePaid * 500) / 10_000;
@@ -139,24 +127,12 @@ contract IntegrationTest is FeeRouterSetup {
         assertEq(vault.totalReserved(), 0);
     }
 
-    // ── Lifecycle 3: Partial void ─────────────────────────────────────────
+    // ── Lifecycle 3: Partial void ────────────────────────────────────────
 
     function test_lifecycle_partialVoid() public {
-        uint256[] memory legs = new uint256[](3);
-        legs[0] = 0;
-        legs[1] = 1;
-        legs[2] = 2;
-        bytes32[] memory outcomes = new bytes32[](3);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-        outcomes[2] = keccak256("yes");
-
-        vm.prank(bettor);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
+        uint256 ticketId = _buySigned(engine, bettor, _threeLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory tBefore = engine.getTicket(ticketId);
 
-        // 2 won, 1 voided
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         oracle.resolve(2, LegStatus.Voided, bytes32(0));
@@ -164,23 +140,14 @@ contract IntegrationTest is FeeRouterSetup {
         engine.settleTicket(ticketId);
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
-        // Should be Won with recalculated (lower) payout
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Won));
         assertTrue(tAfter.potentialPayout <= tBefore.potentialPayout, "payout should decrease or stay same");
     }
 
-    // ── Lifecycle 4: All voided ───────────────────────────────────────────
+    // ── Lifecycle 4: All voided ──────────────────────────────────────────
 
     function test_lifecycle_allVoided() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(bettor);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, bettor, _twoLegs(), 10e6, DEADLINE);
 
         oracle.resolve(0, LegStatus.Voided, bytes32(0));
         oracle.resolve(1, LegStatus.Voided, bytes32(0));
@@ -192,66 +159,44 @@ contract IntegrationTest is FeeRouterSetup {
         assertEq(vault.totalReserved(), 0);
     }
 
-    // ── Lock + Yield Integration ──────────────────────────────────────────
+    // ── Lock + Yield Integration ─────────────────────────────────────────
 
     function test_lockVault_integration() public {
-        // LP locks half their vUSDC
         vm.prank(lp);
         uint256 posId = lockVault.lock(5_000e6, LockVault.LockTier.THIRTY);
 
         assertEq(lockVault.totalLockedShares(), 5_000e6);
         assertEq(vault.balanceOf(address(lockVault)), 5_000e6);
-        assertEq(vault.balanceOf(lp), 5_000e6); // 10k - 5k locked
+        assertEq(vault.balanceOf(lp), 5_000e6);
 
-        // Warp and unlock
         vm.warp(block.timestamp + 31 days);
         vm.prank(lp);
         lockVault.unlock(posId);
 
-        assertEq(vault.balanceOf(lp), 10_000e6); // all back
+        assertEq(vault.balanceOf(lp), 10_000e6);
     }
 
     // ── Lifecycle 5: Fee routing end-to-end ─────────────────────────────
 
     function test_lifecycle_feeRouting_endToEnd() public {
-        address safetyModule = makeAddr("safetyModule");
-
-        // Wire up fee routing
-        vault.setLockVault(lockVault);
-        vault.setSafetyModule(safetyModule);
-        lockVault.setFeeDistributor(address(vault));
-
-        // LP locks vUSDC to be eligible for fee rewards
         vm.prank(lp);
         uint256 posId = lockVault.lock(5_000e6, LockVault.LockTier.THIRTY);
 
-        uint256 vaultBefore = vault.totalAssets();
         uint256 lockVaultUsdcBefore = usdc.balanceOf(address(lockVault));
+        address safetyModule = vault.safetyModule();
 
-        // Bettor buys a ticket
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(bettor);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, bettor, _twoLegs(), 10e6, DEADLINE);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         uint256 feePaid = t.feePaid;
         uint256 feeToLockers = (feePaid * 9000) / 10_000;
         uint256 feeToSafety = (feePaid * 500) / 10_000;
 
-        // Verify fees were routed
-        assertEq(usdc.balanceOf(address(lockVault)) - lockVaultUsdcBefore, feeToLockers, "LockVault got fee share");
-        assertEq(usdc.balanceOf(safetyModule), feeToSafety, "SafetyModule got fee share");
+        assertEq(usdc.balanceOf(address(lockVault)) - lockVaultUsdcBefore, feeToLockers, "LockVault");
+        assertEq(usdc.balanceOf(safetyModule), feeToSafety, "Safety");
 
-        // Solvency invariant holds
-        assertLe(vault.totalReserved(), vault.totalAssets(), "Solvency after fee routing");
+        assertLe(vault.totalReserved(), vault.totalAssets(), "Solvency");
 
-        // Settle as win, claim, verify full flow still works
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         engine.settleTicket(ticketId);
@@ -259,9 +204,8 @@ contract IntegrationTest is FeeRouterSetup {
         uint256 bettorBefore = usdc.balanceOf(bettor);
         vm.prank(bettor);
         engine.claimPayout(ticketId);
-        assertEq(usdc.balanceOf(bettor), bettorBefore + t.potentialPayout, "Bettor gets payout");
+        assertEq(usdc.balanceOf(bettor), bettorBefore + t.potentialPayout, "payout");
 
-        // LP settles rewards and claims fee income
         vm.prank(lp);
         lockVault.settleRewards(posId);
         vm.prank(lp);
@@ -270,23 +214,18 @@ contract IntegrationTest is FeeRouterSetup {
     }
 
     function test_yieldAdapter_integration() public {
-        // Deploy idle funds to yield adapter
         vault.deployIdle(5_000e6);
-        assertEq(vault.totalAssets(), 10_000e6); // unchanged
+        assertEq(vault.totalAssets(), 10_000e6);
         assertEq(vault.localBalance(), 5_000e6);
         assertEq(yieldAdapter.balance(), 5_000e6);
 
-        // Simulate yield
         usdc.mint(owner, 500e6);
         usdc.approve(address(yieldAdapter), 500e6);
         yieldAdapter.simulateYield(500e6);
 
         assertEq(vault.totalAssets(), 10_500e6);
-
-        // Share price increased
         assertTrue(vault.convertToAssets(1e6) > 1e6, "share price > 1");
 
-        // Recall everything
         vault.emergencyRecall();
         assertEq(vault.localBalance(), 10_500e6);
         assertEq(yieldAdapter.balance(), 0);

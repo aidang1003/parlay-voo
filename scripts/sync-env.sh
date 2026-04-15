@@ -73,12 +73,14 @@ ALCHEMY_RPC=""
 DATABASE_URL_VAL=""
 CRON_SECRET_VAL=""
 DEPLOYER_PK_VAL=""
+QUOTE_SIGNER_PK_VAL=""
 if [ -f "$ENV_FILE" ]; then
   WC_ID=$(grep -oP '(?<=NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=).*' "$ENV_FILE" 2>/dev/null || true)
   ALCHEMY_RPC=$(grep -oP '(?<=NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=).*' "$ENV_FILE" 2>/dev/null || true)
   DATABASE_URL_VAL=$(grep -oP '(?<=^DATABASE_URL=).*' "$ENV_FILE" 2>/dev/null || true)
   CRON_SECRET_VAL=$(grep -oP '(?<=^CRON_SECRET=).*' "$ENV_FILE" 2>/dev/null || true)
   DEPLOYER_PK_VAL=$(grep -oP '(?<=^DEPLOYER_PRIVATE_KEY=).*' "$ENV_FILE" 2>/dev/null || true)
+  QUOTE_SIGNER_PK_VAL=$(grep -oP '(?<=^QUOTE_SIGNER_PRIVATE_KEY=).*' "$ENV_FILE" 2>/dev/null || true)
 fi
 
 cat > "$ENV_FILE" <<EOF
@@ -95,6 +97,7 @@ NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=$ALCHEMY_RPC
 DATABASE_URL=$DATABASE_URL_VAL
 CRON_SECRET=$CRON_SECRET_VAL
 DEPLOYER_PRIVATE_KEY=$DEPLOYER_PK_VAL
+QUOTE_SIGNER_PRIVATE_KEY=$QUOTE_SIGNER_PK_VAL
 EOF
 
 echo "Updated $ENV_FILE with deployed addresses (chain $CHAIN_ID):"

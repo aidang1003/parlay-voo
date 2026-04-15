@@ -1,12 +1,13 @@
 /**
- * E2E: Verify leg registration matches seed catalog.
- * Read-only -- no mutations to on-chain state.
+ * E2E: Leg registry is now engine-managed (JIT via buyTicketSigned). Pre-
+ * registration (register-legs.ts + sample legs in Deploy.s.sol) has been
+ * removed, so the registry starts empty and gets populated as users buy.
+ * This test verifies the empty initial state and engine wiring.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { readAddresses, type DeployedAddresses } from "../helpers/addresses";
 import { getPublicClient } from "../helpers/clients";
 import { REGISTRY_ABI } from "../helpers/abis";
-import { SEED_MARKETS } from "@parlaycity/shared";
 
 let addrs: DeployedAddresses;
 let pub: ReturnType<typeof getPublicClient>;
@@ -16,89 +17,22 @@ beforeAll(() => {
   pub = getPublicClient();
 });
 
-function normalize(s: string): string {
-  return s.trim().toLowerCase();
-}
-
-describe("Leg registration", () => {
-  it("legCount matches expected total", async () => {
-    const count = await pub.readContract({
+describe("Leg registry (post-JIT refactor)", () => {
+  it("engine is wired to ParlayEngine", async () => {
+    const engine = await pub.readContract({
       address: addrs.LegRegistry,
       abi: REGISTRY_ABI,
-      functionName: "legCount",
+      functionName: "engine",
     });
-    // 21 seed catalog legs minimum (Deploy.s.sol no longer creates sample legs)
-    expect(count).toBeGreaterThanOrEqual(21n);
+    expect((engine as string).toLowerCase()).toBe(addrs.ParlayEngine.toLowerCase());
   });
 
-  it("each registered seed leg has valid data", async () => {
+  it("legCount may start at zero (legs are created just-in-time at buy)", async () => {
     const count = await pub.readContract({
       address: addrs.LegRegistry,
       abi: REGISTRY_ABI,
       functionName: "legCount",
     });
-
-    // Check all legs (Deploy.s.sol no longer creates sample legs)
-    for (let i = 0n; i < count; i++) {
-      const leg = await pub.readContract({
-        address: addrs.LegRegistry,
-        abi: REGISTRY_ABI,
-        functionName: "getLeg",
-        args: [i],
-      });
-      expect(leg.active).toBe(true);
-      expect(leg.probabilityPPM).toBeGreaterThan(0n);
-      expect(leg.oracleAdapter).not.toBe(
-        "0x0000000000000000000000000000000000000000"
-      );
-    }
-  });
-
-  it("seed leg questions match catalog", async () => {
-    const count = await pub.readContract({
-      address: addrs.LegRegistry,
-      abi: REGISTRY_ABI,
-      functionName: "legCount",
-    });
-
-    // Build map of on-chain questions -> probabilityPPM
-    const onChainLegs = new Map<string, bigint>();
-    for (let i = 0n; i < count; i++) {
-      const leg = await pub.readContract({
-        address: addrs.LegRegistry,
-        abi: REGISTRY_ABI,
-        functionName: "getLeg",
-        args: [i],
-      });
-      onChainLegs.set(normalize(leg.question), leg.probabilityPPM);
-    }
-
-    // Verify every seed leg exists on-chain with matching probability
-    for (const market of SEED_MARKETS) {
-      for (const leg of market.legs) {
-        const key = normalize(leg.question);
-        expect(onChainLegs.has(key)).toBe(true);
-        expect(onChainLegs.get(key)).toBe(BigInt(leg.probabilityPPM));
-      }
-    }
-  });
-
-  it("seed legs have non-zero cutoff times", async () => {
-    const count = await pub.readContract({
-      address: addrs.LegRegistry,
-      abi: REGISTRY_ABI,
-      functionName: "legCount",
-    });
-
-    // Verify all legs have non-zero cutoffs
-    for (let i = 0n; i < count; i++) {
-      const leg = await pub.readContract({
-        address: addrs.LegRegistry,
-        abi: REGISTRY_ABI,
-        functionName: "getLeg",
-        args: [i],
-      });
-      expect(leg.cutoffTime).toBeGreaterThan(0n);
-    }
+    expect(count).toBeGreaterThanOrEqual(0n);
   });
 });

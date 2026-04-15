@@ -1,3 +1,6 @@
+// Hardcoded ABIs should be removed from this at some point
+// Use foundry scripting instead
+
 import { parseAbi } from "viem";
 
 export const USDC_ABI = parseAbi([

@@ -131,13 +131,33 @@ export const HOUSE_VAULT_ABI = [
 
 export const PARLAY_ENGINE_ABI = [
   {
-    name: "buyTicket",
+    name: "buyTicketSigned",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "legIds", type: "uint256[]" },
-      { name: "outcomes", type: "bytes32[]" },
-      { name: "stake", type: "uint256" },
+      {
+        name: "quote",
+        type: "tuple",
+        components: [
+          { name: "buyer", type: "address" },
+          { name: "stake", type: "uint256" },
+          {
+            name: "legs",
+            type: "tuple[]",
+            components: [
+              { name: "sourceRef", type: "string" },
+              { name: "outcome", type: "bytes32" },
+              { name: "probabilityPPM", type: "uint256" },
+              { name: "cutoffTime", type: "uint256" },
+              { name: "earliestResolve", type: "uint256" },
+              { name: "oracleAdapter", type: "address" },
+            ],
+          },
+          { name: "deadline", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
     ],
     outputs: [{ name: "ticketId", type: "uint256" }],
   },
@@ -175,9 +195,6 @@ export const PARLAY_ENGINE_ABI = [
           { name: "mode", type: "uint8" },          // SettlementMode: 0=FAST, 1=OPTIMISTIC
           { name: "status", type: "uint8" },
           { name: "createdAt", type: "uint256" },
-          { name: "payoutMode", type: "uint8" },      // PayoutMode: 0=CLASSIC, 1=PROGRESSIVE, 2=EARLY_CASHOUT
-          { name: "claimedAmount", type: "uint256" },
-          { name: "cashoutPenaltyBps", type: "uint256" },
         ],
       },
     ],
@@ -225,25 +242,6 @@ export const PARLAY_ENGINE_ABI = [
     outputs: [{ name: "", type: "address" }],
   },
   {
-    name: "buyTicketWithMode",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "legIds", type: "uint256[]" },
-      { name: "outcomes", type: "bytes32[]" },
-      { name: "stake", type: "uint256" },
-      { name: "payoutMode", type: "uint8" },
-    ],
-    outputs: [{ name: "ticketId", type: "uint256" }],
-  },
-  {
-    name: "claimProgressive",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "ticketId", type: "uint256" }],
-    outputs: [],
-  },
-  {
     name: "cashoutEarly",
     type: "function",
     stateMutability: "nonpayable",
@@ -265,7 +263,6 @@ export const PARLAY_ENGINE_ABI = [
       { name: "multiplierX1e6", type: "uint256", indexed: false },
       { name: "potentialPayout", type: "uint256", indexed: false },
       { name: "mode", type: "uint8", indexed: false },
-      { name: "payoutMode", type: "uint8", indexed: false },
     ],
   },
 ] as const;

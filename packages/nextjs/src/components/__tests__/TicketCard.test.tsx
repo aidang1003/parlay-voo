@@ -87,7 +87,6 @@ describe("TicketCard", () => {
   it("shows cashout value on button when cashoutValue is provided", () => {
     const ticket = makeTicket({
       status: "Active",
-      payoutMode: 2,
       cashoutValue: 15_500_000n,
       legs: [
         { description: "Leg A", odds: 2.0, outcomeChoice: 1, resolved: true, result: 1 },
@@ -105,7 +104,6 @@ describe("TicketCard", () => {
     });
     const ticket = makeTicket({
       status: "Active",
-      payoutMode: 2,
       cashoutValue: 10_000_000n,
       legs: [
         { description: "Leg A", odds: 2.0, outcomeChoice: 1, resolved: true, result: 1 },

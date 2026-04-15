@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
 import {MockUSDC} from "../../src/MockUSDC.sol";
 import {HouseVault} from "../../src/core/HouseVault.sol";
 import {LegRegistry} from "../../src/core/LegRegistry.sol";
@@ -10,8 +9,9 @@ import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
 import {FeeRouterSetup} from "../helpers/FeeRouterSetup.sol";
+import {SignedBuy} from "../helpers/SignedBuy.sol";
 
-contract ParlayEngineTest is FeeRouterSetup {
+contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
     MockUSDC usdc;
     HouseVault vault;
     LegRegistry registry;
@@ -22,10 +22,12 @@ contract ParlayEngineTest is FeeRouterSetup {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
 
-    uint256 constant BOOTSTRAP_ENDS = 1_000_000; // timestamp
+    uint256 constant BOOTSTRAP_ENDS = 1_000_000;
+    uint256 constant CUTOFF = 600_000;
+    uint256 constant RESOLVE = 700_000;
+    uint256 constant DEADLINE = 550_000;
 
     function setUp() public {
-        // Set block.timestamp before bootstrapEndsAt to test FAST mode
         vm.warp(500_000);
 
         usdc = new MockUSDC();
@@ -35,45 +37,52 @@ contract ParlayEngineTest is FeeRouterSetup {
         engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
 
         vault.setEngine(address(engine));
+        registry.setEngine(address(engine));
+        engine.setTrustedQuoteSigner(_signerAddr());
 
         _wireFeeRouter(vault);
 
-        // Seed vault with liquidity
         usdc.mint(owner, 10_000e6);
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(10_000e6, owner);
 
-        // Fund alice
         usdc.mint(alice, 1_000e6);
         vm.prank(alice);
         usdc.approve(address(engine), type(uint256).max);
-
-        // Create legs: cutoff at ts=600_000, resolve at ts=700_000
-        _createLeg("ETH > $5000?", 500_000); // 50%
-        _createLeg("BTC > $150k?", 250_000); // 25%
-        _createLeg("SOL > $300?", 200_000); // 20%
-        _createLeg("DOGE > $1?", 100_000); // 10%
-        _createLeg("AVAX > $100?", 333_333); // ~33%
-        _createLeg("Extra leg", 500_000); // 50% - legId 5
     }
 
-    function _createLeg(string memory question, uint256 probPPM) internal returns (uint256) {
-        return registry.createLeg(question, "source", 600_000, 700_000, address(oracle), probPPM);
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    function _yesLeg(string memory ref, uint256 ppm) internal view returns (ParlayEngine.SourceLeg memory) {
+        return _mkLeg(ref, bytes32(uint256(1)), ppm, address(oracle), CUTOFF, RESOLVE);
+    }
+
+    function _yesLegCustom(string memory ref, uint256 ppm, uint256 cutoff, uint256 resolve)
+        internal
+        view
+        returns (ParlayEngine.SourceLeg memory)
+    {
+        return _mkLeg(ref, bytes32(uint256(1)), ppm, address(oracle), cutoff, resolve);
+    }
+
+    /// @dev Default 2-leg set (matches legIds 0,1 after first creation).
+    function _twoLegs() internal view returns (ParlayEngine.SourceLeg[] memory legs) {
+        legs = new ParlayEngine.SourceLeg[](2);
+        legs[0] = _yesLeg("leg:eth", 500_000); // 50%
+        legs[1] = _yesLeg("leg:btc", 250_000); // 25%
+    }
+
+    function _threeLegs() internal view returns (ParlayEngine.SourceLeg[] memory legs) {
+        legs = new ParlayEngine.SourceLeg[](3);
+        legs[0] = _yesLeg("leg:eth", 500_000);
+        legs[1] = _yesLeg("leg:btc", 250_000);
+        legs[2] = _yesLeg("leg:sol", 200_000);
     }
 
     // ── Buy Ticket Happy Path ────────────────────────────────────────────
 
     function test_buyTicket_happyPath() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0; // 50%
-        legs[1] = 1; // 25%
-
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(t.buyer, alice);
@@ -83,38 +92,18 @@ contract ParlayEngineTest is FeeRouterSetup {
         assertGt(t.potentialPayout, 0);
         assertGt(t.multiplierX1e6, 0);
         assertGt(t.feePaid, 0);
-
-        // Should be FAST mode (timestamp < bootstrapEndsAt)
         assertEq(uint8(t.mode), uint8(ParlayEngine.SettlementMode.FAST));
-
-        // Ticket should be an NFT owned by alice
         assertEq(engine.ownerOf(ticketId), alice);
     }
 
     function test_buyTicket_optimisticMode() public {
-        // Warp past bootstrap
         vm.warp(BOOTSTRAP_ENDS + 1);
 
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
+        legs[0] = _yesLegCustom("leg:eth2", 500_000, block.timestamp + 1000, block.timestamp + 2000);
+        legs[1] = _yesLegCustom("leg:btc2", 250_000, block.timestamp + 1000, block.timestamp + 2000);
 
-        // Need to re-create legs since cutoff must be in the future
-        uint256 leg0 =
-            registry.createLeg("Q1", "s", block.timestamp + 1000, block.timestamp + 2000, address(oracle), 500_000);
-        uint256 leg1 =
-            registry.createLeg("Q2", "s", block.timestamp + 1000, block.timestamp + 2000, address(oracle), 250_000);
-
-        uint256[] memory newLegs = new uint256[](2);
-        newLegs[0] = leg0;
-        newLegs[1] = leg1;
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(newLegs, outcomes, 10e6);
-
+        uint256 ticketId = _buySigned(engine, alice, legs, 10e6, block.timestamp + 500);
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(uint8(t.mode), uint8(ParlayEngine.SettlementMode.OPTIMISTIC));
     }
@@ -122,101 +111,76 @@ contract ParlayEngineTest is FeeRouterSetup {
     // ── Validations ──────────────────────────────────────────────────────
 
     function test_buyTicket_revertsOnSingleLeg() public {
-        uint256[] memory legs = new uint256[](1);
-        legs[0] = 0;
-        bytes32[] memory outcomes = new bytes32[](1);
-        outcomes[0] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](1);
+        legs[0] = _yesLeg("leg:eth", 500_000);
+
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: need >= 2 legs");
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
     function test_buyTicket_revertsOnTooManyLegs() public {
-        uint256[] memory legs = new uint256[](6);
-        bytes32[] memory outcomes = new bytes32[](6);
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](6);
         for (uint256 i = 0; i < 6; i++) {
-            legs[i] = i;
-            outcomes[i] = keccak256("yes");
+            legs[i] = _yesLeg(string(abi.encodePacked("leg:x", bytes1(uint8(48 + i)))), 500_000);
         }
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: too many legs");
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
     function test_buyTicket_revertsOnDuplicateLegs() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 0; // duplicate
-
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
+        legs[0] = _yesLeg("leg:dup", 500_000);
+        legs[1] = _yesLeg("leg:dup", 500_000); // same sourceRef -> same legId
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: duplicate leg");
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
     function test_buyTicket_revertsOnCutoffPassed() public {
-        vm.warp(600_001); // past cutoff
+        vm.warp(600_001);
 
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = _twoLegs();
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs, 700_000, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: cutoff passed");
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
     function test_buyTicket_revertsOnInsufficientStake() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = _twoLegs();
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 0.5e6, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: stake too low");
-        engine.buyTicket(legs, outcomes, 0.5e6); // less than 1 USDC
-    }
-
-    function test_buyTicket_revertsOnLengthMismatch() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](3);
-
-        vm.prank(alice);
-        vm.expectRevert("ParlayEngine: length mismatch");
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
     // ── Settlement ───────────────────────────────────────────────────────
 
     function test_settleTicket_allWins() public {
-        // Buy ticket
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
-        // Resolve legs as Won
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
-
-        // Settle
         engine.settleTicket(ticketId);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
@@ -224,42 +188,23 @@ contract ParlayEngineTest is FeeRouterSetup {
     }
 
     function test_settleTicket_withLoss() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory tBefore = engine.getTicket(ticketId);
         uint256 reservedBefore = vault.totalReserved();
 
-        // One leg lost
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Lost, keccak256("no"));
-
         engine.settleTicket(ticketId);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Lost));
-        // Reservation should have been released
         assertEq(vault.totalReserved(), reservedBefore - tBefore.potentialPayout);
     }
 
     // ── Claim ────────────────────────────────────────────────────────────
 
     function test_claimPayout() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
@@ -267,44 +212,25 @@ contract ParlayEngineTest is FeeRouterSetup {
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         uint256 expectedPayout = t.potentialPayout;
-
         uint256 aliceBalBefore = usdc.balanceOf(alice);
+
         vm.prank(alice);
         engine.claimPayout(ticketId);
 
         assertEq(usdc.balanceOf(alice), aliceBalBefore + expectedPayout);
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed));
-        assertEq(tAfter.claimedAmount, tAfter.potentialPayout, "claimedAmount should equal potentialPayout");
     }
 
     function test_claimPayout_revertsIfNotWon() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: not won");
         engine.claimPayout(ticketId);
     }
 
     function test_claimPayout_revertsIfNotOwner() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         engine.settleTicket(ticketId);
@@ -314,44 +240,15 @@ contract ParlayEngineTest is FeeRouterSetup {
         engine.claimPayout(ticketId);
     }
 
-    // ── Deactivated Leg ──────────────────────────────────────────────────
-
-    function test_buyTicket_revertsOnDeactivatedLeg() public {
-        registry.deactivateLeg(0);
-
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        vm.expectRevert("ParlayEngine: leg not active");
-        engine.buyTicket(legs, outcomes, 10e6);
-    }
-
-    // ── Extended Tests (Phase 4) ──────────────────────────────────────────
+    // ── Extended Tests ───────────────────────────────────────────────────
 
     function test_settleTicket_partialVoid() public {
-        // 3 legs: 2 won, 1 voided
-        uint256[] memory legs = new uint256[](3);
-        legs[0] = 0;
-        legs[1] = 1;
-        legs[2] = 2;
-        bytes32[] memory outcomes = new bytes32[](3);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-        outcomes[2] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _threeLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory tBefore = engine.getTicket(ticketId);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         oracle.resolve(2, LegStatus.Voided, bytes32(0));
-
         engine.settleTicket(ticketId);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
@@ -360,19 +257,10 @@ contract ParlayEngineTest is FeeRouterSetup {
     }
 
     function test_settleTicket_allVoided_ticketVoided() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
         oracle.resolve(0, LegStatus.Voided, bytes32(0));
         oracle.resolve(1, LegStatus.Voided, bytes32(0));
-
         engine.settleTicket(ticketId);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
@@ -381,60 +269,37 @@ contract ParlayEngineTest is FeeRouterSetup {
     }
 
     function test_settleTicket_alreadySettled_reverts() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Lost, keccak256("no"));
-
         engine.settleTicket(ticketId);
+
         vm.expectRevert("ParlayEngine: not active");
         engine.settleTicket(ticketId);
     }
 
     function test_buyTicket_feeCalculation() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        // baseFee=100bps + perLegFee=50bps*2 = 200bps = 2%
-        // feePaid = 2% of 10 USDC = 0.2 USDC = 200000
         assertEq(t.feePaid, 200_000);
     }
 
     function test_buyTicket_pauseBlocksBuy() public {
         engine.pause();
-
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = _twoLegs();
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert();
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
     function test_setBaseFee_boundsCheck() public {
         engine.setBaseFee(2000);
         assertEq(engine.baseFee(), 2000);
-
         vm.expectRevert("ParlayEngine: baseFee too high");
         engine.setBaseFee(2001);
     }
@@ -442,7 +307,6 @@ contract ParlayEngineTest is FeeRouterSetup {
     function test_setPerLegFee_boundsCheck() public {
         engine.setPerLegFee(500);
         assertEq(engine.perLegFee(), 500);
-
         vm.expectRevert("ParlayEngine: perLegFee too high");
         engine.setPerLegFee(501);
     }
@@ -450,7 +314,6 @@ contract ParlayEngineTest is FeeRouterSetup {
     function test_setMinStake_boundsCheck() public {
         engine.setMinStake(5e6);
         assertEq(engine.minStake(), 5e6);
-
         vm.expectRevert("ParlayEngine: minStake too low");
         engine.setMinStake(0.5e6);
     }
@@ -458,68 +321,51 @@ contract ParlayEngineTest is FeeRouterSetup {
     // ── No Bets ──────────────────────────────────────────────────────────
 
     function test_noBet_winsWhenLegLost() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0; // 50%
-        legs[1] = 1; // 25%
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = bytes32(uint256(1)); // Yes on leg 0
-        outcomes[1] = bytes32(uint256(2)); // No on leg 1
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
+        legs[0] = _yesLeg("leg:eth", 500_000);
+        legs[1] = _mkLeg("leg:btc", bytes32(uint256(2)), 250_000, address(oracle), CUTOFF, RESOLVE);
 
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, legs, 10e6, DEADLINE);
 
-        // Leg 0 won (Yes bettor wins), Leg 1 lost (No bettor wins)
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Lost, keccak256("no"));
-
         engine.settleTicket(ticketId);
+
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Won));
     }
 
     function test_noBet_losesWhenLegWon() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = bytes32(uint256(1)); // Yes
-        outcomes[1] = bytes32(uint256(2)); // No
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
+        legs[0] = _yesLeg("leg:eth", 500_000);
+        legs[1] = _mkLeg("leg:btc", bytes32(uint256(2)), 250_000, address(oracle), CUTOFF, RESOLVE);
 
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, legs, 10e6, DEADLINE);
 
-        // Leg 0 won (Yes wins), Leg 1 won (No bettor loses)
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
-
         engine.settleTicket(ticketId);
+
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Lost));
     }
 
     function test_noBet_usesComplementProbability() public {
-        // Leg 1 has 25% prob -> No bet should use 75% (750_000 PPM)
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0; // 50%
-        legs[1] = 1; // 25% -> No gives 75%
-        bytes32[] memory outcomesYes = new bytes32[](2);
-        outcomesYes[0] = bytes32(uint256(1));
-        outcomesYes[1] = bytes32(uint256(1));
+        ParlayEngine.SourceLeg[] memory legsYes = new ParlayEngine.SourceLeg[](2);
+        legsYes[0] = _yesLeg("leg:eth", 500_000);
+        legsYes[1] = _yesLeg("leg:btc", 250_000);
 
-        bytes32[] memory outcomesNo = new bytes32[](2);
-        outcomesNo[0] = bytes32(uint256(1));
-        outcomesNo[1] = bytes32(uint256(2)); // No bet on leg 1
+        ParlayEngine.SourceLeg[] memory legsNo = new ParlayEngine.SourceLeg[](2);
+        legsNo[0] = _yesLeg("leg:eth", 500_000);
+        legsNo[1] = _mkLeg("leg:btc", bytes32(uint256(2)), 250_000, address(oracle), CUTOFF, RESOLVE);
 
-        vm.prank(alice);
-        uint256 ticketYes = engine.buyTicket(legs, outcomesYes, 10e6);
-        vm.prank(alice);
-        uint256 ticketNo = engine.buyTicket(legs, outcomesNo, 10e6);
+        uint256 tYes = _buySigned(engine, alice, legsYes, 10e6, DEADLINE);
+        uint256 tNo = _buySigned(engine, alice, legsNo, 10e6, DEADLINE);
 
-        ParlayEngine.Ticket memory tYes = engine.getTicket(ticketYes);
-        ParlayEngine.Ticket memory tNo = engine.getTicket(ticketNo);
+        ParlayEngine.Ticket memory tickYes = engine.getTicket(tYes);
+        ParlayEngine.Ticket memory tickNo = engine.getTicket(tNo);
 
-        // No bet on 25% leg -> lower multiplier since complement (75%) is more likely
-        assertTrue(tNo.multiplierX1e6 < tYes.multiplierX1e6, "No-bet multiplier < Yes-bet multiplier");
+        assertTrue(tickNo.multiplierX1e6 < tickYes.multiplierX1e6, "No-bet multiplier < Yes-bet multiplier");
     }
 
     function test_setMaxLegs_boundsCheck() public {
@@ -528,74 +374,41 @@ contract ParlayEngineTest is FeeRouterSetup {
 
         vm.expectRevert("ParlayEngine: invalid maxLegs");
         engine.setMaxLegs(11);
-
         vm.expectRevert("ParlayEngine: invalid maxLegs");
         engine.setMaxLegs(1);
     }
 
-    // ── Edge Cases ──────────────────────────────────────────────────────────
+    // ── Edge Cases ──────────────────────────────────────────────────────
 
     function test_buyTicket_zeroStake_reverts() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs = _twoLegs();
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 0, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: stake too low");
-        engine.buyTicket(legs, outcomes, 0);
+        engine.buyTicketSigned(q, sig);
     }
 
     function test_buyTicket_exactMaxLegs() public {
-        // maxLegs defaults to 5. Use high-prob legs so combined multiplier stays within maxPayout.
-        uint256 h0 = _createLeg("H0", 700_000); // 70%
-        uint256 h1 = _createLeg("H1", 700_000);
-        uint256 h2 = _createLeg("H2", 700_000);
-        uint256 h3 = _createLeg("H3", 700_000);
-        uint256 h4 = _createLeg("H4", 700_000);
+        ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](5);
+        legs[0] = _yesLeg("leg:h0", 700_000);
+        legs[1] = _yesLeg("leg:h1", 700_000);
+        legs[2] = _yesLeg("leg:h2", 700_000);
+        legs[3] = _yesLeg("leg:h3", 700_000);
+        legs[4] = _yesLeg("leg:h4", 700_000);
 
-        uint256[] memory legs = new uint256[](5);
-        legs[0] = h0;
-        legs[1] = h1;
-        legs[2] = h2;
-        legs[3] = h3;
-        legs[4] = h4;
-        bytes32[] memory outcomes = new bytes32[](5);
-        for (uint256 i = 0; i < 5; i++) {
-            outcomes[i] = keccak256("yes");
-        }
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, legs, 10e6, DEADLINE);
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(t.legIds.length, 5);
         assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Active));
     }
 
-    function test_buyTicket_emptyLegsArray_reverts() public {
-        uint256[] memory legs = new uint256[](0);
-        bytes32[] memory outcomes = new bytes32[](0);
-
-        vm.prank(alice);
-        vm.expectRevert("ParlayEngine: need >= 2 legs");
-        engine.buyTicket(legs, outcomes, 10e6);
-    }
-
     function test_settleTicket_unresolvedLegs_reverts() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
-        // Only resolve leg 0, leave leg 1 unresolved
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         vm.expectRevert("ParlayEngine: leg not resolvable");
@@ -603,17 +416,8 @@ contract ParlayEngineTest is FeeRouterSetup {
     }
 
     function test_claimPayout_onVoidedTicket_reverts() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
-
-        // Void both legs
         oracle.resolve(0, LegStatus.Voided, bytes32(0));
         oracle.resolve(1, LegStatus.Voided, bytes32(0));
         engine.settleTicket(ticketId);
@@ -627,40 +431,21 @@ contract ParlayEngineTest is FeeRouterSetup {
     }
 
     function test_claimPayout_doubleClaim_reverts() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         engine.settleTicket(ticketId);
 
-        // First claim succeeds
         vm.prank(alice);
         engine.claimPayout(ticketId);
-
-        // Second claim reverts (status is now Claimed, not Won)
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: not won");
         engine.claimPayout(ticketId);
     }
 
     function test_claimPayout_onLostTicket_reverts() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Lost, keccak256("no"));
@@ -672,18 +457,7 @@ contract ParlayEngineTest is FeeRouterSetup {
     }
 
     function test_buyTicket_maxStake_succeeds() public {
-        // Alice has 1000 USDC, try large stake
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0; // 50%
-        legs[1] = 1; // 25%
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        // Large stake that stays within vault capacity
-        vm.prank(alice);
-        uint256 ticketId = engine.buyTicket(legs, outcomes, 50e6);
-
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 50e6, DEADLINE);
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         assertEq(t.stake, 50e6);
         assertGt(t.potentialPayout, 0);
@@ -700,7 +474,7 @@ contract ParlayEngineTest is FeeRouterSetup {
         engine.claimPayout(9999);
     }
 
-    // ── Admin Setter Access Control ─────────────────────────────────────────
+    // ── Admin Setter Access Control ─────────────────────────────────────
 
     function test_setBaseFee_nonOwner_reverts() public {
         vm.prank(alice);
@@ -726,13 +500,13 @@ contract ParlayEngineTest is FeeRouterSetup {
         engine.setMaxLegs(3);
     }
 
-    function test_setBaseCashoutPenalty_nonOwner_reverts() public {
+    function test_setCashoutPenalty_nonOwner_reverts() public {
         vm.prank(alice);
         vm.expectRevert();
-        engine.setBaseCashoutPenalty(2000);
+        engine.setCashoutPenalty(2000);
     }
 
-    // ── Admin Setter Event Emissions ────────────────────────────────────────
+    // ── Admin Setter Event Emissions ────────────────────────────────────
 
     function test_setBaseFee_emitsEvent() public {
         vm.expectEmit(true, true, true, true);
@@ -758,59 +532,33 @@ contract ParlayEngineTest is FeeRouterSetup {
         engine.setMaxLegs(8);
     }
 
-    function test_setBaseCashoutPenalty_emitsEvent() public {
+    function test_setCashoutPenalty_emitsEvent() public {
         vm.expectEmit(true, true, true, true);
-        emit ParlayEngine.BaseCashoutPenaltyUpdated(1500, 3000);
-        engine.setBaseCashoutPenalty(3000);
+        emit ParlayEngine.CashoutPenaltyUpdated(1500, 3000);
+        engine.setCashoutPenalty(3000);
     }
 
-    // ── Admin Setter Effects on Ticket Pricing ──────────────────────────────
+    // ── Admin Setter Effects on Ticket Pricing ──────────────────────────
 
     function test_setBaseFee_affectsNextTicketFee() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        // Buy with default baseFee=100, perLegFee=50 -> total edge = 100 + 50*2 = 200 bps
-        vm.prank(alice);
-        uint256 t1 = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 t1 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         uint256 fee1 = engine.getTicket(t1).feePaid;
 
-        // Double baseFee -> total edge = 200 + 50*2 = 300 bps
         engine.setBaseFee(200);
-
-        vm.prank(alice);
-        uint256 t2 = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 t2 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         uint256 fee2 = engine.getTicket(t2).feePaid;
 
         assertGt(fee2, fee1, "higher baseFee must increase fee");
-        // fee1 = 10e6 * 200 / 10_000 = 200_000
-        // fee2 = 10e6 * 300 / 10_000 = 300_000
         assertEq(fee1, 200_000);
         assertEq(fee2, 300_000);
     }
 
     function test_setPerLegFee_affectsNextTicketFee() public {
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        // Buy with default: 100 + 50*2 = 200 bps
-        vm.prank(alice);
-        uint256 t1 = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 t1 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         uint256 fee1 = engine.getTicket(t1).feePaid;
 
-        // Set perLegFee to 200 -> 100 + 200*2 = 500 bps
         engine.setPerLegFee(200);
-
-        vm.prank(alice);
-        uint256 t2 = engine.buyTicket(legs, outcomes, 10e6);
+        uint256 t2 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         uint256 fee2 = engine.getTicket(t2).feePaid;
 
         assertGt(fee2, fee1, "higher perLegFee must increase fee");
@@ -821,70 +569,50 @@ contract ParlayEngineTest is FeeRouterSetup {
     function test_setMinStake_enforcedOnBuy() public {
         engine.setMinStake(5e6);
 
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
-        // Below new minimum: reverts
+        ParlayEngine.SourceLeg[] memory legs = _twoLegs();
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory qBad = _mkQuote(alice, 4e6, legs, DEADLINE, nonce);
+        bytes memory sigBad = _signQuote(engine, SIGNER_PK, qBad);
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: stake too low");
-        engine.buyTicket(legs, outcomes, 4e6);
+        engine.buyTicketSigned(qBad, sigBad);
 
-        // At new minimum: succeeds
-        vm.prank(alice);
-        engine.buyTicket(legs, outcomes, 5e6);
+        _buySigned(engine, alice, _twoLegs(), 5e6, DEADLINE);
     }
 
     function test_setMaxLegs_enforcedOnBuy() public {
         engine.setMaxLegs(3);
 
-        // 3 legs should work
-        uint256[] memory legs3 = new uint256[](3);
-        legs3[0] = 0; legs3[1] = 1; legs3[2] = 2;
-        bytes32[] memory out3 = new bytes32[](3);
-        out3[0] = keccak256("yes");
-        out3[1] = keccak256("yes");
-        out3[2] = keccak256("yes");
+        ParlayEngine.SourceLeg[] memory legs3 = _threeLegs();
+        _buySigned(engine, alice, legs3, 10e6, DEADLINE);
 
-        vm.prank(alice);
-        engine.buyTicket(legs3, out3, 10e6);
-
-        // 4 legs should revert
-        uint256 extra = _createLeg("EXTRA", 500_000);
-        uint256[] memory legs4 = new uint256[](4);
-        legs4[0] = 0; legs4[1] = 1; legs4[2] = 2; legs4[3] = extra;
-        bytes32[] memory out4 = new bytes32[](4);
-        for (uint256 i = 0; i < 4; i++) out4[i] = keccak256("yes");
-
+        ParlayEngine.SourceLeg[] memory legs4 = new ParlayEngine.SourceLeg[](4);
+        legs4[0] = _yesLeg("leg:eth", 500_000);
+        legs4[1] = _yesLeg("leg:btc", 250_000);
+        legs4[2] = _yesLeg("leg:sol", 200_000);
+        legs4[3] = _yesLeg("leg:extra", 500_000);
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs4, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: too many legs");
-        engine.buyTicket(legs4, out4, 10e6);
+        engine.buyTicketSigned(q, sig);
     }
 
-    // ── Pause/Unpause ───────────────────────────────────────────────────────
+    // ── Pause/Unpause ───────────────────────────────────────────────────
 
     function test_pause_blocksBuyAndSettle() public {
         engine.pause();
-
-        uint256[] memory legs = new uint256[](2);
-        legs[0] = 0;
-        legs[1] = 1;
-        bytes32[] memory outcomes = new bytes32[](2);
-        outcomes[0] = keccak256("yes");
-        outcomes[1] = keccak256("yes");
-
+        ParlayEngine.SourceLeg[] memory legs = _twoLegs();
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, legs, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
         vm.prank(alice);
         vm.expectRevert();
-        engine.buyTicket(legs, outcomes, 10e6);
+        engine.buyTicketSigned(q, sig);
 
         engine.unpause();
-
-        // After unpause, buy should succeed
-        vm.prank(alice);
-        engine.buyTicket(legs, outcomes, 10e6);
+        _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
     }
 
     function test_pause_nonOwner_reverts() public {

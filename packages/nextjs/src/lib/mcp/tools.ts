@@ -12,9 +12,13 @@ import {
   PER_LEG_FEE_BPS,
   RiskAction,
   SEED_MARKETS,
+  LOCAL_CHAIN_ID,
+  BASE_SEPOLIA_CHAIN_ID,
+  getRpcUrl,
+  type SupportedChainId,
 } from "@parlaycity/shared";
 import type { RiskProfile, Market, Leg } from "@parlaycity/shared";
-import { HOUSE_VAULT_ABI, LEG_REGISTRY_ABI, PARLAY_ENGINE_ABI } from "../contracts";
+import { HOUSE_VAULT_ABI, LEG_REGISTRY_ABI, PARLAY_ENGINE_ABI, contractAddresses } from "../contracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
 import { getRegisteredActiveMarkets } from "../db/client";
 
@@ -22,23 +26,24 @@ import { getRegisteredActiveMarkets } from "../db/client";
 // Chain client
 // ---------------------------------------------------------------------------
 
-const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
-const chain = chainId === 31337 ? foundry : baseSepolia;
-const rpcUrl =
-  process.env.BASE_SEPOLIA_RPC_URL ??
-  (chainId === 31337 ? "http://127.0.0.1:8545" : "https://sepolia.base.org");
+const chainId = Number(
+  process.env.NEXT_PUBLIC_CHAIN_ID ?? String(BASE_SEPOLIA_CHAIN_ID),
+) as SupportedChainId;
+const chain = chainId === LOCAL_CHAIN_ID ? foundry : baseSepolia;
+const rpcUrl = getRpcUrl(chainId);
 
 const client = createPublicClient({ chain, transport: http(rpcUrl) });
 
 // ---------------------------------------------------------------------------
-// Contract addresses from env
+// Contract addresses (sourced from src/contracts/deployedContracts.ts via
+// the lib/contracts shim, which honors NEXT_PUBLIC_CHAIN_ID).
 // ---------------------------------------------------------------------------
 
 const addr = {
-  houseVault: (process.env.NEXT_PUBLIC_HOUSE_VAULT_ADDRESS ?? "") as `0x${string}`,
-  parlayEngine: (process.env.NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS ?? "") as `0x${string}`,
-  legRegistry: (process.env.NEXT_PUBLIC_LEG_REGISTRY_ADDRESS ?? "") as `0x${string}`,
-  usdc: (process.env.NEXT_PUBLIC_USDC_ADDRESS ?? "") as `0x${string}`,
+  houseVault: contractAddresses.houseVault,
+  parlayEngine: contractAddresses.parlayEngine,
+  legRegistry: contractAddresses.legRegistry,
+  usdc: contractAddresses.usdc,
 };
 
 // SEED_MARKETS imported from @parlaycity/shared

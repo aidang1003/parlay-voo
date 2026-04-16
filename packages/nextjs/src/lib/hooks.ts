@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAccount, useReadContract, useReadContracts, useWriteContract, usePublicClient, useChainId } from "wagmi";
 import { parseUnits, parseEventLogs, type Abi } from "viem";
 import { BUILDER_SUFFIX } from "./builder-code";
-import { ORACLE_ADAPTER_ABI } from "./contracts";
 import { useDeployedContract } from "../hooks/useDeployedContract";
 import type { SupportedDeployedChainId } from "../contracts/deployedContracts";
 
@@ -83,19 +82,28 @@ export interface LegOracleResult {
   status: number; // 0=Unresolved, 1=Won, 2=Lost, 3=Voided
 }
 
-/** Queries each leg's oracle adapter for individual resolution status */
+/**
+ * Queries each leg's oracle adapter for individual resolution status.
+ *
+ * Each leg stores its own `oracleAdapter` address (AdminOracleAdapter during
+ * bootstrap, OptimisticOracleAdapter in production). Both implement
+ * `IOracleAdapter`, so we reuse AdminOracleAdapter's ABI from
+ * `deployedContracts.ts` — `getStatus`'s signature is interface-enforced.
+ */
 export function useLegStatuses(
   legIds: readonly bigint[],
   legMap: Map<string, LegInfo>,
   pollIntervalMs = 5000,
 ) {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const oracle = useDeployedContract("AdminOracleAdapter", { chainId });
   const [statuses, setStatuses] = useState<Map<string, LegOracleResult>>(new Map());
 
   const legIdsKey = JSON.stringify(legIds.map(String));
 
   const fetchStatuses = useCallback(async () => {
-    if (!publicClient || legIds.length === 0 || legMap.size === 0) return;
+    if (!publicClient || !oracle || legIds.length === 0 || legMap.size === 0) return;
 
     const map = new Map<string, LegOracleResult>();
     for (const legId of legIds) {
@@ -108,7 +116,7 @@ export function useLegStatuses(
       try {
         const data = await publicClient.readContract({
           address: leg.oracleAdapter,
-          abi: ORACLE_ADAPTER_ABI,
+          abi: oracle.abi,
           functionName: "getStatus",
           args: [legId],
         });
@@ -119,7 +127,7 @@ export function useLegStatuses(
       }
     }
     setStatuses(map);
-  }, [publicClient, legIdsKey, legMap.size]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [publicClient, oracle?.abi, legIdsKey, legMap.size]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchStatuses();

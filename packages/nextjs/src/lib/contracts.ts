@@ -52,35 +52,6 @@ export const LEG_REGISTRY_ABI = abiOf("LegRegistry");
 export const LOCK_VAULT_ABI = abiOf("LockVault");
 export const ADMIN_ORACLE_ABI = abiOf("AdminOracleAdapter");
 
-/** Generic IOracleAdapter view interface — not produced per-chain. */
-export const ORACLE_ADAPTER_ABI = [
-  {
-    name: "getStatus",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{name: "legId", type: "uint256"}],
-    outputs: [
-      {name: "status", type: "uint8"},
-      {name: "outcome", type: "bytes32"},
-    ],
-  },
-  {
-    name: "canResolve",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{name: "legId", type: "uint256"}],
-    outputs: [{name: "", type: "bool"}],
-  },
-] as const;
-
-/** LegStatus enum from IOracleAdapter.sol */
-export const LEG_STATUS = {
-  Unresolved: 0,
-  Won: 1,
-  Lost: 2,
-  Voided: 3,
-} as const;
-
 export const contractAddresses = {
   usdc: addressOf("MockUSDC"),
   houseVault: addressOf("HouseVault"),

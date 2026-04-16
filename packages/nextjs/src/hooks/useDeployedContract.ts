@@ -7,13 +7,8 @@ import deployedContracts, {
 } from "../contracts/deployedContracts";
 import {LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID} from "@parlaycity/shared";
 
-/**
- * Default chain to use when wagmi reports a chain we don't recognize (e.g. the
- * user is on mainnet without contracts deployed there). Pages that legitimately
- * need a fixed chain — e.g. the LP dashboard always pointing at Sepolia — pass
- * a `chainId` override.
- */
-const FALLBACK_CHAIN_ID: SupportedDeployedChainId = BASE_SEPOLIA_CHAIN_ID;
+const availableChainIds = Object.keys(deployedContracts).map(Number) as SupportedDeployedChainId[];
+const FALLBACK_CHAIN_ID: SupportedDeployedChainId = availableChainIds[0];
 
 /**
  * Returns `{ address, abi }` for a contract on the given chain (or the active

@@ -23,6 +23,14 @@ contract Deploy is CoreStep, LockVaultStep, YieldStep, FaucetStep {
         console.log("Deployer:               ", deployer);
         console.log("Chain ID:               ", block.chainid);
 
+        if (block.chainid == 31337 && deployer.balance < 0.01 ether) {
+            uint256 anvilKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+            vm.startBroadcast(anvilKey);
+            payable(deployer).transfer(1 ether);
+            vm.stopBroadcast();
+            console.log("Funded deployer from Anvil account #0");
+        }
+
         vm.startBroadcast(cfg.deployerKey);
 
         CoreDeployment memory core = _deployCore(cfg);

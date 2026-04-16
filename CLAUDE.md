@@ -80,7 +80,7 @@ pnpm fund-wallet 0x... 1000   # Mint MockUSDC on Base Sepolia
 - `math.ts` -- mirrors ParlayMath.sol exactly (bigint arithmetic, PPM=1e6, BPS=1e4)
 - `types.ts` -- all TypeScript interfaces (Market, Leg, Ticket, Quote, Risk, etc.)
 - `constants.ts` -- fee/limit constants matching on-chain values
-- `schemas.ts` -- Zod validation schemas
+- `schemas.ts` -- Zod validation schemas -> If this is not still used, get rid of it.
 - `seed.ts` -- static seed markets (IDs 1-21, 7 categories)
 
 **Scripts (`scripts/`):**

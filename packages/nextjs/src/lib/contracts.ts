@@ -13,17 +13,18 @@
  * back to Base Sepolia if unset or unknown.
  */
 import type {Abi} from "viem";
-import {BASE_SEPOLIA_CHAIN_ID} from "@parlaycity/shared";
 import deployedContracts, {
   type SupportedDeployedChainId,
 } from "../contracts/deployedContracts";
+
+const availableChainIds = Object.keys(deployedContracts).map(Number) as SupportedDeployedChainId[];
 
 function pinnedChainId(): SupportedDeployedChainId {
   const raw = Number(process.env.NEXT_PUBLIC_CHAIN_ID);
   if (raw && raw in deployedContracts) {
     return raw as SupportedDeployedChainId;
   }
-  return BASE_SEPOLIA_CHAIN_ID;
+  return availableChainIds[0];
 }
 
 const chainEntry = deployedContracts[pinnedChainId()] as Record<

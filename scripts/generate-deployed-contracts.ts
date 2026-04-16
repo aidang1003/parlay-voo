@@ -152,6 +152,7 @@ ${body}
 export default deployedContracts;
 export type DeployedContracts = typeof deployedContracts;
 export type SupportedChainId = keyof DeployedContracts;
+export type SupportedDeployedChainId = SupportedChainId;
 export type ContractName<C extends SupportedChainId> = keyof DeployedContracts[C];
 `;
 }

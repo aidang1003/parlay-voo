@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAccount } from "wagmi";
 import { formatUnits } from "viem";
 import { useModal } from "connectkit";
-import { PARLAY_CONFIG } from "@/lib/config";
+import { MAX_LEGS, MIN_LEGS, MIN_STAKE_USDC, BASE_FEE_BPS, PER_LEG_FEE_BPS } from "@parlaycity/shared";
 import {
   sanitizeNumericInput,
   blockNonNumericKeys,
@@ -342,10 +342,10 @@ export function ParlayBuilder() {
   // ── Derived values ─────────────────────────────────────────────────────
 
   const stakeNum = parseFloat(stake) || 0;
-  const effectiveMaxLegs = maxLegs ?? PARLAY_CONFIG.maxLegs;
-  const effectiveMinStake = minStakeUSDC ?? PARLAY_CONFIG.minStakeUSDC;
-  const effectiveBaseFee = baseFeeBps ?? PARLAY_CONFIG.baseFee;
-  const effectivePerLegFee = perLegFeeBps ?? PARLAY_CONFIG.perLegFee;
+  const effectiveMaxLegs = maxLegs ?? MAX_LEGS;
+  const effectiveMinStake = minStakeUSDC ?? MIN_STAKE_USDC;
+  const effectiveBaseFee = baseFeeBps ?? BASE_FEE_BPS;
+  const effectivePerLegFee = perLegFeeBps ?? PER_LEG_FEE_BPS;
 
   const filteredLegs = useMemo(() => {
     if (activeCategory === "all") return allLegs;
@@ -393,7 +393,7 @@ export function ParlayBuilder() {
   const canBuy =
     mounted &&
     isConnected &&
-    selectedLegs.length >= PARLAY_CONFIG.minLegs &&
+    selectedLegs.length >= MIN_LEGS &&
     selectedLegs.length <= effectiveMaxLegs &&
     stakeNum >= effectiveMinStake &&
     !insufficientLiquidity &&
@@ -509,7 +509,7 @@ export function ParlayBuilder() {
   fetchRiskAdviceRef.current = fetchRiskAdvice;
 
   useEffect(() => {
-    if (selectedLegs.length < PARLAY_CONFIG.minLegs || !(parseFloat(stake) > 0)) return;
+    if (selectedLegs.length < MIN_LEGS || !(parseFloat(stake) > 0)) return;
     setRiskLoading(true);
     const timer = setTimeout(() => {
       fetchRiskAdviceRef.current();
@@ -535,7 +535,7 @@ export function ParlayBuilder() {
     if (isConfirming) return "Confirming...";
     if (isSuccess) return "Ticket Bought!";
     if (vaultEmpty) return "No Vault Liquidity";
-    if (selectedLegs.length < PARLAY_CONFIG.minLegs) return `Select at least ${PARLAY_CONFIG.minLegs} legs`;
+    if (selectedLegs.length < MIN_LEGS) return `Select at least ${MIN_LEGS} legs`;
     if (insufficientBalance) return "Insufficient USDC Balance";
     if (exceedsMaxPayout) return `Max Payout $${maxPayoutNum.toFixed(0)}`;
     if (insufficientLiquidity) return "Insufficient Vault Liquidity";

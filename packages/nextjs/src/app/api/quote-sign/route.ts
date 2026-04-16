@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     contractAddresses.parlayEngine !== ZERO ? contractAddresses.parlayEngine : undefined;
   const chainContracts =
     (deployedContracts[chainId as keyof typeof deployedContracts] ??
-      deployedContracts[BASE_SEPOLIA_CHAIN_ID]) as Record<string, {address: string}>;
+      Object.values(deployedContracts)[0]) as Record<string, {address: string}>;
   const oracleAddr = chainContracts.AdminOracleAdapter?.address;
 
   if (!signerKey) return NextResponse.json({ error: "QUOTE_SIGNER_PRIVATE_KEY not set" }, { status: 500 });

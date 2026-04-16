@@ -12,5 +12,4 @@ export const MAX_UTILIZATION_BPS = 8000;
 export const MAX_PAYOUT_BPS = 500;
 export const BASE_CASHOUT_PENALTY_BPS = 1500; // 15% base penalty, scaled by unresolved/total legs
 
-export const BASE_SEPOLIA_CHAIN_ID = 84532;
-export const ANVIL_CHAIN_ID = 31337;
+// Chain IDs live in chains.ts — import from there.

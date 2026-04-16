@@ -4,7 +4,7 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@ai-sdk/anthropic"],
   },
-  webpack: (config) => {
+  webpack: (config, { dev }) => {
     // Resolve .js imports in transpiled workspace packages (TS sources with .js extensions)
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js", ".jsx"],
@@ -15,6 +15,10 @@ const nextConfig = {
       ...(config.resolve.fallback ?? {}),
       "@react-native-async-storage/async-storage": false,
     };
+    if (dev) {
+      config.watchOptions = { ...config.watchOptions, followSymlinks: true };
+      config.snapshot = { ...config.snapshot, managedPaths: [] };
+    }
     return config;
   },
 };

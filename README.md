@@ -54,7 +54,7 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 - `pnpm deploy:local` and `pnpm deploy:sepolia` are the only deploy entrypoints
 - All chain config lives in `packages/foundry/script/HelperConfig.s.sol` (USDC address, oracle params, deployer key, per-chain overrides)
-- Root `.env` is the single hand-edited source of truth; `scripts/sync-env.ts` writes the Next.js `.env.local` from deploy broadcasts
+- Root `.env` is the single hand-edited source of truth; `scripts/generate-deployed-contracts.ts` writes `packages/nextjs/src/contracts/deployedContracts.ts` from deploy broadcasts
 - No Makefile, no shell-script deploy wrappers, no contract addresses pasted into env files
 
 ---
@@ -81,7 +81,7 @@ Mint MockUSDC on Sepolia: `pnpm fund-wallet 0xYourWallet 1000`.
 packages/foundry/    Solidity 0.8.24, HelperConfig-driven deploy
 packages/nextjs/     Next.js 14 app, wagmi 2, ConnectKit
 packages/shared/     ParlayMath TS mirror, Zod schemas, types
-scripts/             sync-env, risk-agent, settler-bot, demo-autopilot
+scripts/             generate-deployed-contracts, risk-agent, settler-bot, demo-autopilot
 docs/                Architecture diagrams + per-subsystem specs
 ```
 

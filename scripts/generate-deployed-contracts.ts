@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * Replaces sync-env.ts. Walks forge broadcast JSON for every chainId that has
- * a deploy on disk, pairs each contract with its ABI from forge `out/`, and
- * writes two artifacts:
+ * Walks forge broadcast JSON for every chainId that has a deploy on disk,
+ * pairs each contract with its ABI from forge `out/`, and writes two
+ * artifacts:
  *
  *   1. packages/nextjs/src/contracts/deployedContracts.ts
  *      — committed; consumed by `useDeployedContract` in the Next.js app

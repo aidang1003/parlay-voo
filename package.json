@@ -5,7 +5,6 @@
     "bootstrap": "pnpm install && cd packages/foundry && (forge install foundry-rs/forge-std --no-git 2>/dev/null || true) && (forge install OpenZeppelin/openzeppelin-contracts --no-git 2>/dev/null || true)",
     "dev-start": "bash scripts/dev.sh",
     "dev-stop": "bash scripts/dev-stop.sh",
-    "sync-env": "tsx scripts/sync-env.ts",
     "fund-wallet:local": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/FundWallet.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --sig \"run(uint256)\"",
     "fund-wallet:sepolia": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/FundWallet.s.sol --rpc-url base-sepolia --broadcast --sig \"run(uint256)\"",
     "demo-seed:local": "dotenv -e .env -e packages/nextjs/.env.local -- bash -c 'cd packages/foundry && forge script script/DemoSeed.s.sol --rpc-url http://127.0.0.1:8545 --broadcast'",

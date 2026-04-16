@@ -21,8 +21,8 @@ sleep 2
 (cd "$ROOT/packages/foundry" && forge clean > /dev/null 2>&1 || true)
 (cd "$ROOT/packages/foundry" && env -u USDC_ADDRESS forge script script/Deploy.s.sol \
   --broadcast --rpc-url http://127.0.0.1:8545 > "$PID_DIR/deploy.log" 2>&1)
-env -u USDC_ADDRESS npx tsx "$ROOT/scripts/sync-env.ts"
-echo "  Contracts deployed, .env.local synced"
+npx tsx "$ROOT/scripts/generate-deployed-contracts.ts" 31337
+echo "  Contracts deployed, deployedContracts.ts regenerated"
 
 (cd "$ROOT/packages/nextjs" && nohup pnpm dev > "$PID_DIR/web.log" 2>&1 &
  echo $! > "$PID_DIR/web.pid")

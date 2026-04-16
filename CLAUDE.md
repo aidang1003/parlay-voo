@@ -87,7 +87,7 @@ pnpm clean                    # forge clean + .next
 - `seed.ts` -- static seed markets (IDs 1-21, 7 categories)
 
 **Scripts (`scripts/`):**
-- `generate-deployed-contracts.ts` -- reads forge broadcast + ABI JSON, writes `deployedContracts.ts` + `deployments/<chainId>.json`. Chained onto `pnpm deploy:*`. Replaces old `sync-env.ts`.
+- `generate-deployed-contracts.ts` -- reads forge broadcast + ABI JSON, writes `deployedContracts.ts` + `deployments/<chainId>.json`. Chained onto `pnpm deploy:*`.
 - `risk-agent.ts` -- autonomous betting agent (Kelly criterion sizing, 0G AI inference)
 - `settler-bot.ts` -- permissionless ticket settlement loop
 - `demo-autopilot.ts` -- auto-resolves legs on a running ticket for demos

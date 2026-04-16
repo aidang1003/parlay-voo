@@ -15,9 +15,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// / `scripts/risk-agent.ts` is the right way to create tickets. This script
 /// covers the on-chain prerequisites that still work from pure Solidity.
 ///
-/// Reads addresses from the NEXT_PUBLIC_* env vars populated by
-/// `scripts/sync-env.ts`. Requires DEPLOYER_PRIVATE_KEY (and, off-local,
-/// ACCOUNT1_PRIVATE_KEY) in env.
+/// TODO: migrate to reading addresses from `deployments/<chainId>.json` like
+/// FundWallet.s.sol. Currently reads NEXT_PUBLIC_*_ADDRESS env vars which are
+/// no longer auto-populated — callers must set them manually in .env.local
+/// (or in the dotenv chain of `pnpm demo-seed:*`) before invoking.
+/// Requires DEPLOYER_PRIVATE_KEY (and, off-local, ACCOUNT1_PRIVATE_KEY) in env.
 contract DemoSeed is Script {
     function run() external {
         address usdc = vm.envAddress("NEXT_PUBLIC_USDC_ADDRESS");

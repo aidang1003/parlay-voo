@@ -1,28 +1,31 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useAccount, useReadContract, useReadContracts, useWriteContract, usePublicClient } from "wagmi";
-import { parseUnits, parseEventLogs } from "viem";
+import { useAccount, useReadContract, useReadContracts, useWriteContract, usePublicClient, useChainId } from "wagmi";
+import { parseUnits, parseEventLogs, type Abi } from "viem";
 import { BUILDER_SUFFIX } from "./builder-code";
-import {
-  USDC_ABI,
-  HOUSE_VAULT_ABI,
-  PARLAY_ENGINE_ABI,
-  LEG_REGISTRY_ABI,
-  LOCK_VAULT_ABI,
-  ORACLE_ADAPTER_ABI,
-  contractAddresses,
-} from "./contracts";
+import { ORACLE_ADAPTER_ABI } from "./contracts";
+import { useDeployedContract } from "../hooks/useDeployedContract";
+import type { SupportedDeployedChainId } from "../contracts/deployedContracts";
 
 /**
- * Returns a public client pinned to the chain where contracts are deployed
- * (from NEXT_PUBLIC_CHAIN_ID). Falls back to wallet chain if env not set.
- * This prevents "returned no data" errors when the wallet is on a different chain.
+ * Resolves the chain this app reads from: `NEXT_PUBLIC_CHAIN_ID` if set
+ * (production/local pin), else the wallet's active chain. Pinning prevents
+ * "returned no data" errors when the wallet is on a chain the app is not
+ * configured for.
  */
-function useContractClient() {
-  const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID);
-  return usePublicClient({ chainId: chainId || undefined });
+function usePinnedChainId(): SupportedDeployedChainId {
+  const wallet = useChainId();
+  const env = Number(process.env.NEXT_PUBLIC_CHAIN_ID);
+  return (env || wallet) as SupportedDeployedChainId;
 }
+
+function useContractClient() {
+  const chainId = usePinnedChainId();
+  return usePublicClient({ chainId });
+}
+
+const EMPTY_ABI: Abi = [];
 
 // ---- Read hooks ----
 
@@ -39,12 +42,14 @@ export interface LegInfo {
 /** Fetches leg details from LegRegistry for an array of leg IDs */
 export function useLegDescriptions(legIds: readonly bigint[]) {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const registry = useDeployedContract("LegRegistry", { chainId });
   const [legs, setLegs] = useState<Map<string, LegInfo>>(new Map());
 
   const legIdsKey = JSON.stringify(legIds.map(String));
 
   const fetchLegs = useCallback(async () => {
-    if (!publicClient || !contractAddresses.legRegistry || legIds.length === 0) return;
+    if (!publicClient || !registry || legIds.length === 0) return;
 
     const map = new Map<string, LegInfo>();
     for (const legId of legIds) {
@@ -52,8 +57,8 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
       if (map.has(key)) continue;
       try {
         const data = await publicClient.readContract({
-          address: contractAddresses.legRegistry as `0x${string}`,
-          abi: LEG_REGISTRY_ABI,
+          address: registry.address,
+          abi: registry.abi,
           functionName: "getLeg",
           args: [legId],
         });
@@ -63,7 +68,7 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
       }
     }
     setLegs(map);
-  }, [publicClient, legIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [publicClient, registry?.address, legIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchLegs();
@@ -127,14 +132,16 @@ export function useLegStatuses(
 
 export function useUSDCBalance() {
   const { address } = useAccount();
+  const chainId = usePinnedChainId();
+  const usdc = useDeployedContract("MockUSDC", { chainId });
 
   const { data, isLoading, refetch } = useReadContract({
-    address: contractAddresses.usdc as `0x${string}`,
-    abi: USDC_ABI,
+    address: usdc?.address,
+    abi: usdc?.abi ?? EMPTY_ABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: {
-      enabled: !!address && !!contractAddresses.usdc,
+      enabled: !!address && !!usdc,
       refetchInterval: 5000,
     },
   });
@@ -147,8 +154,9 @@ export function useUSDCBalance() {
 }
 
 export function useVaultStats() {
-  const vault = contractAddresses.houseVault as `0x${string}`;
-  const baseContract = { address: vault, abi: HOUSE_VAULT_ABI } as const;
+  const chainId = usePinnedChainId();
+  const vault = useDeployedContract("HouseVault", { chainId });
+  const baseContract = { address: vault?.address, abi: vault?.abi ?? EMPTY_ABI } as const;
 
   const { data, isLoading, refetch } = useReadContracts({
     contracts: [
@@ -158,7 +166,7 @@ export function useVaultStats() {
       { ...baseContract, functionName: "freeLiquidity" },
       { ...baseContract, functionName: "maxPayout" },
     ],
-    query: { enabled: !!contractAddresses.houseVault, refetchInterval: 10000 },
+    query: { enabled: !!vault, refetchInterval: 10000 },
   });
 
   const pick = (i: number) =>
@@ -188,8 +196,9 @@ export function useVaultStats() {
 }
 
 export function useParlayConfig() {
-  const engine = contractAddresses.parlayEngine as `0x${string}`;
-  const baseContract = { address: engine, abi: PARLAY_ENGINE_ABI } as const;
+  const chainId = usePinnedChainId();
+  const engine = useDeployedContract("ParlayEngine", { chainId });
+  const baseContract = { address: engine?.address, abi: engine?.abi ?? EMPTY_ABI } as const;
 
   const { data, isLoading, refetch } = useReadContracts({
     contracts: [
@@ -198,7 +207,7 @@ export function useParlayConfig() {
       { ...baseContract, functionName: "minStake" },
       { ...baseContract, functionName: "maxLegs" },
     ],
-    query: { enabled: !!contractAddresses.parlayEngine, refetchInterval: 10000 },
+    query: { enabled: !!engine, refetchInterval: 10000 },
   });
 
   const pick = (i: number) =>
@@ -234,13 +243,16 @@ export interface OnChainTicket {
 }
 
 export function useTicket(ticketId: bigint | undefined) {
+  const chainId = usePinnedChainId();
+  const engine = useDeployedContract("ParlayEngine", { chainId });
+
   const { data, isLoading, refetch } = useReadContract({
-    address: contractAddresses.parlayEngine as `0x${string}`,
-    abi: PARLAY_ENGINE_ABI,
+    address: engine?.address,
+    abi: engine?.abi ?? EMPTY_ABI,
     functionName: "getTicket",
     args: ticketId !== undefined ? [ticketId] : undefined,
     query: {
-      enabled: ticketId !== undefined && !!contractAddresses.parlayEngine,
+      enabled: ticketId !== undefined && !!engine,
       refetchInterval: 5000,
     },
   });
@@ -255,6 +267,8 @@ export function useTicket(ticketId: bigint | undefined) {
 export function useUserTickets() {
   const { address } = useAccount();
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const engine = useDeployedContract("ParlayEngine", { chainId });
   const [tickets, setTickets] = useState<{ id: bigint; ticket: OnChainTicket }[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -264,7 +278,7 @@ export function useUserTickets() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchTickets = useCallback(async () => {
-    if (!address || !publicClient || !contractAddresses.parlayEngine) {
+    if (!address || !publicClient || !engine) {
       ++fetchIdRef.current;
       inFlightRef.current = false;
       setTickets([]);
@@ -283,8 +297,8 @@ export function useUserTickets() {
 
     try {
       const count = await publicClient.readContract({
-        address: contractAddresses.parlayEngine as `0x${string}`,
-        abi: PARLAY_ENGINE_ABI,
+        address: engine.address,
+        abi: engine.abi,
         functionName: "ticketCount",
       });
 
@@ -298,16 +312,16 @@ export function useUserTickets() {
         if (localFetchId !== fetchIdRef.current) return;
         try {
           const owner = await publicClient.readContract({
-            address: contractAddresses.parlayEngine as `0x${string}`,
-            abi: PARLAY_ENGINE_ABI,
+            address: engine.address,
+            abi: engine.abi,
             functionName: "ownerOf",
             args: [BigInt(i)],
           });
 
           if ((owner as string).toLowerCase() === address.toLowerCase()) {
             const ticket = await publicClient.readContract({
-              address: contractAddresses.parlayEngine as `0x${string}`,
-              abi: PARLAY_ENGINE_ABI,
+              address: engine.address,
+              abi: engine.abi,
               functionName: "getTicket",
               args: [BigInt(i)],
             });
@@ -332,7 +346,7 @@ export function useUserTickets() {
         hasFetchedRef.current = true;
       }
     }
-  }, [address, publicClient]);
+  }, [address, publicClient, engine?.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch on mount and poll every 5 seconds
   useEffect(() => {
@@ -348,8 +362,10 @@ export function useUserTickets() {
 
 /** Mint MockUSDC to the connected wallet (testnet only, 10k max per call). */
 export function useMintTestUSDC() {
-  const publicClient = useContractClient();
+  const publicClient = usePublicClient();
   const { address } = useAccount();
+  const chainId = usePinnedChainId();
+  const usdc = useDeployedContract("MockUSDC", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -357,16 +373,22 @@ export function useMintTestUSDC() {
   const [error, setError] = useState<string | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
+  const canMint = !!usdc;
+
   const mint = async (amount: bigint = parseUnits("1000", 6)) => {
-    if (!address || !publicClient) return;
     setIsPending(true);
     setIsConfirming(false);
     setIsSuccess(false);
     setError(null);
     try {
+      if (!address || !publicClient || !usdc) {
+        throw new Error(
+          !address ? "Wallet not connected" : !publicClient ? "Client not ready" : "Minting not available on this network",
+        );
+      }
       const hash = await writeContractAsync({
-        address: contractAddresses.usdc,
-        abi: USDC_ABI,
+        address: usdc.address,
+        abi: usdc.abi,
         functionName: "mint",
         args: [address, amount],
         dataSuffix: BUILDER_SUFFIX,
@@ -388,12 +410,15 @@ export function useMintTestUSDC() {
   // Cleanup timeout on unmount
   useEffect(() => () => clearTimeout(successTimerRef.current), []);
 
-  return { mint, isPending, isConfirming, isSuccess, error };
+  return { mint, canMint, isPending, isConfirming, isSuccess, error };
 }
 
 export function useBuyTicket() {
   const publicClient = useContractClient();
   const { address } = useAccount();
+  const chainId = usePinnedChainId();
+  const usdc = useDeployedContract("MockUSDC", { chainId });
+  const engine = useDeployedContract("ParlayEngine", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -411,7 +436,7 @@ export function useBuyTicket() {
     legs: Array<{ sourceRef: string; side: "yes" | "no" }>,
     stakeUsdc: number
   ): Promise<boolean> => {
-    if (!address || !publicClient) return false;
+    if (!address || !publicClient || !usdc || !engine) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -456,10 +481,10 @@ export function useBuyTicket() {
 
       // Approve exact amount
       const approveHash = await writeContractAsync({
-        address: contractAddresses.usdc as `0x${string}`,
-        abi: USDC_ABI,
+        address: usdc.address,
+        abi: usdc.abi,
         functionName: "approve",
-        args: [contractAddresses.parlayEngine as `0x${string}`, stakeAmount],
+        args: [engine.address, stakeAmount],
         dataSuffix: BUILDER_SUFFIX,
       });
       const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
@@ -486,8 +511,8 @@ export function useBuyTicket() {
       };
 
       const buyHash = await writeContractAsync({
-        address: contractAddresses.parlayEngine as `0x${string}`,
-        abi: PARLAY_ENGINE_ABI,
+        address: engine.address,
+        abi: engine.abi,
         functionName: "buyTicketSigned",
         args: [quoteArg, signature],
         dataSuffix: BUILDER_SUFFIX,
@@ -498,15 +523,17 @@ export function useBuyTicket() {
         throw new Error("Transaction reverted on-chain");
       }
 
-      // Parse TicketPurchased event from receipt to get the actual ticket ID
+      // Parse TicketPurchased event from receipt to get the actual ticket ID.
+      // Cast the decoded args because the generated ABI is not `as const`, so
+      // viem cannot infer per-event arg types from a widened `Abi`.
       let newTicketId: bigint | undefined;
       try {
         const purchaseEvents = parseEventLogs({
-          abi: PARLAY_ENGINE_ABI,
+          abi: engine.abi,
           logs: receipt.logs,
           eventName: "TicketPurchased",
         });
-        newTicketId = purchaseEvents[0]?.args?.ticketId;
+        newTicketId = (purchaseEvents[0]?.args as { ticketId?: bigint } | undefined)?.ticketId;
       } catch {
         // ABI mismatch or unexpected log format -- fall through to fallback
       }
@@ -515,8 +542,8 @@ export function useBuyTicket() {
       // if event ABI drifts from contract)
       if (newTicketId === undefined && publicClient) {
         const count = await publicClient.readContract({
-          address: contractAddresses.parlayEngine as `0x${string}`,
-          abi: PARLAY_ENGINE_ABI,
+          address: engine.address,
+          abi: engine.abi,
           functionName: "ticketCount",
         });
         newTicketId = (count as bigint) - 1n;
@@ -550,6 +577,9 @@ export function useBuyTicket() {
 export function useDepositVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const usdc = useDeployedContract("MockUSDC", { chainId });
+  const vault = useDeployedContract("HouseVault", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -557,7 +587,7 @@ export function useDepositVault() {
   const [error, setError] = useState<Error | null>(null);
 
   const deposit = async (amountUsdc: number): Promise<boolean> => {
-    if (!address || !publicClient) return false;
+    if (!address || !publicClient || !usdc || !vault) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -569,10 +599,10 @@ export function useDepositVault() {
 
       // Approve exact amount
       const approveHash = await writeContractAsync({
-        address: contractAddresses.usdc as `0x${string}`,
-        abi: USDC_ABI,
+        address: usdc.address,
+        abi: usdc.abi,
         functionName: "approve",
-        args: [contractAddresses.houseVault as `0x${string}`, amount],
+        args: [vault.address, amount],
         dataSuffix: BUILDER_SUFFIX,
       });
       const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
@@ -584,8 +614,8 @@ export function useDepositVault() {
       setIsPending(false);
       setIsConfirming(true);
       const depositHash = await writeContractAsync({
-        address: contractAddresses.houseVault as `0x${string}`,
-        abi: HOUSE_VAULT_ABI,
+        address: vault.address,
+        abi: vault.abi,
         functionName: "deposit",
         args: [amount, address],
         dataSuffix: BUILDER_SUFFIX,
@@ -616,6 +646,8 @@ export function useDepositVault() {
 export function useWithdrawVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const vault = useDeployedContract("HouseVault", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -623,7 +655,7 @@ export function useWithdrawVault() {
   const [error, setError] = useState<Error | null>(null);
 
   const withdraw = async (amountUsdc: number): Promise<boolean> => {
-    if (!address || !publicClient) return false;
+    if (!address || !publicClient || !vault) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -636,8 +668,8 @@ export function useWithdrawVault() {
       setIsPending(false);
       setIsConfirming(true);
       const withdrawHash = await writeContractAsync({
-        address: contractAddresses.houseVault as `0x${string}`,
-        abi: HOUSE_VAULT_ABI,
+        address: vault.address,
+        abi: vault.abi,
         functionName: "withdraw",
         args: [amount, address],
         dataSuffix: BUILDER_SUFFIX,
@@ -667,6 +699,8 @@ export function useWithdrawVault() {
 
 export function useSettleTicket() {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const engine = useDeployedContract("ParlayEngine", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
   const [isPending, setIsPending] = useState(false);
@@ -675,7 +709,7 @@ export function useSettleTicket() {
   const [error, setError] = useState<Error | null>(null);
 
   const settle = async (ticketId: bigint): Promise<boolean> => {
-    if (!publicClient) return false;
+    if (!publicClient || !engine) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -685,8 +719,8 @@ export function useSettleTicket() {
 
     try {
       const txHash = await writeContractAsync({
-        address: contractAddresses.parlayEngine as `0x${string}`,
-        abi: PARLAY_ENGINE_ABI,
+        address: engine.address,
+        abi: engine.abi,
         functionName: "settleTicket",
         args: [ticketId],
         dataSuffix: BUILDER_SUFFIX,
@@ -718,6 +752,8 @@ export function useSettleTicket() {
 
 export function useClaimPayout() {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const engine = useDeployedContract("ParlayEngine", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
   const [isPending, setIsPending] = useState(false);
@@ -726,7 +762,7 @@ export function useClaimPayout() {
   const [error, setError] = useState<Error | null>(null);
 
   const claim = async (ticketId: bigint): Promise<boolean> => {
-    if (!publicClient) return false;
+    if (!publicClient || !engine) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -736,8 +772,8 @@ export function useClaimPayout() {
 
     try {
       const txHash = await writeContractAsync({
-        address: contractAddresses.parlayEngine as `0x${string}`,
-        abi: PARLAY_ENGINE_ABI,
+        address: engine.address,
+        abi: engine.abi,
         functionName: "claimPayout",
         args: [ticketId],
         dataSuffix: BUILDER_SUFFIX,
@@ -769,6 +805,8 @@ export function useClaimPayout() {
 
 export function useCashoutEarly() {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const engine = useDeployedContract("ParlayEngine", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
   const [isPending, setIsPending] = useState(false);
@@ -777,7 +815,7 @@ export function useCashoutEarly() {
   const [error, setError] = useState<Error | null>(null);
 
   const cashoutEarly = async (ticketId: bigint, minOut: bigint = 0n): Promise<boolean> => {
-    if (!publicClient) return false;
+    if (!publicClient || !engine) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -787,8 +825,8 @@ export function useCashoutEarly() {
 
     try {
       const txHash = await writeContractAsync({
-        address: contractAddresses.parlayEngine as `0x${string}`,
-        abi: PARLAY_ENGINE_ABI,
+        address: engine.address,
+        abi: engine.abi,
         functionName: "cashoutEarly",
         args: [ticketId, minOut],
         dataSuffix: BUILDER_SUFFIX,
@@ -833,6 +871,9 @@ export interface LockPosition {
 export function useLockVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const vault = useDeployedContract("HouseVault", { chainId });
+  const lockVault = useDeployedContract("LockVault", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -840,7 +881,7 @@ export function useLockVault() {
   const [error, setError] = useState<Error | null>(null);
 
   const lock = async (shares: bigint, tier: number): Promise<boolean> => {
-    if (!address || !publicClient || !contractAddresses.lockVault) return false;
+    if (!address || !publicClient || !vault || !lockVault) return false;
 
     setIsPending(true);
     setIsConfirming(false);
@@ -848,12 +889,13 @@ export function useLockVault() {
     setError(null);
 
     try {
-      // Approve exact vUSDC transfer to lockVault
+      // Approve exact vUSDC transfer to lockVault (ERC20 approve on the vault
+      // share token which is the HouseVault contract itself).
       const approveHash = await writeContractAsync({
-        address: contractAddresses.houseVault as `0x${string}`,
-        abi: USDC_ABI,
+        address: vault.address,
+        abi: vault.abi,
         functionName: "approve",
-        args: [contractAddresses.lockVault as `0x${string}`, shares],
+        args: [lockVault.address, shares],
         dataSuffix: BUILDER_SUFFIX,
       });
       const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
@@ -865,8 +907,8 @@ export function useLockVault() {
       setIsPending(false);
       setIsConfirming(true);
       const lockHash = await writeContractAsync({
-        address: contractAddresses.lockVault as `0x${string}`,
-        abi: LOCK_VAULT_ABI,
+        address: lockVault.address,
+        abi: lockVault.abi,
         functionName: "lock",
         args: [shares, tier],
         dataSuffix: BUILDER_SUFFIX,
@@ -894,13 +936,15 @@ export function useLockVault() {
 
 export function useUnlockVault() {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const lockVault = useDeployedContract("LockVault", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
   const unlock = async (positionId: bigint) => {
-    if (!publicClient || !contractAddresses.lockVault) return;
+    if (!publicClient || !lockVault) return;
 
     setIsPending(true);
     setIsSuccess(false);
@@ -908,8 +952,8 @@ export function useUnlockVault() {
 
     try {
       const hash = await writeContractAsync({
-        address: contractAddresses.lockVault as `0x${string}`,
-        abi: LOCK_VAULT_ABI,
+        address: lockVault.address,
+        abi: lockVault.abi,
         functionName: "unlock",
         args: [positionId],
         dataSuffix: BUILDER_SUFFIX,
@@ -932,13 +976,15 @@ export function useUnlockVault() {
 
 export function useEarlyWithdraw() {
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const lockVault = useDeployedContract("LockVault", { chainId });
   const { writeContractAsync } = useWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
   const earlyWithdraw = async (positionId: bigint) => {
-    if (!publicClient || !contractAddresses.lockVault) return;
+    if (!publicClient || !lockVault) return;
 
     setIsPending(true);
     setIsSuccess(false);
@@ -946,8 +992,8 @@ export function useEarlyWithdraw() {
 
     try {
       const hash = await writeContractAsync({
-        address: contractAddresses.lockVault as `0x${string}`,
-        abi: LOCK_VAULT_ABI,
+        address: lockVault.address,
+        abi: lockVault.abi,
         functionName: "earlyWithdraw",
         args: [positionId],
         dataSuffix: BUILDER_SUFFIX,
@@ -971,6 +1017,8 @@ export function useEarlyWithdraw() {
 export function useLockPositions() {
   const { address } = useAccount();
   const publicClient = useContractClient();
+  const chainId = usePinnedChainId();
+  const lockVault = useDeployedContract("LockVault", { chainId });
   const [positions, setPositions] = useState<{ id: bigint; position: LockPosition }[]>([]);
   const [userTotalLocked, setUserTotalLocked] = useState(0n);
   const [isLoading, setIsLoading] = useState(true);
@@ -978,7 +1026,7 @@ export function useLockPositions() {
   const inFlightRef = useRef(false);
 
   const fetchPositions = useCallback(async () => {
-    if (!address || !publicClient || !contractAddresses.lockVault) {
+    if (!address || !publicClient || !lockVault) {
       ++fetchIdRef.current;
       inFlightRef.current = false;
       setPositions([]);
@@ -993,8 +1041,8 @@ export function useLockPositions() {
 
     try {
       const nextId = await publicClient.readContract({
-        address: contractAddresses.lockVault as `0x${string}`,
-        abi: LOCK_VAULT_ABI,
+        address: lockVault.address,
+        abi: lockVault.abi,
         functionName: "nextPositionId",
       });
 
@@ -1007,8 +1055,8 @@ export function useLockPositions() {
         if (localFetchId !== fetchIdRef.current) return;
         try {
           const data = await publicClient.readContract({
-            address: contractAddresses.lockVault as `0x${string}`,
-            abi: LOCK_VAULT_ABI,
+            address: lockVault.address,
+            abi: lockVault.abi,
             functionName: "positions",
             args: [BigInt(i)],
           });
@@ -1045,7 +1093,7 @@ export function useLockPositions() {
         setIsLoading(false);
       }
     }
-  }, [address, publicClient]);
+  }, [address, publicClient, lockVault?.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchPositions();
@@ -1057,20 +1105,23 @@ export function useLockPositions() {
 }
 
 export function useLockStats() {
+  const { address } = useAccount();
+  const chainId = usePinnedChainId();
+  const lockVault = useDeployedContract("LockVault", { chainId });
+
   const totalLockedResult = useReadContract({
-    address: contractAddresses.lockVault as `0x${string}`,
-    abi: LOCK_VAULT_ABI,
+    address: lockVault?.address,
+    abi: lockVault?.abi ?? EMPTY_ABI,
     functionName: "totalLockedShares",
-    query: { enabled: !!contractAddresses.lockVault, refetchInterval: 10000 },
+    query: { enabled: !!lockVault, refetchInterval: 10000 },
   });
 
-  const { address } = useAccount();
   const pendingRewardsResult = useReadContract({
-    address: contractAddresses.lockVault as `0x${string}`,
-    abi: LOCK_VAULT_ABI,
+    address: lockVault?.address,
+    abi: lockVault?.abi ?? EMPTY_ABI,
     functionName: "pendingRewards",
     args: address ? [address] : undefined,
-    query: { enabled: !!address && !!contractAddresses.lockVault, refetchInterval: 10000 },
+    query: { enabled: !!address && !!lockVault, refetchInterval: 10000 },
   });
 
   return {

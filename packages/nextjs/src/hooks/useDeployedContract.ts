@@ -1,6 +1,7 @@
 "use client";
 
 import {useChainId} from "wagmi";
+import type {Abi} from "viem";
 import deployedContracts, {
   type SupportedDeployedChainId,
   type ContractName,
@@ -9,6 +10,8 @@ import {LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID} from "@parlaycity/shared";
 
 const availableChainIds = Object.keys(deployedContracts).map(Number) as SupportedDeployedChainId[];
 const FALLBACK_CHAIN_ID: SupportedDeployedChainId = availableChainIds[0];
+
+export type DeployedContract = {address: `0x${string}`; abi: Abi};
 
 /**
  * Returns `{ address, abi }` for a contract on the given chain (or the active
@@ -24,7 +27,7 @@ export function useDeployedContract<
 >(
   contractName: N,
   options?: {chainId?: C},
-): {address: `0x${string}`; abi: unknown} | undefined {
+): DeployedContract | undefined {
   const wagmiChainId = useChainId();
   const chainId = (options?.chainId ?? wagmiChainId) as SupportedDeployedChainId;
   return resolveDeployed(chainId, contractName as string);
@@ -37,14 +40,11 @@ export function useDeployedContract<
 export function getDeployedContract(
   chainId: number,
   contractName: string,
-):
-  | {address: `0x${string}`; abi: unknown; chainId: SupportedDeployedChainId}
-  | undefined {
+): (DeployedContract & {chainId: SupportedDeployedChainId}) | undefined {
   const resolved = resolveDeployed(chainId as SupportedDeployedChainId, contractName);
   if (resolved) {
     return {...resolved, chainId: chainId as SupportedDeployedChainId};
   }
-  // Try fallback chain
   const fallback = resolveDeployed(FALLBACK_CHAIN_ID, contractName);
   if (fallback) {
     return {...fallback, chainId: FALLBACK_CHAIN_ID};
@@ -55,9 +55,9 @@ export function getDeployedContract(
 function resolveDeployed(
   chainId: SupportedDeployedChainId,
   contractName: string,
-): {address: `0x${string}`; abi: unknown} | undefined {
+): DeployedContract | undefined {
   const chainEntry = deployedContracts[chainId] as
-    | Record<string, {address: `0x${string}`; abi: unknown}>
+    | Record<string, {address: `0x${string}`; abi: Abi}>
     | undefined;
   if (!chainEntry) return undefined;
   const c = chainEntry[contractName];

@@ -19,10 +19,21 @@ pnpm --filter web dev # terminal 3: frontend on :3000
 
 ## Common Operations
 
-### Mint Test USDC (local)
+### Mint Test USDC + Fund ETH (local)
+```bash
+pnpm fund-wallet:local 10000    # Mints USDC + sends 0.1 ETH from Anvil #0
+```
+
+Or manually via cast:
 ```bash
 cast send <MOCK_USDC> "mint(address,uint256)" <YOUR_ADDR> 10000000000 \
   --rpc-url http://127.0.0.1:8545 \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
+
+For one-off ETH funding without the script:
+```bash
+cast send <YOUR_ADDR> --value 0.1ether --rpc-url http://127.0.0.1:8545 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
@@ -64,8 +75,9 @@ Leg's betting window has closed. Create legs with future cutoff times.
 ```bash
 # Kill anvil and restart
 pnpm dev:stop
-pnpm chain
-pnpm deploy:local
+pnpm chain                    # terminal 1
+pnpm deploy:local             # terminal 2 — regenerates deployedContracts.ts
+# Next.js HMR picks up the new addresses automatically (no restart needed)
 ```
 
 ## Monitoring

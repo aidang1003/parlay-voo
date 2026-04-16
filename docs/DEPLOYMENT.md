@@ -24,11 +24,16 @@ Or step-by-step:
 
 ```bash
 pnpm chain            # anvil on :8545
-pnpm deploy:local     # deploy contracts, sync .env.local
+pnpm deploy:local     # deploy contracts, regenerate deployedContracts.ts
 pnpm --filter web dev # frontend on :3000
 ```
 
-Local mode uses MockUSDC (auto-minted) and the Anvil default key. No `.env` config required beyond what ships in the repo.
+Local mode uses MockUSDC (auto-minted). The Deploy script auto-funds the deployer from Anvil account #0 if needed. No `.env` config required beyond what ships in the repo.
+
+To fund a wallet with MockUSDC + ETH on Anvil:
+```bash
+pnpm fund-wallet:local 10000
+```
 
 ## Base Sepolia
 
@@ -46,8 +51,8 @@ pnpm deploy:sepolia
 # 3. (Optional) seed demo data
 pnpm demo:seed:sepolia
 
-# 4. (Optional) mint MockUSDC to any wallet (local/dev only — real USDC is not mintable)
-pnpm fund-wallet 0xRecipient 1000
+# 4. (Optional) mint MockUSDC to any wallet
+pnpm fund-wallet:sepolia 1000
 ```
 
 ### What `pnpm deploy:sepolia` does
@@ -56,7 +61,7 @@ pnpm fund-wallet 0xRecipient 1000
 2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, OptimisticOracleAdapter, ParlayEngine. Wires permissions and fee routing.
 3. Deploys LockVault and the yield adapter.
 4. Calls `SetTrustedSigner` to register `QUOTE_SIGNER_PRIVATE_KEY`'s address as the engine's trusted JIT quote signer.
-5. `tsx scripts/sync-env.ts sepolia` reads the forge broadcast JSON and writes `packages/nextjs/.env.local` with all contract addresses + forwarded secrets.
+5. `tsx scripts/generate-deployed-contracts.ts 84532` reads the forge broadcast JSON + ABIs from `forge out/` and writes `packages/nextjs/src/contracts/deployedContracts.ts`.
 
 Per-chain config (USDC, bootstrap length, oracle liveness/bond) lives in `packages/foundry/script/HelperConfig.s.sol`. Adding a new chain = adding a `getXxxConfig()` branch keyed on `block.chainid`.
 
@@ -77,27 +82,22 @@ forge verify-contract <address> src/core/HouseVault.sol:HouseVault \
 cd packages/nextjs && npx vercel
 ```
 
+Contract addresses are baked into `deployedContracts.ts` (committed to git), so no `NEXT_PUBLIC_*_ADDRESS` env vars are needed on Vercel.
+
 Required env vars on Vercel:
 
 | Variable | Required | Description |
 |---|---|---|
-| `NEXT_PUBLIC_CHAIN_ID` | Yes | `84532` for Base Sepolia |
-| `NEXT_PUBLIC_LEG_REGISTRY_ADDRESS` | Yes | LegRegistry |
-| `NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS` | Yes | ParlayEngine |
-| `NEXT_PUBLIC_HOUSE_VAULT_ADDRESS` | Yes | HouseVault |
-| `NEXT_PUBLIC_LOCK_VAULT_ADDRESS` | Yes | LockVault |
-| `NEXT_PUBLIC_ADMIN_ORACLE_ADDRESS` | Yes | AdminOracleAdapter |
-| `NEXT_PUBLIC_USDC_ADDRESS` | Yes | USDC |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yes | WalletConnect project ID |
+| `NEXT_PUBLIC_CHAIN_ID` | Yes | `84532` for Base Sepolia, `31337` for local |
+| `NEXT_PUBLIC_WC_PROJECT_ID` | Yes | WalletConnect project ID |
+| `QUOTE_SIGNER_PRIVATE_KEY` | Yes | Server-side JIT quote signing |
 | `ANTHROPIC_API_KEY` | For chat | Enables AI chat panel |
-| `BASE_SEPOLIA_RPC_URL` | For vault reads | Alchemy RPC |
-
-Values are in `packages/nextjs/.env.local` after deploy — copy them over.
+| `BASE_SEPOLIA_RPC_URL` | Optional | Alchemy RPC (fallback: public Base Sepolia) |
 
 ## Post-deploy checklist
 
 - [ ] Deployer funded with ETH + USDC on Base Sepolia
-- [ ] `packages/nextjs/.env.local` contains all contract addresses (auto-written by `sync-env.ts`)
+- [ ] `deployedContracts.ts` regenerated with correct addresses (auto-written by `generate-deployed-contracts.ts`)
 - [ ] Trusted JIT signer matches `QUOTE_SIGNER_PRIVATE_KEY`
 - [ ] Contracts verified on BaseScan (optional but recommended)
 - [ ] Frontend connects on chain ID 84532

@@ -8,11 +8,20 @@ import {
   toFunctionSelector,
 } from "viem";
 import { baseSepolia } from "viem/chains";
+import {
+  BASE_SEPOLIA_CHAIN_ID,
+  getRpcUrl,
+  type SupportedChainId,
+} from "@parlaycity/shared";
+import { contractAddresses } from "@/lib/contracts";
 
 const AGENT_WALLET = (process.env.NEXT_PUBLIC_AGENT_WALLET ??
   "0x1214ACab3De95D9C72354562D223f45e16a80389") as `0x${string}`;
 
-const RPC_URL = process.env.RPC_URL ?? "https://sepolia.base.org";
+const STATS_CHAIN_ID = Number(
+  process.env.NEXT_PUBLIC_CHAIN_ID ?? String(BASE_SEPOLIA_CHAIN_ID),
+) as SupportedChainId;
+const RPC_URL = process.env.RPC_URL ?? getRpcUrl(STATS_CHAIN_ID);
 
 const USDC_ABI = parseAbi([
   "function balanceOf(address) view returns (uint256)",
@@ -70,9 +79,12 @@ export async function GET() {
       transport: http(RPC_URL),
     });
 
-    const usdcAddr = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined;
-    const registryAddr = process.env.NEXT_PUBLIC_LEG_REGISTRY_ADDRESS as `0x${string}` | undefined;
-    const engineAddr = process.env.NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS as `0x${string}` | undefined;
+    const ZERO = "0x0000000000000000000000000000000000000000" as `0x${string}`;
+    const usdcAddr = contractAddresses.usdc !== ZERO ? contractAddresses.usdc : undefined;
+    const registryAddr =
+      contractAddresses.legRegistry !== ZERO ? contractAddresses.legRegistry : undefined;
+    const engineAddr =
+      contractAddresses.parlayEngine !== ZERO ? contractAddresses.parlayEngine : undefined;
 
     // Parallel on-chain reads
     const [ethBalance, usdcBalance, legCount, ticketCount] = await Promise.all([
@@ -171,11 +183,11 @@ export async function GET() {
       contracts: {
         parlayEngine: engineAddr ?? null,
         legRegistry: registryAddr ?? null,
-        houseVault: process.env.NEXT_PUBLIC_HOUSE_VAULT_ADDRESS ?? null,
-        lockVault: process.env.NEXT_PUBLIC_LOCK_VAULT_ADDRESS ?? null,
+        houseVault: contractAddresses.houseVault !== ZERO ? contractAddresses.houseVault : null,
+        lockVault: contractAddresses.lockVault !== ZERO ? contractAddresses.lockVault : null,
         usdc: usdcAddr ?? null,
       },
-      chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 84532),
+      chainId: STATS_CHAIN_ID,
       timestamp: Date.now(),
     };
 

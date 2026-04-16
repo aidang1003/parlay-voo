@@ -4,6 +4,13 @@ import { getAddress, isAddress, type Hex } from "viem";
 import { getActiveMarkets } from "@/lib/db/client";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
+import { contractAddresses } from "@/lib/contracts";
+import deployedContracts from "@/contracts/deployedContracts";
+import {
+  BASE_SEPOLIA_CHAIN_ID,
+  LOCAL_CHAIN_ID,
+  type SupportedChainId,
+} from "@parlaycity/shared";
 
 /**
  * POST /api/quote-sign
@@ -50,9 +57,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "legs must be 2..5" }, { status: 400 });
   }
   const signerKey = process.env.QUOTE_SIGNER_PRIVATE_KEY as Hex | undefined;
-  const engineAddr = process.env.NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS;
-  const oracleAddr = process.env.NEXT_PUBLIC_ADMIN_ORACLE_ADDRESS;
-  const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "31337");
+  const chainId = Number(
+    process.env.NEXT_PUBLIC_CHAIN_ID ?? String(LOCAL_CHAIN_ID),
+  ) as SupportedChainId;
+  const ZERO = "0x0000000000000000000000000000000000000000";
+  const engineAddr =
+    contractAddresses.parlayEngine !== ZERO ? contractAddresses.parlayEngine : undefined;
+  const chainContracts =
+    (deployedContracts[chainId as keyof typeof deployedContracts] ??
+      deployedContracts[BASE_SEPOLIA_CHAIN_ID]) as Record<string, {address: string}>;
+  const oracleAddr = chainContracts.AdminOracleAdapter?.address;
 
   if (!signerKey) return NextResponse.json({ error: "QUOTE_SIGNER_PRIVATE_KEY not set" }, { status: 500 });
   if (!engineAddr || !oracleAddr) {

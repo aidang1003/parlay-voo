@@ -129,12 +129,17 @@ pnpm clean                    # forge clean + .next
 
 **Deployer:** `0x1214ACab3De95D9C72354562D223f45e16a80389` (funded on Base Sepolia, private key in `.env`).
 
-**Base Sepolia contracts (v2):**
-- MockUSDC: `0xBf68FAa69faA3b42FFDEA2C033dF795706F6362b`
-- HouseVault: `0xeF9334cA8C7cb7F081e4A53005020CD2F939A979`
-- ParlayEngine: `0x8463CF3D7EE71Be38dDD10f83BA64689033eFDd2`
-- LegRegistry: `0x2244D0f74469BD0ef8C47e7E5f7631E529D4c3bc`
-- LockVault: `0x75457799813D894078FEbec6Fed6602938635435`
+**Base Sepolia USDC:** deploys `MockUSDC` by default (so the in-app mint button
+works). Override with `USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+in `.env` to use real Circle USDC. Current deployed addresses live in
+`packages/nextjs/src/contracts/deployedContracts.ts`.
+
+> **Known gap:** the vault / engine / UI only recognize the `MockUSDC` token
+> from `deployedContracts.ts`. If you switch `USDC_ADDRESS` to real Circle
+> USDC, the vault will accept it but the frontend mint button disappears and
+> balance reads still point at `MockUSDC`. Making the stack accept multiple
+> stable tokens (real Circle USDC + MockUSDC side-by-side) is a larger
+> refactor and deferred.
 
 ## Tests
 

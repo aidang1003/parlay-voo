@@ -85,8 +85,9 @@ contract HelperConfig is CodeConstants, Script {
     }
 
     function getBaseSepoliaConfig() public view returns (NetworkConfig memory) {
-        // USDC override allowed for testing with a custom token on Sepolia.
-        address usdc = vm.envOr("USDC_ADDRESS", USDC_BASE_SEPOLIA);
+        // Default to deploying MockUSDC so the in-app mint button works on testnet.
+        // Set USDC_ADDRESS=<real Circle USDC> to test against Circle's faucet token instead.
+        address usdc = vm.envOr("USDC_ADDRESS", address(0));
         return NetworkConfig({
             usdc: usdc,
             bootstrapDays: vm.envOr("BOOTSTRAP_DAYS", uint256(30)),

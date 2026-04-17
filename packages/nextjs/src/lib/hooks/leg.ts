@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
-import { useContractClient, usePinnedChainId } from "./_internal";
+import { useContractClient } from "./_internal";
 
 export interface LegInfo {
   question: string;
@@ -23,8 +23,7 @@ export interface LegOracleResult {
 /** Fetches leg details from LegRegistry for an array of leg IDs */
 export function useLegDescriptions(legIds: readonly bigint[]) {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const registry = useDeployedContract("LegRegistry", { chainId });
+  const registry = useDeployedContract("LegRegistry");
   const [legs, setLegs] = useState<Map<string, LegInfo>>(new Map());
 
   const legIdsKey = JSON.stringify(legIds.map(String));
@@ -72,8 +71,7 @@ export function useLegStatuses(
   pollIntervalMs = 5000,
 ) {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const oracle = useDeployedContract("AdminOracleAdapter", { chainId });
+  const oracle = useDeployedContract("AdminOracleAdapter");
   const [statuses, setStatuses] = useState<Map<string, LegOracleResult>>(new Map());
 
   const legIdsKey = JSON.stringify(legIds.map(String));

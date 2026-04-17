@@ -1,12 +1,12 @@
 "use client";
 
-import {useChainId} from "wagmi";
 import type {Abi} from "viem";
 import deployedContracts, {
   type SupportedDeployedChainId,
   type ContractName,
 } from "../contracts/deployedContracts";
 import {LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID} from "@parlaycity/shared";
+import {usePinnedChainId} from "../lib/hooks/_internal";
 
 const availableChainIds = Object.keys(deployedContracts).map(Number) as SupportedDeployedChainId[];
 const FALLBACK_CHAIN_ID: SupportedDeployedChainId = availableChainIds[0];
@@ -14,9 +14,11 @@ const FALLBACK_CHAIN_ID: SupportedDeployedChainId = availableChainIds[0];
 export type DeployedContract = {address: `0x${string}`; abi: Abi};
 
 /**
- * Returns `{ address, abi }` for a contract on the given chain (or the active
- * wagmi chain). Returns `undefined` if the contract is not deployed on that
- * chain — call sites should treat that as "not ready" rather than throw.
+ * Returns `{ address, abi }` for a contract on the given chain. Defaults to
+ * `usePinnedChainId()` (NEXT_PUBLIC_CHAIN_ID → wallet chain) so reads and
+ * writes target the same network. Returns `undefined` if the contract isn't
+ * deployed on that chain — callers treat that as "not ready" or throw via
+ * `assertDeployed` from `lib/hooks/_internal`.
  *
  * The friendly contract names (`"HouseVault"`, `"ParlayEngine"`, ...) come
  * from `scripts/generate-deployed-contracts.ts`. Keep them stable.
@@ -28,8 +30,8 @@ export function useDeployedContract<
   contractName: N,
   options?: {chainId?: C},
 ): DeployedContract | undefined {
-  const wagmiChainId = useChainId();
-  const chainId = (options?.chainId ?? wagmiChainId) as SupportedDeployedChainId;
+  const pinned = usePinnedChainId();
+  const chainId = (options?.chainId ?? pinned) as SupportedDeployedChainId;
   return resolveDeployed(chainId, contractName as string);
 }
 

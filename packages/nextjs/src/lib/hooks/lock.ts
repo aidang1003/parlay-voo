@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useAccount, useReadContract, useWriteContract } from "wagmi";
+import { useAccount, useReadContract } from "wagmi";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
-import { EMPTY_ABI, useContractClient, usePinnedChainId } from "./_internal";
+import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export interface LockPosition {
   owner: `0x${string}`;
@@ -19,10 +19,9 @@ export interface LockPosition {
 export function useLockVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const vault = useDeployedContract("HouseVault", { chainId });
-  const lockVault = useDeployedContract("LockVault", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const vault = useDeployedContract("HouseVault");
+  const lockVault = useDeployedContract("LockVault");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -84,9 +83,8 @@ export function useLockVault() {
 
 export function useUnlockVault() {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const lockVault = useDeployedContract("LockVault", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const lockVault = useDeployedContract("LockVault");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -124,9 +122,8 @@ export function useUnlockVault() {
 
 export function useEarlyWithdraw() {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const lockVault = useDeployedContract("LockVault", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const lockVault = useDeployedContract("LockVault");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -165,8 +162,7 @@ export function useEarlyWithdraw() {
 export function useLockPositions() {
   const { address } = useAccount();
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const lockVault = useDeployedContract("LockVault", { chainId });
+  const lockVault = useDeployedContract("LockVault");
   const [positions, setPositions] = useState<{ id: bigint; position: LockPosition }[]>([]);
   const [userTotalLocked, setUserTotalLocked] = useState(0n);
   const [isLoading, setIsLoading] = useState(true);
@@ -254,8 +250,7 @@ export function useLockPositions() {
 
 export function useLockStats() {
   const { address } = useAccount();
-  const chainId = usePinnedChainId();
-  const lockVault = useDeployedContract("LockVault", { chainId });
+  const lockVault = useDeployedContract("LockVault");
 
   const totalLockedResult = useReadContract({
     address: lockVault?.address,

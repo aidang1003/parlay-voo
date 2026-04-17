@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useAccount, useReadContract, useWriteContract } from "wagmi";
+import { useAccount, useReadContract } from "wagmi";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
-import { EMPTY_ABI, useContractClient, usePinnedChainId } from "./_internal";
+import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export interface OnChainTicket {
   buyer: `0x${string}`;
@@ -21,8 +21,7 @@ export interface OnChainTicket {
 }
 
 export function useTicket(ticketId: bigint | undefined) {
-  const chainId = usePinnedChainId();
-  const engine = useDeployedContract("ParlayEngine", { chainId });
+  const engine = useDeployedContract("ParlayEngine");
 
   const { data, isLoading, refetch } = useReadContract({
     address: engine?.address,
@@ -45,8 +44,7 @@ export function useTicket(ticketId: bigint | undefined) {
 export function useUserTickets() {
   const { address } = useAccount();
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const engine = useDeployedContract("ParlayEngine", { chainId });
+  const engine = useDeployedContract("ParlayEngine");
   const [tickets, setTickets] = useState<{ id: bigint; ticket: OnChainTicket }[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -138,9 +136,8 @@ export function useUserTickets() {
 
 export function useSettleTicket() {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const engine = useDeployedContract("ParlayEngine", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const engine = useDeployedContract("ParlayEngine");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -191,9 +188,8 @@ export function useSettleTicket() {
 
 export function useClaimPayout() {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const engine = useDeployedContract("ParlayEngine", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const engine = useDeployedContract("ParlayEngine");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -244,9 +240,8 @@ export function useClaimPayout() {
 
 export function useCashoutEarly() {
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const engine = useDeployedContract("ParlayEngine", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const engine = useDeployedContract("ParlayEngine");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);

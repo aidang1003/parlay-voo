@@ -1,15 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useReadContracts, useWriteContract } from "wagmi";
+import { useAccount, useReadContracts } from "wagmi";
 import { parseUnits } from "viem";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
-import { EMPTY_ABI, useContractClient, usePinnedChainId } from "./_internal";
+import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export function useVaultStats() {
-  const chainId = usePinnedChainId();
-  const vault = useDeployedContract("HouseVault", { chainId });
+  const vault = useDeployedContract("HouseVault");
   const baseContract = { address: vault?.address, abi: vault?.abi ?? EMPTY_ABI } as const;
 
   const { data, isLoading, refetch } = useReadContracts({
@@ -52,10 +51,9 @@ export function useVaultStats() {
 export function useDepositVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const usdc = useDeployedContract("MockUSDC", { chainId });
-  const vault = useDeployedContract("HouseVault", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const usdc = useDeployedContract("MockUSDC");
+  const vault = useDeployedContract("HouseVault");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -121,9 +119,8 @@ export function useDepositVault() {
 export function useWithdrawVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
-  const chainId = usePinnedChainId();
-  const vault = useDeployedContract("HouseVault", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const vault = useDeployedContract("HouseVault");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);

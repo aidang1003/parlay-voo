@@ -141,12 +141,24 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
    - **New shell helpers** (`dev.sh`, `dev-stop.sh`, `deploy-local.sh`, `deploy-sepolia.sh`, `fund-wallet.sh`) — extracted from the old Makefile so `package.json` scripts stay readable.
 
 
-   ## Re-factor to Chain Agnostic
+   ## Re-factor to Chain Agnostic ✅ COMPLETE
    - So much of working with this framework is fighting next and forge to use the chain I actually want
    - Too many things are hard-coded for chain selection
    - Clean so that the project works on the anvil local chain and base sepolia
    - That way when we migrate to base mainnet we are not surprised by a few straggling functions that hardcode base sepolia
 
+   **Fix applied (2026-04-16):** Root cause was a read/write chain split. Reads went through `useContractClient()` which pins to `NEXT_PUBLIC_CHAIN_ID`; writes called bare `writeContractAsync()` which silently used the wallet's active chain. Wallet on Base Sepolia + app pinned to Anvil = MetaMask broadcasts tx against addresses that don't exist on that chain → hang.
+   - New `usePinnedWriteContract()` wrapper in `packages/nextjs/src/lib/hooks/_internal.ts`. Auto-injects `chainId` from `usePinnedChainId()` into every write. Mismatched wallets now surface `ChainMismatchError` or trigger a wallet chain-switch instead of failing silently.
+   - `useDeployedContract()` now defaults to the pinned chain (was wallet chain), so reads and writes target the same network by construction. Call sites dropped the boilerplate `{ chainId: usePinnedChainId() }` option.
+   - All 5 hook files (`usdc.ts`, `vault.ts`, `parlay.ts`, `ticket.ts`, `lock.ts`) migrated to the wrapper. Zero remaining direct `useWriteContract()` or `writeContractAsync({...})` without a pinned chain. `pnpm typecheck` green.
+   - Added `assertDeployed()` helper in `_internal.ts` that throws `"<Contract> is not deployed on <Chain Name>"` — available for call sites that want the explicit throw pattern from `useMintTestUSDC` instead of silent `return false`.
+
+## Non-critical bugs
+- nextjs won't hot-reload on contract re-deploy
+- First page-load requires refresh to actually get data. Bug with layout.js?
+- Console error for pageProvider.js:2 POST https://eth.merkle.io/ net::ERR_FAILED 429 (Too Many Requests)
+  > Access to fetch at 'https://eth.merkle.io/' from origin 'http://localhost:3000' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. If an opaque response serves your needs, set the request's mode to 'no-cors' to fetch the resource with CORS disabled.
+- Warning in the `forge build` command that should be silenced
 
 ## Bailout rules
 

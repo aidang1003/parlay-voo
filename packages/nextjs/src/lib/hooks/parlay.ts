@@ -1,15 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useReadContracts, useWriteContract } from "wagmi";
+import { useAccount, useReadContracts } from "wagmi";
 import { parseUnits, parseEventLogs } from "viem";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
-import { EMPTY_ABI, useContractClient, usePinnedChainId } from "./_internal";
+import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export function useParlayConfig() {
-  const chainId = usePinnedChainId();
-  const engine = useDeployedContract("ParlayEngine", { chainId });
+  const engine = useDeployedContract("ParlayEngine");
   const baseContract = { address: engine?.address, abi: engine?.abi ?? EMPTY_ABI } as const;
 
   const { data, isLoading, refetch } = useReadContracts({
@@ -43,10 +42,9 @@ export function useParlayConfig() {
 export function useBuyTicket() {
   const publicClient = useContractClient();
   const { address } = useAccount();
-  const chainId = usePinnedChainId();
-  const usdc = useDeployedContract("MockUSDC", { chainId });
-  const engine = useDeployedContract("ParlayEngine", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const usdc = useDeployedContract("MockUSDC");
+  const engine = useDeployedContract("ParlayEngine");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);

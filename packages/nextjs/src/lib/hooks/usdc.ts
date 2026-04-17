@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useAccount, useReadContract, useWriteContract, usePublicClient } from "wagmi";
+import { useAccount, useReadContract, usePublicClient } from "wagmi";
 import { parseUnits } from "viem";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
-import { EMPTY_ABI, usePinnedChainId } from "./_internal";
+import { EMPTY_ABI, usePinnedWriteContract } from "./_internal";
 
 export function useUSDCBalance() {
   const { address } = useAccount();
-  const chainId = usePinnedChainId();
-  const usdc = useDeployedContract("MockUSDC", { chainId });
+  const usdc = useDeployedContract("MockUSDC");
 
   const { data, isLoading, refetch } = useReadContract({
     address: usdc?.address,
@@ -34,9 +33,8 @@ export function useUSDCBalance() {
 export function useMintTestUSDC() {
   const publicClient = usePublicClient();
   const { address } = useAccount();
-  const chainId = usePinnedChainId();
-  const usdc = useDeployedContract("MockUSDC", { chainId });
-  const { writeContractAsync } = useWriteContract();
+  const usdc = useDeployedContract("MockUSDC");
+  const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);

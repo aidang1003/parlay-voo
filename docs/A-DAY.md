@@ -159,8 +159,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Console error for pageProvider.js:2 POST https://eth.merkle.io/ net::ERR_FAILED 429 (Too Many Requests)
   > Access to fetch at 'https://eth.merkle.io/' from origin 'http://localhost:3000' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. If an opaque response serves your needs, set the request's mode to 'no-cors' to fetch the resource with CORS disabled.
 - Warning in the `forge build` command that should be silenced
-- Solidify difference between, DEPLOYER WALLET, SIGNER WALLET, MY WALLET. The overhead of managing these is becoming high and it could very easily lead to errors. ✅ IN PROGRESS
-
+- Solidify difference between, DEPLOYER WALLET, SIGNER WALLET, MY WALLET. The overhead of managing these is becoming high and it could very easily lead to errors. ✅ COMLPETE
 - Make dev.sh/dev-stop.sh use call the same scripts I call manually (pnpm chain, pnpm deploy:local, pnpm web-dev)
 - Funding my personal wallet with gas on the anvil chaing should happen automatically on deploy
 

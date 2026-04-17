@@ -56,7 +56,9 @@ export async function POST(req: Request) {
   if (!Array.isArray(body.legs) || body.legs.length < 2 || body.legs.length > 5) {
     return NextResponse.json({ error: "legs must be 2..5" }, { status: 400 });
   }
-  const signerKey = process.env.QUOTE_SIGNER_PRIVATE_KEY as Hex | undefined;
+  const signerKey = (process.env.QUOTE_SIGNER_PRIVATE_KEY ?? process.env.DEPLOYER_PRIVATE_KEY) as
+    | Hex
+    | undefined;
   const chainId = Number(
     process.env.NEXT_PUBLIC_CHAIN_ID ?? String(LOCAL_CHAIN_ID),
   ) as SupportedChainId;
@@ -68,7 +70,12 @@ export async function POST(req: Request) {
       Object.values(deployedContracts)[0]) as Record<string, {address: string}>;
   const oracleAddr = chainContracts.AdminOracleAdapter?.address;
 
-  if (!signerKey) return NextResponse.json({ error: "QUOTE_SIGNER_PRIVATE_KEY not set" }, { status: 500 });
+  if (!signerKey) {
+    return NextResponse.json(
+      { error: "neither QUOTE_SIGNER_PRIVATE_KEY nor DEPLOYER_PRIVATE_KEY is set" },
+      { status: 500 },
+    );
+  }
   if (!engineAddr || !oracleAddr) {
     return NextResponse.json({ error: "engine/oracle address not configured" }, { status: 500 });
   }

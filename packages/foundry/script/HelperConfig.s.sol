@@ -78,7 +78,7 @@ contract HelperConfig is CodeConstants, Script {
             optimisticBond: OPTIMISTIC_BOND,
             uniswapNFPM: address(0),
             weth: address(0),
-            deployerKey: vm.envOr("PRIVATE_KEY", ANVIL_DEFAULT_KEY)
+            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_DEFAULT_KEY)
         });
     }
 

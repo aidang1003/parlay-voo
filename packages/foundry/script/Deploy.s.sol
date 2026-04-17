@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {console} from "forge-std/Script.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
-import {HelperConfig} from "./HelperConfig.s.sol";
+import {HelperConfig, CodeConstants} from "./HelperConfig.s.sol";
 import {CoreStep} from "./steps/CoreStep.sol";
 import {LockVaultStep} from "./steps/LockVaultStep.sol";
 import {YieldStep} from "./steps/YieldStep.sol";
@@ -14,7 +14,7 @@ import {SetTrustedSigner} from "./SetTrustedSigner.s.sol";
 /// Per-chain config (USDC address, bootstrap window, oracle params) comes from
 /// HelperConfig; each concern lives in script/steps/*.sol and is composed via
 /// inheritance so the whole deploy runs inside a single broadcast.
-contract Deploy is CoreStep, LockVaultStep, YieldStep, FaucetStep {
+contract Deploy is CoreStep, LockVaultStep, YieldStep, FaucetStep, CodeConstants {
     function run() external {
         HelperConfig helperConfig = new HelperConfig();
         HelperConfig.NetworkConfig memory cfg = helperConfig.getConfig();
@@ -23,9 +23,8 @@ contract Deploy is CoreStep, LockVaultStep, YieldStep, FaucetStep {
         console.log("Deployer:               ", deployer);
         console.log("Chain ID:               ", block.chainid);
 
-        if (block.chainid == 31337 && deployer.balance < 0.01 ether) {
-            uint256 anvilKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-            vm.startBroadcast(anvilKey);
+        if (block.chainid == LOCAL_CHAIN_ID && deployer.balance < 0.01 ether) {
+            vm.startBroadcast(ANVIL_DEFAULT_KEY);
             payable(deployer).transfer(1 ether);
             vm.stopBroadcast();
             console.log("Funded deployer from Anvil account #0");

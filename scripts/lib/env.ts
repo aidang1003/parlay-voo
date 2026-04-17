@@ -5,6 +5,23 @@
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
+/** Well-known anvil default keys. Safe to embed — these are the foundry defaults
+ *  shipped with anvil, published in the foundry docs, and every dev has them. */
+export const ANVIL_ACCOUNT_0_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
+export const ANVIL_ACCOUNT_1_KEY =
+  "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
+
+/**
+ * Resolve the key an agent/user script should sign with.
+ * Reads `DEPLOYER_PRIVATE_KEY` and falls back to the supplied anvil account.
+ * Callers should run `requireExplicitKeyForRemoteRpc(rpcUrl)` first so the
+ * anvil fallback can only reach remote RPCs by explicit user choice.
+ */
+export function resolveAgentKey(fallback: string = ANVIL_ACCOUNT_0_KEY): `0x${string}` {
+  return (process.env.DEPLOYER_PRIVATE_KEY ?? fallback) as `0x${string}`;
+}
+
 /**
  * Parse packages/nextjs/.env.local into a key-value record.
  * Returns empty record if file is missing or unreadable.
@@ -29,8 +46,8 @@ export function loadEnvLocal(): Record<string, string> {
 }
 
 /**
- * Guard: when RPC_URL points to a non-local network, PRIVATE_KEY must be
- * explicitly provided. Prevents accidentally broadcasting with Anvil keys
+ * Guard: when RPC_URL points to a non-local network, DEPLOYER_PRIVATE_KEY must
+ * be explicitly provided. Prevents accidentally broadcasting with anvil keys
  * on a real chain.
  */
 export function requireExplicitKeyForRemoteRpc(rpcUrl: string): void {
@@ -39,11 +56,11 @@ export function requireExplicitKeyForRemoteRpc(rpcUrl: string): void {
     rpcUrl.includes("localhost") ||
     rpcUrl.includes("0.0.0.0");
 
-  if (!isLocal && !process.env.PRIVATE_KEY) {
+  if (!isLocal && !process.env.DEPLOYER_PRIVATE_KEY) {
     throw new Error(
-      `RPC_URL points to a remote network (${rpcUrl}) but PRIVATE_KEY is not set. ` +
-        "Refusing to use default Anvil key on a non-local chain. " +
-        "Set PRIVATE_KEY explicitly.",
+      `RPC_URL points to a remote network (${rpcUrl}) but DEPLOYER_PRIVATE_KEY is not set. ` +
+        "Refusing to use default anvil key on a non-local chain. " +
+        "Set DEPLOYER_PRIVATE_KEY explicitly.",
     );
   }
 }

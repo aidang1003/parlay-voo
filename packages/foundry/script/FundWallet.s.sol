@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Script, console} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
+import {CodeConstants} from "./HelperConfig.s.sol";
 
 /// @notice Mint MockUSDC + (on local Anvil) fund ETH to a wallet.
 ///
@@ -11,10 +12,10 @@ import {MockUSDC} from "../src/MockUSDC.sol";
 ///   pnpm fund-wallet:local 10000
 ///   pnpm fund-wallet:sepolia 10000
 ///
-/// For one-off ETH on Anvil without this script:
+/// For one-off ETH on Anvil without this script (well-known anvil #0 key; never use on a real chain):
 ///   cast send 0xYOUR_WALLET --value 0.1ether --rpc-url http://127.0.0.1:8545 \
 ///     --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-contract FundWallet is Script {
+contract FundWallet is Script, CodeConstants {
     using stdJson for string;
 
     function _readMockUsdcFromBroadcast() internal view returns (address) {
@@ -48,9 +49,8 @@ contract FundWallet is Script {
         uint256 amount = amountUnits * 1e6; // USDC is 6-decimals
 
         // On local Anvil, fund the deployer and user wallet from account #0.
-        if (block.chainid == 31337) {
-            uint256 anvilKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-            vm.startBroadcast(anvilKey);
+        if (block.chainid == LOCAL_CHAIN_ID) {
+            vm.startBroadcast(ANVIL_DEFAULT_KEY);
             if (deployer.balance < 0.01 ether) {
                 payable(deployer).transfer(0.1 ether);
             }

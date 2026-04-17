@@ -8,7 +8,6 @@ cache/
 .next/
 dist/
 packages/foundry/deployments/
-packages/nextjs/src/contracts/deployedContracts.ts
 
 # Foundry
 packages/foundry/out/

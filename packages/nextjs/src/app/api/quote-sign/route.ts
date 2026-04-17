@@ -140,7 +140,10 @@ export async function POST(req: Request) {
   }
 
   const nonce = BigInt("0x" + crypto.randomUUID().replace(/-/g, "")) & ((1n << 128n) - 1n);
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60);
+  // 10 min: the buy flow is approve-then-buy, so a tight TTL (e.g. 60s) expires
+  // during the approve's block confirmation on testnet and the engine reverts
+  // "quote expired". Nonce still bounds replay, so widening TTL is safe.
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
   const quote = {
     buyer: getAddress(body.buyer),

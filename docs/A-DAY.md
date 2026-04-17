@@ -92,11 +92,17 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Notes:** Live polymarket data will be used to 1) find real bets with their live odds 2) settle active bets
 - **CRON_SECRET caveat:** the Bearer check on `/api/polymarket/sync` and `/api/db/init` is probably not doing much for security and adds complexity we don't need. The realistic attack is Vercel compute-bill drain, not fund/data loss — sync is idempotent, reads a hand-curated list, and the on-chain writes are gated by `DEPLOYER_PRIVATE_KEY`. If the secret plumbing ever causes friction (local dev, new contributors, CI), drop it and replace with an in-route "skip if last run < 1h ago" idempotency gate.
 
-### F-3 - Just in time parlay engine
+### F-3 - Just in time parlay engine ✅ COMPLETE
 - **Time:** days
 - **Value:** medium
 - **Blockers:** Huge overhaul of entire stack
 - **Notes:** Instead of registering all possible legs in the smart contract they need to be registered at acceptance time for accurate pricing data
+
+### F-4 Real Parlay Settlement
+- **Time:** 1-day
+- **Value:** High
+- **Blockers:** Admin functionality to view all tickets so we can verify
+- **Description:** The legs in a ticket should have a way of actually resolving. I envision we build a service using next's framework that reads from a list of currently active legs. When the leg resolves any tickets with that leg should update. If all legs resolve as successful then resolve the ticket and payout to the user's account. If one leg is unsuccesful designate the capital we were holding can be sent back to the pool (or marked as no longer in escrow) and the ticket can be resolved.
 
 
 ## Parlay Builder Frontend Fixes ✅ COMPLETE

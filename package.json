@@ -27,7 +27,7 @@
     "chain": "cd packages/foundry && anvil",
     "deploy:local": "dotenv -c -- bash -c 'cd packages/foundry && forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast' && tsx scripts/generate-deployed-contracts.ts 31337",
     "re-deploy:local": "pnpm clean && pnpm deploy:local",
-    "deploy:sepolia": "dotenv -c -- bash -c 'cd packages/foundry && forge script script/Deploy.s.sol --rpc-url base-sepolia --broadcast --slow' && tsx scripts/generate-deployed-contracts.ts 84532",
+    "deploy:sepolia": "dotenv -c -- bash -c 'cd packages/foundry && forge script script/Deploy.s.sol --rpc-url base-sepolia --broadcast --slow --verify' && tsx scripts/generate-deployed-contracts.ts 84532",
     "re-deploy:sepolia": "pnpm clean && pnpm deploy:sepolia",
     "forge-test": "cd packages/foundry && forge test -vvv",
     "forge-snapshot": "cd packages/foundry && forge snapshot",

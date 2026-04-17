@@ -183,9 +183,11 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Make dev.sh/dev-stop.sh use call the same scripts I call manually (pnpm chain, pnpm deploy:local, pnpm web-dev)
 - Funding my personal wallet with gas on the anvil chain should happen automatically on deploy
 - Some typescript module named parleycity is in there. Look into what this is later.
+- Messages returned to console on a contract deploy are not 100% accurate
 
 ## Random Things I think of
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
+- Admin page features: Syncing/initializing the database
 
 ## Bailout rules
 

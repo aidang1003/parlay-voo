@@ -25,6 +25,10 @@ Key interfaces: `IOracleAdapter`, `IYieldAdapter`, `IHedgeAdapter` (interface ex
 
 Deployment order: MockUSDC -> HouseVault -> LegRegistry -> Oracles -> ParlayEngine -> vault.setEngine -> LockVault -> MockYieldAdapter -> sample legs.
 
+**Local Anvil:** `Deploy.s.sol` auto-funds the deployer from Anvil account #0 if balance < 0.01 ETH. `FundWallet.s.sol` does the same for the deployer + user wallet. Both scripts read MockUSDC address from `broadcast/Deploy.s.sol/<chainId>/run-latest.json` (enabled by `fs_permissions` in `foundry.toml`).
+
+**Post-deploy:** `scripts/generate-deployed-contracts.ts` (chained onto `pnpm deploy:*`) reads broadcast JSON + forge `out/` ABIs and writes `packages/nextjs/src/contracts/deployedContracts.ts`. This is the SE2-style contract discovery — no `.env.local` address vars.
+
 ## Formatting
 
 `forge fmt` -- line_length=120, tab_width=4, bracket_spacing=false.

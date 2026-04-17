@@ -7,6 +7,8 @@ out/
 cache/
 .next/
 dist/
+packages/foundry/deployments/
+packages/nextjs/src/contracts/deployedContracts.ts
 
 # Foundry
 packages/foundry/out/
@@ -16,8 +18,8 @@ packages/foundry/broadcast/
 
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # IDE
 .idea/

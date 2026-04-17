@@ -42,7 +42,7 @@ curated.ts ──►  /api/polymarket/sync  ──►  LegRegistry (on-chain)
 ## Running sync locally
 
 Requires `DATABASE_URL`, `CRON_SECRET`, `DEPLOYER_PRIVATE_KEY` in `.env.local`,
-and the dev server running (`make dev`).
+and the dev server running (`pnpm dev`).
 
 ```bash
 # One-time: apply schema + backfill seed legs into leg_mapping
@@ -119,9 +119,9 @@ cast send $NEXT_PUBLIC_ADMIN_ORACLE_ADDRESS \
 CRON_SECRET missing or mismatched. Check `.env.local` and Vercel env.
 
 **"missing required env"**
-One of `DEPLOYER_PRIVATE_KEY`, `NEXT_PUBLIC_LEG_REGISTRY_ADDRESS`, or
-`ADMIN_ORACLE_ADDRESS` isn't set. `scripts/sync-env.sh` preserves these across
-deploys.
+`DEPLOYER_PRIVATE_KEY` isn't set in root `.env`. Contract addresses live in
+`packages/nextjs/src/contracts/deployedContracts.ts` (regenerated on every
+`pnpm deploy:*`) — they are not read from env vars.
 
 **"market already closed/archived"**
 Curated entry references a market that ended before registration. Remove or

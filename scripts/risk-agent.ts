@@ -25,7 +25,8 @@
  *
  * On-chain (only when DRY_RUN=false):
  *   RPC_URL               -- defaults to http://127.0.0.1:8545
- *   PRIVATE_KEY           -- defaults to Anvil account #1
+ *   DEPLOYER_PRIVATE_KEY  -- signing key; locally falls back to anvil account #1 so the agent
+ *                            acts as a distinct user wallet from the deployer during dev
  *   PARLAY_ENGINE_ADDRESS -- overrides .env.local
  *   USDC_ADDRESS          -- overrides .env.local
  */
@@ -46,7 +47,14 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry, baseSepolia } from "viem/chains";
 
-import { loadEnvLocal, requireExplicitKeyForRemoteRpc, safeBigIntToNumber, safeParseNumber } from "./lib/env";
+import {
+  ANVIL_ACCOUNT_1_KEY,
+  loadEnvLocal,
+  requireExplicitKeyForRemoteRpc,
+  resolveAgentKey,
+  safeBigIntToNumber,
+  safeParseNumber,
+} from "./lib/env";
 import type { AgentQuoteResponse, AiInsight } from "@parlaycity/shared";
 
 // -- ABI fragments (on-chain, only used when DRY_RUN=false) -----------------
@@ -160,8 +168,7 @@ function getOnChainConfig() {
   const rpcUrl = process.env.RPC_URL ?? "http://127.0.0.1:8545";
   requireExplicitKeyForRemoteRpc(rpcUrl);
 
-  const privateKey = (process.env.PRIVATE_KEY ??
-    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d") as `0x${string}`;
+  const privateKey = resolveAgentKey(ANVIL_ACCOUNT_1_KEY);
 
   const engineAddr = (process.env.PARLAY_ENGINE_ADDRESS ??
     envLocal.NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS ??

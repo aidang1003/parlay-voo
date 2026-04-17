@@ -8,26 +8,30 @@ interface IParlayEngine {
 }
 
 contract SetTrustedSigner is Script {
-    function run() public {
-        // The original deployer (owner) key used to authorize the transaction
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-
-        // The new vanity key used to derive the trusted signer address
-        uint256 signerPrivateKey = vm.envUint("QUOTE_SIGNER_PRIVATE_KEY");
+    /// @notice Sets the trusted quote signer on the ParlayEngine owned by `ownerKey`.
+    /// Called as a composable step from Deploy.s.sol (passes its own deployerKey in)
+    /// and standalone via `forge script ... --sig "run()"` (reads env).
+    function run(uint256 ownerKey, address engineAddress) public {
+        // Defaults to the owner key when QUOTE_SIGNER_PRIVATE_KEY is unset, so a single
+        // funded wallet works across local + testnet. Mainnet should set this explicitly
+        // to keep the quote signer (hot) separate from the owner (cold).
+        uint256 signerPrivateKey = vm.envOr("QUOTE_SIGNER_PRIVATE_KEY", ownerKey);
         address signerAddress = vm.addr(signerPrivateKey);
 
-        // Read the ParlayEngine address from environment variables
-        address parlayEngineAddress = vm.envOr("NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS", address(0));
-        require(parlayEngineAddress != address(0), "ParlayEngine address not found in env");
+        require(engineAddress != address(0), "ParlayEngine address required");
 
-        console.log("Target ParlayEngine:", parlayEngineAddress);
+        console.log("Target ParlayEngine:", engineAddress);
         console.log("Setting Trusted Signer To:", signerAddress);
 
-        // Start broadcasting transactions using the deployer's private key
-        vm.startBroadcast(deployerPrivateKey);
-        IParlayEngine(parlayEngineAddress).setTrustedQuoteSigner(signerAddress);
+        vm.startBroadcast(ownerKey);
+        IParlayEngine(engineAddress).setTrustedQuoteSigner(signerAddress);
         vm.stopBroadcast();
+    }
 
-        console.log("Successfully updated trusted quote signer!");
+    /// @notice Standalone entrypoint — reads owner key + engine address from env.
+    function run() external {
+        uint256 ownerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address engineAddress = vm.envAddress("NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS");
+        run(ownerKey, engineAddress);
     }
 }

@@ -19,8 +19,8 @@
  *   POLL_INTERVAL_MS   -- how often to check for new tickets (default: 3000)
  *   CRASH_LEG_INDEX    -- crash the Nth leg (0-indexed) of each ticket (default: none)
  *   CRASH_ODDS         -- probability (0-100) that any given ticket crashes (default: 30)
- *   RPC_URL            -- defaults to http://127.0.0.1:8545
- *   PRIVATE_KEY        -- defaults to Anvil account #0
+ *   RPC_URL              -- defaults to http://127.0.0.1:8545
+ *   DEPLOYER_PRIVATE_KEY -- signing key (must own the admin oracle); falls back to anvil account #0 locally
  */
 
 import {
@@ -37,7 +37,13 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry, baseSepolia } from "viem/chains";
 
-import { loadEnvLocal, requireExplicitKeyForRemoteRpc, safeBigIntToNumber, safeParseNumber } from "./lib/env";
+import {
+  loadEnvLocal,
+  requireExplicitKeyForRemoteRpc,
+  resolveAgentKey,
+  safeBigIntToNumber,
+  safeParseNumber,
+} from "./lib/env";
 
 // -- ABI fragments -----------------------------------------------------------
 
@@ -70,8 +76,7 @@ function getConfig() {
   const rpcUrl = process.env.RPC_URL ?? "http://127.0.0.1:8545";
   requireExplicitKeyForRemoteRpc(rpcUrl);
 
-  const privateKey = (process.env.PRIVATE_KEY ??
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
+  const privateKey = resolveAgentKey();
 
   const engineAddr = (process.env.PARLAY_ENGINE_ADDRESS ??
     envLocal.NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS ?? "") as Address;

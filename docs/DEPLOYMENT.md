@@ -1,4 +1,4 @@
-# ParlayCity Deployment Guide
+# ParlayVoo Deployment Guide
 
 ## Prerequisites
 
@@ -9,81 +9,66 @@
 
 ### Fund the deployer wallet
 
-Deployer address: `0x1214ACab3De95D9C72354562D223f45e16a80389`
+1. **Base Sepolia ETH** — [Coinbase faucet](https://www.coinbase.com/faucets/base-ethereum-goerli-faucet) or bridge from Sepolia.
+2. **Base Sepolia USDC** — [Circle faucet](https://faucet.circle.com/). Need ~100 USDC for LP + demo tickets.
 
-1. **Base Sepolia ETH** -- use the [Coinbase faucet](https://www.coinbase.com/faucets/base-ethereum-goerli-faucet) or bridge from Sepolia
-2. **Base Sepolia USDC** -- get from the [Circle faucet](https://faucet.circle.com/) (select "Base Sepolia", USDC). Need ~100 USDC for LP + demo tickets.
-
-## Local Deployment (Anvil)
+## Local (Anvil)
 
 ```bash
-make setup
-make dev           # starts anvil + deploy + services + web
+pnpm setup
+pnpm dev              # anvil + deploy + web on :3000
+pnpm demo:seed        # optional: LP + 5 sample legs
 ```
 
 Or step-by-step:
 
 ```bash
-make chain            # terminal 1: anvil on :8545
-make deploy-local     # deploy contracts, sync .env.local
-make register-legs    # register catalog legs on-chain
-make dev-services     # terminal 2: API on :3001
-make dev-web          # terminal 3: frontend on :3000
+pnpm chain            # anvil on :8545
+pnpm deploy:local     # deploy contracts, regenerate deployedContracts.ts
+pnpm --filter web dev # frontend on :3000
 ```
 
-Local mode uses MockUSDC (auto-minted) and Anvil default keys. No `.env` config needed.
+Local mode uses MockUSDC (auto-minted). The Deploy script auto-funds the deployer from Anvil account #0 if needed. No `.env` config required beyond what ships in the repo.
 
-## Base Sepolia Deployment
+To fund a wallet with MockUSDC + ETH on Anvil:
+```bash
+pnpm fund-wallet:local 10000
+```
 
-### One-command deploy
+## Base Sepolia
 
 ```bash
-cp .env.example .env
-# Edit .env: set DEPLOYER_PRIVATE_KEY, ACCOUNT1_PRIVATE_KEY, BASESCAN_API_KEY
-make deploy-sepolia-full
+# 1. Fill root .env:
+#   DEPLOYER_PRIVATE_KEY=<funded key>
+#   QUOTE_SIGNER_PRIVATE_KEY=<signer key — set as trusted signer during deploy>
+#   ACCOUNT1_PRIVATE_KEY=<optional, for demo:seed:sepolia>
+#   BASESCAN_API_KEY=<optional, for verification>
+#   USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e  (or leave blank to use the HelperConfig default)
+
+# 2. Deploy
+pnpm deploy:sepolia
+
+# 3. (Optional) seed demo data
+pnpm demo:seed:sepolia
+
+# 4. (Optional) mint MockUSDC to any wallet
+pnpm fund-wallet:sepolia 1000
 ```
 
-This runs: `deploy-sepolia` -> `sync-env sepolia` -> `register-legs-sepolia` -> `demo-seed-sepolia`
+### What `pnpm deploy:sepolia` does
 
-### Manual step-by-step
+1. Loads `HelperConfig.getBaseSepoliaConfig()` — returns `{usdc, bootstrapDays, optimisticLiveness, optimisticBond, uniswapNFPM, weth, deployerKey}`.
+2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, OptimisticOracleAdapter, ParlayEngine. Wires permissions and fee routing.
+3. Deploys LockVault and the yield adapter.
+4. Calls `SetTrustedSigner` to register `QUOTE_SIGNER_PRIVATE_KEY`'s address as the engine's trusted JIT quote signer.
+5. `tsx scripts/generate-deployed-contracts.ts 84532` reads the forge broadcast JSON + ABIs from `forge out/` and writes `packages/nextjs/src/contracts/deployedContracts.ts`.
 
-```bash
-# 1. Configure environment
-cp .env.example .env
-# Edit .env with:
-#   DEPLOYER_PRIVATE_KEY=<your-funded-key>
-#   ACCOUNT1_PRIVATE_KEY=<second-wallet-key>  (for demo-seed)
-#   USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e
-#   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
-#   BASESCAN_API_KEY=<from basescan.org>
+Per-chain config (USDC, bootstrap length, oracle liveness/bond) lives in `packages/foundry/script/HelperConfig.s.sol`. Adding a new chain = adding a `getXxxConfig()` branch keyed on `block.chainid`.
 
-# 2. Deploy core contracts
-make deploy-sepolia
+## Contract verification
 
-# 3. Register market legs on-chain
-make register-legs-sepolia
+Pass `--verify` flags through forge, or verify manually:
 
-# 4. Seed demo data (LP deposits + sample tickets)
-make demo-seed-sepolia
-
-# 5. (Optional) Create Uniswap V3 USDC/WETH pool
-make create-pool-sepolia
-```
-
-### What deploy-sepolia does
-
-1. Detects `USDC_ADDRESS` env var -- uses Circle USDC (skips MockUSDC deploy)
-2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, OptimisticOracleAdapter
-3. Deploys ParlayEngine (30-day bootstrap period)
-4. Wires permissions: engine on vault, fee routing (90/5/5), LockVault, MockYieldAdapter
-5. Auto-verifies on BaseScan if `BASESCAN_API_KEY` is set
-6. Runs `sync-env.sh sepolia` to write `packages/nextjs/.env.local`
-
-## Contract Verification
-
-Auto-verification happens during `deploy-sepolia` when `BASESCAN_API_KEY` is set in `.env`.
-
-Manual verification:
 ```bash
 forge verify-contract <address> src/core/HouseVault.sol:HouseVault \
   --chain base-sepolia \
@@ -91,82 +76,40 @@ forge verify-contract <address> src/core/HouseVault.sol:HouseVault \
   --constructor-args $(cast abi-encode "constructor(address)" 0x036CbD53842c5426634e7929541eC2318f3dCF7e)
 ```
 
-## Uniswap V3 Pool Creation
-
-Creates a USDC/WETH pool on Base Sepolia Uniswap V3 (0.05% fee tier):
-
-```bash
-make create-pool-sepolia
-```
-
-Requires the deployer to hold both USDC and ETH. The script:
-- Wraps 0.01 ETH to WETH
-- Creates and initializes the pool at ~$2800/ETH
-- Adds full-range liquidity
-
-Addresses (Base Sepolia):
-- USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-- WETH: `0x4200000000000000000000000000000000000006`
-- Uniswap V3 NonfungiblePositionManager: `0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2`
-- Uniswap V3 SwapRouter: `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`
-
-## Frontend Deployment (Vercel)
-
-The frontend is deployed to Vercel. Configuration is in `packages/nextjs/vercel.json`.
-
-### Deploy via CLI
+## Frontend (Vercel)
 
 ```bash
 cd packages/nextjs && npx vercel
 ```
 
-### Required Vercel Environment Variables
+Contract addresses are baked into `deployedContracts.ts` (committed to git), so no `NEXT_PUBLIC_*_ADDRESS` env vars are needed on Vercel.
 
-Set via `vercel env add` or the Vercel dashboard:
+Required env vars on Vercel:
 
 | Variable | Required | Description |
 |---|---|---|
-| `NEXT_PUBLIC_CHAIN_ID` | Yes | Chain ID (84532 for Base Sepolia) |
-| `NEXT_PUBLIC_LEG_REGISTRY_ADDRESS` | Yes | LegRegistry contract address |
-| `NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS` | Yes | ParlayEngine contract address |
-| `NEXT_PUBLIC_HOUSE_VAULT_ADDRESS` | Yes | HouseVault contract address |
-| `NEXT_PUBLIC_LOCK_VAULT_ADDRESS` | Yes | LockVault contract address |
-| `NEXT_PUBLIC_ADMIN_ORACLE_ADDRESS` | Yes | AdminOracleAdapter address |
-| `NEXT_PUBLIC_USDC_ADDRESS` | Yes | USDC token address |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yes | WalletConnect project ID |
+| `NEXT_PUBLIC_CHAIN_ID` | Yes | `84532` for Base Sepolia, `31337` for local |
+| `NEXT_PUBLIC_WC_PROJECT_ID` | Yes | WalletConnect project ID |
+| `QUOTE_SIGNER_PRIVATE_KEY` | Yes | Server-side JIT quote signing |
 | `ANTHROPIC_API_KEY` | For chat | Enables AI chat panel |
-| `BASE_SEPOLIA_RPC_URL` | For vault health | Alchemy RPC for on-chain reads |
-| `BDL_API_KEY` | For NBA | BallDontLie API key for live NBA markets |
+| `BASE_SEPOLIA_RPC_URL` | Optional | Alchemy RPC (fallback: public Base Sepolia) |
 
-### Local build
+## Post-deploy checklist
 
-```bash
-cd packages/nextjs
-pnpm build
-```
+- [ ] Deployer funded with ETH + USDC on Base Sepolia
+- [ ] `deployedContracts.ts` regenerated with correct addresses (auto-written by `generate-deployed-contracts.ts`)
+- [ ] Trusted JIT signer matches `QUOTE_SIGNER_PRIVATE_KEY`
+- [ ] Contracts verified on BaseScan (optional but recommended)
+- [ ] Frontend connects on chain ID 84532
+- [ ] Vault deposit, ticket purchase (signed quote), and claim all work end-to-end
 
-Set `NEXT_PUBLIC_*` env vars on your hosting platform (values are in `packages/nextjs/.env.local` after deploy).
-
-## Post-Deploy Checklist
-
-- [ ] Deployer wallet funded with ETH + USDC on Base Sepolia
-- [ ] All contract addresses in `packages/nextjs/.env.local` (auto-generated by sync-env)
-- [ ] Contracts verified on BaseScan
-- [ ] Frontend connects to Base Sepolia (chain ID 84532)
-- [ ] Vault deposit works with Circle USDC
-- [ ] Buy ticket works (parlay builder)
-- [ ] Admin can resolve legs via AdminOracleAdapter
-- [ ] Claim payout works after resolution
-- [ ] Uniswap pool created (optional, for vUSDC liquidity)
-
-## Environment Variables Reference
+## Env reference
 
 | Variable | Required | Description |
 |---|---|---|
-| `DEPLOYER_PRIVATE_KEY` | Yes | Deployer wallet private key |
-| `ACCOUNT1_PRIVATE_KEY` | Demo only | Second wallet for demo-seed |
-| `BASE_SEPOLIA_RPC_URL` | Yes | RPC endpoint (default: `https://sepolia.base.org`) |
-| `USDC_ADDRESS` | Sepolia | Circle USDC address (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) |
-| `BASESCAN_API_KEY` | Optional | For contract verification on BaseScan |
-| `UNISWAP_NFPM` | Pool only | NonfungiblePositionManager address |
-| `WETH_ADDRESS` | Pool only | WETH address on Base Sepolia |
+| `DEPLOYER_PRIVATE_KEY` | Yes | Deploy broadcaster |
+| `QUOTE_SIGNER_PRIVATE_KEY` | Yes | Registered as engine's trusted JIT quote signer |
+| `ACCOUNT1_PRIVATE_KEY` | Demo only | Second wallet for `demo:seed:sepolia` |
+| `BASE_SEPOLIA_RPC_URL` | Yes | RPC endpoint (default `https://sepolia.base.org`) |
+| `USDC_ADDRESS` | Optional | Override Circle USDC (HelperConfig default: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`) |
+| `BASESCAN_API_KEY` | Optional | For auto-verification |

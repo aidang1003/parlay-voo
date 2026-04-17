@@ -9,7 +9,7 @@
  *
  * Env vars (or reads from packages/nextjs/.env.local):
  *   RPC_URL               -- defaults to http://127.0.0.1:8545
- *   PRIVATE_KEY           -- defaults to Anvil account #0 (local only)
+ *   DEPLOYER_PRIVATE_KEY  -- signing key; falls back to anvil account #0 (local only)
  *   PARLAY_ENGINE_ADDRESS -- overrides .env.local
  *   LEG_REGISTRY_ADDRESS  -- overrides .env.local
  *   POLL_INTERVAL_MS      -- defaults to 10000
@@ -28,7 +28,12 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry, baseSepolia } from "viem/chains";
 
-import { loadEnvLocal, requireExplicitKeyForRemoteRpc, safeBigIntToNumber } from "./lib/env";
+import {
+  loadEnvLocal,
+  requireExplicitKeyForRemoteRpc,
+  resolveAgentKey,
+  safeBigIntToNumber,
+} from "./lib/env";
 import { BUILDER_SUFFIX } from "./lib/builder-code";
 
 // -- ABI fragments (only what we need) ------------------------------------
@@ -71,8 +76,7 @@ function getConfig() {
   // Guard: refuse Anvil keys on remote networks
   requireExplicitKeyForRemoteRpc(rpcUrl);
 
-  const privateKey = (process.env.PRIVATE_KEY ??
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
+  const privateKey = resolveAgentKey();
 
   const engineAddr = (process.env.PARLAY_ENGINE_ADDRESS ??
     envLocal.NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS ??

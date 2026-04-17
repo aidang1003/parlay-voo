@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react";
-import { PARLAY_CONFIG } from "@/lib/config";
+import { MAX_LEGS } from "@parlaycity/shared";
 import { useParlayConfig } from "@/lib/hooks";
 
 interface MultiplierClimbProps {
@@ -68,7 +68,7 @@ export function MultiplierClimb({
 }: MultiplierClimbProps) {
   const [isLog, setIsLog] = useState(true);
   const { maxLegs } = useParlayConfig();
-  const effectiveMaxLegs = maxLegs ?? PARLAY_CONFIG.maxLegs;
+  const effectiveMaxLegs = maxLegs ?? MAX_LEGS;
 
   // --- Animated state ---
   const [displayedMultiplier, setDisplayedMultiplier] = useState(1);

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Providers } from "@/components/providers";
 import { Header } from "@/components/Header";
 import { DemoBanner } from "@/components/DemoBanner";
+import { ChainGuard } from "@/components/ChainGuard";
 import { FTUESpotlight, FTUEProvider } from "@/components/FTUESpotlight";
 import { ChatPanel } from "@/components/ChatPanel";
 import "./globals.css";
@@ -30,6 +31,7 @@ export default function RootLayout({
           <FTUEProvider>
             <div className="relative z-10">
               <Header />
+              <ChainGuard />
               <DemoBanner />
               <FTUESpotlight />
               <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">

@@ -44,7 +44,11 @@ contract FundWallet is Script, CodeConstants {
 
         require(userWallet != address(0), "userWallet=0");
 
-        uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        // Local Anvil falls back to the well-known account #0 so devs can fund a wallet
+        // with zero env setup. Remote chains must supply the real deployer key (MockUSDC owner).
+        uint256 key = block.chainid == LOCAL_CHAIN_ID
+            ? vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_DEFAULT_KEY)
+            : vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(key);
         uint256 amount = amountUnits * 1e6; // USDC is 6-decimals
 

@@ -61,25 +61,50 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 ## Getting started
 
+One-time setup: `pnpm bootstrap` (installs JS deps + forge libs), then copy `.env.example` to `.env` and fill in the keys you need (`DATABASE_URL`, `ANTHROPIC_API_KEY`, and on Sepolia `DEPLOYER_PRIVATE_KEY` + `QUOTE_SIGNER_PRIVATE_KEY`).
+
+### Path A — one command
+
 ```bash
-pnpm bootstrap       # pnpm install + forge install
-pnpm dev             # anvil + deploy + web on :3000
-pnpm deploy:local    # redeploy to the running anvil
-pnpm demo:seed       # seed LP + 5 sample legs
-pnpm gate            # tests + typecheck + build (run before commits)
+pnpm dev-start       # anvil + deploy + next dev, all in the background
+pnpm dev-stop        # tear it down
 ```
 
-Deploy to Base Sepolia: fill `DEPLOYER_PRIVATE_KEY` and `QUOTE_SIGNER_PRIVATE_KEY` in `.env`, then `pnpm deploy:sepolia`.
+Does everything in Path B for you. Logs land in `.pids/*.log`.
 
-Mint MockUSDC on Sepolia: `pnpm fund-wallet 0xYourWallet 1000`.
+### Path B — start each piece yourself (local, from zero)
+
+Run each in its own terminal so you can see the logs:
+
+```bash
+pnpm chain                          # 1. anvil on :8545
+pnpm deploy:local                   # 2. deploy contracts + regen deployedContracts.ts
+pnpm dev                            # 3. next dev on :3000
+pnpm fund-wallet:local 10000        # 4. mint 10k MockUSDC + ETH to your wallet
+pnpm db-init                        # 5. create the Neon tables (one-time per DB)
+pnpm db-sync                        # 6. populate markets from Polymarket
+```
+
+Steps 5–6 hit the running web server, so `pnpm dev` must be up first. Step 4 funds the deployer key from `.env` by default — pass an address as the second arg to fund someone else.
+
+### Base Sepolia
+
+Same flow, swap the `:local` suffixes for `:sepolia` (`pnpm deploy:sepolia`, `pnpm fund-wallet:sepolia 1000`, etc.) and skip `pnpm chain`. `pnpm fund-wallet:sepolia` mints MockUSDC; for real Sepolia ETH use a public faucet (e.g. [Coinbase](https://portal.cdp.coinbase.com/products/faucet), [Alchemy](https://sepoliafaucet.com)).
+
+### Everyday commands
+
+```bash
+pnpm gate            # tests + typecheck + build (run before commits)
+pnpm re-deploy:local # wipe .next + forge artifacts, redeploy
+```
 
 ---
 
 ## Debugging stuck transactions
 
-- **Nonce hang (tx sits pending forever after an anvil restart):** anvil reset your account's on-chain nonce to 0, but your browser wallet still holds a higher cached nonce and signs new txs at it — anvil parks them in the `queued` pool forever. Verify with `curl -s -X POST http://127.0.0.1:8545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":1}` — if `queued > 0`, that's it.
+- **Nonce hang (tx sits pending forever after an anvil restart):** anvil reset your account's on-chain nonce to 0, but your browser wallet still holds a higher cached nonce and signs new txs at it — anvil parks them in the `queued` pool forever. Verify with `curl -s -X POST http://127.0.0.1:8545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":1}'` — if `queued > 0`, that's it.
   - **Fix in Rabby:** gear icon → Settings → *Clear Pending* → pick the stuck network.
-  - **Fix via cast:** `cast rpc anvil_setNonce 0xYourWallet 0xN --rpc-url http://127.0.0.1:8545` where `N` is one past the highest queued nonce (hex), then `cast rpc anvil_mine`.
+  - **Fix via cast:** `cast rpc anvil_setNonce 0xYourWallet 0xN --rpc-url http://127.0.0.1:8545` where `N` is **one past** the highest queued nonce (hex), then `cast rpc anvil_mine`.
   - **If it persists:** restart the dev stack (`pnpm dev:stop && pnpm dev`), hard-reload the dapp, and reconnect the wallet — that drops any wagmi/viem client-side nonce cache too.
 
 ---

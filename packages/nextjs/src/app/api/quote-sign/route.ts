@@ -7,6 +7,7 @@ import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
 import { contractAddresses } from "@/lib/contracts";
 import deployedContracts from "@/contracts/deployedContracts";
 import {
+  ANVIL_ACCOUNT_0_KEY,
   BASE_SEPOLIA_CHAIN_ID,
   LOCAL_CHAIN_ID,
   type SupportedChainId,
@@ -56,12 +57,12 @@ export async function POST(req: Request) {
   if (!Array.isArray(body.legs) || body.legs.length < 2 || body.legs.length > 5) {
     return NextResponse.json({ error: "legs must be 2..5" }, { status: 400 });
   }
-  const signerKey = (process.env.QUOTE_SIGNER_PRIVATE_KEY ?? process.env.DEPLOYER_PRIVATE_KEY) as
-    | Hex
-    | undefined;
   const chainId = Number(
-    process.env.NEXT_PUBLIC_CHAIN_ID ?? String(LOCAL_CHAIN_ID),
+    process.env.NEXT_PUBLIC_CHAIN_ID || String(LOCAL_CHAIN_ID),
   ) as SupportedChainId;
+  const signerKey = (process.env.QUOTE_SIGNER_PRIVATE_KEY
+    || process.env.DEPLOYER_PRIVATE_KEY
+    || (chainId === LOCAL_CHAIN_ID ? ANVIL_ACCOUNT_0_KEY : undefined)) as Hex | undefined;
   const ZERO = "0x0000000000000000000000000000000000000000";
   const engineAddr =
     contractAddresses.parlayEngine !== ZERO ? contractAddresses.parlayEngine : undefined;

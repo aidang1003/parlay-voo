@@ -11,6 +11,12 @@ export const LOCAL_CHAIN_ID = 31337;
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const BASE_MAINNET_CHAIN_ID = 8453;
 
+/** Well-known Anvil default key (forge-std test account #0). Safe to embed —
+ *  published in foundry docs. Mirrors `CodeConstants.ANVIL_ACCOUNT_0_KEY` in
+ *  `packages/foundry/script/HelperConfig.s.sol`. NEVER use on a non-local chain. */
+export const ANVIL_ACCOUNT_0_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
+
 export type SupportedChainId =
   | typeof LOCAL_CHAIN_ID
   | typeof BASE_SEPOLIA_CHAIN_ID

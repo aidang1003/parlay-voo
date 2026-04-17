@@ -4,11 +4,12 @@
 
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { ANVIL_ACCOUNT_0_KEY } from "../../packages/shared/src/chains";
 
-/** Well-known anvil default keys. Safe to embed — these are the foundry defaults
- *  shipped with anvil, published in the foundry docs, and every dev has them. */
-export const ANVIL_ACCOUNT_0_KEY =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
+export { ANVIL_ACCOUNT_0_KEY };
+
+/** Anvil account #1 — used by scripts that need a second funded EOA distinct
+ *  from the deployer. Not needed in shared since only scripts use it. */
 export const ANVIL_ACCOUNT_1_KEY =
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
 

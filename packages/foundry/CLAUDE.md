@@ -105,3 +105,6 @@ Every contract PR must verify:
 - Must release reserved liability safely
 - Must respect `minOut` slippage parameter
 - Must never exceed what reserve accounting allows
+
+
+Remappings go in the foundry.toml file. IDEs have issues reading from remappings.txt

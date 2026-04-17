@@ -141,6 +141,13 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
    - **New shell helpers** (`dev.sh`, `dev-stop.sh`, `deploy-local.sh`, `deploy-sepolia.sh`, `fund-wallet.sh`) — extracted from the old Makefile so `package.json` scripts stay readable.
 
 
+   ## Re-factor to Chain Agnostic
+   - So much of working with this framework is fighting next and forge to use the chain I actually want
+   - Too many things are hard-coded for chain selection
+   - Clean so that the project works on the anvil local chain and base sepolia
+   - That way when we migrate to base mainnet we are not surprised by a few straggling functions that hardcode base sepolia
+
+
 ## Bailout rules
 
 - If something in the backlog is taking 2x its estimate, stop and reassess. Don't grind.

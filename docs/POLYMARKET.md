@@ -88,8 +88,8 @@ vercel cron ls                   # should show the daily entry
 3. Once resolved, sync calls `AdminOracleAdapter.resolve(legId, status, 0x0)`
    for both YES and NO sides, inserts a row in `polymarket_resolutions`, and
    deactivates both legs in `leg_mapping`.
-4. The permissionless `settler-bot` (unchanged) picks up affected tickets on
-   its next loop and settles them to users.
+4. The unified `/api/settlement/run` cron (Phase B) picks up affected tickets
+   on its next tick and settles them to users.
 
 Expected latency from Polymarket resolution to ticket settlement: within 24h
 of the next cron run. For faster resolution, hit `pnpm polymarket:sync` by hand.
@@ -135,11 +135,14 @@ pick a longer-dated market.
 Market has no bids or asks right now. Usually means thin liquidity; consider
 dropping the market, or retry later.
 
-**Sync Phase B never resolves a market**
+**Settlement cron never resolves a market**
 Check that Polymarket's `outcome_prices` has flipped to [1.00, 0.00] or
-[0.00, 1.00]. If the market is closed but `outcome_prices` is missing, sync
-treats it as VOIDED — see the manual void path above.
+[0.00, 1.00]. Wait-for-exactness: any other value (ambiguous mid-settlement)
+returns null and retries next tick. Only a `closed=true` market with
+`outcome_prices` missing entirely is treated as VOIDED — otherwise, see the
+manual void path above.
 
 **Ticket didn't settle after resolution**
-`settler-bot.ts` has its own polling loop. Make sure it's running (Vercel
-Function or local process) and watch its logs for the affected `ticketId`.
+`/api/settlement/run` is now the settlement cron. Confirm the Vercel cron is
+hitting it (check function logs) and that the same tick returned a non-zero
+`settled` count.

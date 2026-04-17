@@ -69,21 +69,20 @@ export class PolymarketClient {
     const metadata = await this.fetchMarket(conditionId);
     if (!metadata.closed) return null;
 
-    const prices = metadata.outcomePrices;
-    if (!metadata.outcomePrices) {
-      return { conditionId, outcome: "VOIDED", resolvedAt: Math.floor(Date.now() / 1000) };
-    }
-
-    const [yesPrice, noPrice] = prices;
+    const [yesPrice, noPrice] = metadata.outcomePrices;
     const yes = Number(yesPrice);
     const no = Number(noPrice);
+    const resolvedAt = Math.floor(Date.now() / 1000);
 
-    let outcome: PolymarketResolution["outcome"];
-    if (yes === 1 && no === 0) outcome = "YES";
-    else if (yes === 0 && no === 1) outcome = "NO";
-    else outcome = "VOIDED";
-
-    return { conditionId, outcome, resolvedAt: Math.floor(Date.now() / 1000) };
+    // Wait-for-exactness: only settle when Polymarket returns clean 1/0 prices.
+    // Anything else (e.g. 0.97/0.03 mid-settle rounding) returns null so the
+    // cron retries next tick rather than mis-voiding a live resolution.
+    if (yes === 1 && no === 0) return { conditionId, outcome: "YES", resolvedAt };
+    if (yes === 0 && no === 1) return { conditionId, outcome: "NO", resolvedAt };
+    // Both-zero is the normalizer's sentinel for "outcomePrices missing entirely"
+    // — a closed market with no prices at all is a genuine void.
+    if (yes === 0 && no === 0) return { conditionId, outcome: "VOIDED", resolvedAt };
+    return null;
   }
 
   private async request<T>(url: string): Promise<T> {

@@ -4,6 +4,10 @@
     {
       "path": "/api/polymarket/sync",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/settlement/run",
+      "schedule": "0 */3 * * *"
     }
   ]
 }

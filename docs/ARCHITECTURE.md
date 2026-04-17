@@ -14,7 +14,7 @@ flowchart TB
 
     subgraph "Autonomous Agents"
         MA[Market Discovery Agent<br/>scripts/market-agent.ts]
-        SB[Settler Bot<br/>scripts/settler-bot.ts]
+        SB[Settlement Cron<br/>/api/settlement/run]
     end
 
     subgraph "Frontend -- Next.js 14 (Vercel)"
@@ -117,13 +117,16 @@ BDL API  -->  Resolution (completed games) -->  resolve() on AdminOracleAdapter
                                            -->  x402 /agent-quote (optional AI insight from 0G)
 ```
 
-### Settler Bot (`scripts/settler-bot.ts`)
+### Settlement Cron (`/api/settlement/run`)
 
-Permissionless settlement keeper. Polls for tickets whose legs have all been resolved, then calls `settleTicket()` to finalize payouts and release vault reserves.
+Unified two-phase settlement running on a Vercel cron. Phase A pulls unresolved Polymarket conditions from `tblegmapping`, calls `PolymarketClient.fetchResolution()`, and relays exact YES/NO/VOIDED outcomes into `AdminOracleAdapter.resolve()`. Phase B iterates `ticketCount`, and for each active ticket whose legs all return `canResolve=true`, calls `ParlayEngine.settleTicket()` to finalize payouts and release vault reserves.
 
 ```
-Poll ticketCount  -->  Check canResolve for each leg  -->  settleTicket()
+Poll unresolved conditions  -->  fetchResolution  -->  AdminOracleAdapter.resolve()
+Poll ticketCount            -->  canResolve for each leg  -->  settleTicket()
 ```
+
+Idempotent: `tbpolymarketresolution` is the Phase A gate, already-settled tickets are skipped in Phase B. Signed with `DEPLOYER_PRIVATE_KEY`. Replaced the old `scripts/settler-bot.ts` worker.
 
 ### Payment Flows
 

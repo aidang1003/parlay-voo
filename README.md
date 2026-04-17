@@ -115,7 +115,7 @@ pnpm re-deploy:local # wipe .next + forge artifacts, redeploy
 packages/foundry/    Solidity 0.8.24, HelperConfig-driven deploy
 packages/nextjs/     Next.js 14 app, wagmi 2, ConnectKit
 packages/shared/     ParlayMath TS mirror, Zod schemas, types
-scripts/             generate-deployed-contracts, risk-agent, settler-bot, demo-autopilot
+scripts/             generate-deployed-contracts, risk-agent, demo-autopilot
 docs/                Architecture diagrams + per-subsystem specs
 ```
 

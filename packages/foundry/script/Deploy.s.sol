@@ -24,7 +24,7 @@ contract Deploy is CoreStep, LockVaultStep, YieldStep, FaucetStep, CodeConstants
         console.log("Chain ID:               ", block.chainid);
 
         if (block.chainid == LOCAL_CHAIN_ID && deployer.balance < 0.01 ether) {
-            vm.startBroadcast(ANVIL_DEFAULT_KEY);
+            vm.startBroadcast(ANVIL_ACCOUNT_0_KEY);
             payable(deployer).transfer(1 ether);
             vm.stopBroadcast();
             console.log("Funded deployer from Anvil account #0");

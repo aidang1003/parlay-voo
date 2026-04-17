@@ -7,7 +7,7 @@
     },
     {
       "path": "/api/settlement/run",
-      "schedule": "0 */3 * * *"
+      "schedule": "0 20 * * *"
     }
   ]
 }

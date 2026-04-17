@@ -75,6 +75,15 @@ Mint MockUSDC on Sepolia: `pnpm fund-wallet 0xYourWallet 1000`.
 
 ---
 
+## Debugging stuck transactions
+
+- **Nonce hang (tx sits pending forever after an anvil restart):** anvil reset your account's on-chain nonce to 0, but your browser wallet still holds a higher cached nonce and signs new txs at it — anvil parks them in the `queued` pool forever. Verify with `curl -s -X POST http://127.0.0.1:8545 -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":1}` — if `queued > 0`, that's it.
+  - **Fix in Rabby:** gear icon → Settings → *Clear Pending* → pick the stuck network.
+  - **Fix via cast:** `cast rpc anvil_setNonce 0xYourWallet 0xN --rpc-url http://127.0.0.1:8545` where `N` is one past the highest queued nonce (hex), then `cast rpc anvil_mine`.
+  - **If it persists:** restart the dev stack (`pnpm dev:stop && pnpm dev`), hard-reload the dapp, and reconnect the wallet — that drops any wagmi/viem client-side nonce cache too.
+
+---
+
 ## Where things live
 
 ```

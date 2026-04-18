@@ -39,6 +39,7 @@ vi.mock("@/lib/hooks", () => ({
     isConfirming: false,
     isSuccess: false,
     error: null,
+    ready: true,
   })),
   useUnlockVault: vi.fn(() => ({
     unlock: vi.fn(),
@@ -147,13 +148,14 @@ describe("VaultDashboard", () => {
     expect(screen.getByText("You have no vault shares to withdraw.")).toBeInTheDocument();
   });
 
-  it("switches to lock tab and shows tier selector", () => {
+  it("switches to lock tab and shows duration slider + preview", () => {
     render(<VaultDashboard />);
     fireEvent.click(screen.getByText("Lock"));
     expect(screen.getByText(/Lock your vault shares/)).toBeInTheDocument();
-    expect(screen.getByText("1.1x")).toBeInTheDocument();
-    expect(screen.getByText("1.25x")).toBeInTheDocument();
-    expect(screen.getByText("1.5x")).toBeInTheDocument();
+    expect(screen.getByLabelText("Lock duration")).toBeInTheDocument();
+    // Default is 365d → exactly 2.00x fee share
+    expect(screen.getByText("2.00x")).toBeInTheDocument();
+    expect(screen.getByText("Day-0 exit penalty")).toBeInTheDocument();
   });
 
   it("deposit input accepts numeric value", () => {
@@ -583,6 +585,7 @@ describe("VaultDashboard", () => {
         isConfirming: false,
         isSuccess: false,
         error: null,
+        ready: true,
         ...overrides,
       } as any);
     }
@@ -597,6 +600,21 @@ describe("VaultDashboard", () => {
       fireEvent.click(screen.getByText("Lock"));
       const btn = screen.getAllByRole("button").find((b) => b.textContent === "Connect Wallet");
       expect(btn).toBeDefined();
+    });
+
+    it("'Not Deployed On This Network' takes priority over missing shares", () => {
+      vi.mocked(useAccount).mockReturnValue({
+        isConnected: true,
+        address: "0xAlice",
+      } as unknown as ReturnType<typeof useAccount>);
+      mockLockState({ ready: false });
+      render(<VaultDashboard />);
+      fireEvent.click(screen.getByText("Lock"));
+      const btn = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent === "Not Deployed On This Network");
+      expect(btn).toBeDefined();
+      expect(btn).toBeDisabled();
     });
 
     it("'Deposit USDC First' takes priority over validation", () => {

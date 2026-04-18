@@ -9,10 +9,10 @@ import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_interna
 export interface LockPosition {
   owner: `0x${string}`;
   shares: bigint;
-  tier: number;
+  duration: bigint;
   lockedAt: bigint;
   unlockAt: bigint;
-  feeMultiplierBps: bigint;
+  feeShareBps: bigint;
   rewardDebt: bigint;
 }
 
@@ -20,14 +20,19 @@ export function useLockVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();
   const vault = useDeployedContract("HouseVault");
-  const lockVault = useDeployedContract("LockVault");
+  const lockVault = useDeployedContract("LockVaultV2");
   const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const lock = async (shares: bigint, tier: number): Promise<boolean> => {
+  // False when LockVaultV2 isn't deployed on the active chain (e.g. Sepolia
+  // broadcast pre-dates the V2 rollout). The UI uses this to disable the
+  // submit button with a clear label instead of silently no-oping.
+  const ready = !!vault && !!lockVault;
+
+  const lock = async (shares: bigint, durationSecs: bigint): Promise<boolean> => {
     if (!address || !publicClient || !vault || !lockVault) return false;
 
     setIsPending(true);
@@ -36,8 +41,6 @@ export function useLockVault() {
     setError(null);
 
     try {
-      // Approve exact vUSDC transfer to lockVault (ERC20 approve on the vault
-      // share token which is the HouseVault contract itself).
       const approveHash = await writeContractAsync({
         address: vault.address,
         abi: vault.abi,
@@ -50,14 +53,13 @@ export function useLockVault() {
         throw new Error("Approve transaction reverted on-chain");
       }
 
-      // Lock shares
       setIsPending(false);
       setIsConfirming(true);
       const lockHash = await writeContractAsync({
         address: lockVault.address,
         abi: lockVault.abi,
         functionName: "lock",
-        args: [shares, tier],
+        args: [shares, durationSecs],
         dataSuffix: BUILDER_SUFFIX,
       });
       const lockReceipt = await publicClient.waitForTransactionReceipt({ hash: lockHash });
@@ -78,12 +80,12 @@ export function useLockVault() {
     }
   };
 
-  return { lock, isPending, isConfirming, isSuccess, error };
+  return { lock, isPending, isConfirming, isSuccess, error, ready };
 }
 
 export function useUnlockVault() {
   const publicClient = useContractClient();
-  const lockVault = useDeployedContract("LockVault");
+  const lockVault = useDeployedContract("LockVaultV2");
   const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -122,7 +124,7 @@ export function useUnlockVault() {
 
 export function useEarlyWithdraw() {
   const publicClient = useContractClient();
-  const lockVault = useDeployedContract("LockVault");
+  const lockVault = useDeployedContract("LockVaultV2");
   const { writeContractAsync } = usePinnedWriteContract();
   const [isPending, setIsPending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -162,7 +164,7 @@ export function useEarlyWithdraw() {
 export function useLockPositions() {
   const { address } = useAccount();
   const publicClient = useContractClient();
-  const lockVault = useDeployedContract("LockVault");
+  const lockVault = useDeployedContract("LockVaultV2");
   const [positions, setPositions] = useState<{ id: bigint; position: LockPosition }[]>([]);
   const [userTotalLocked, setUserTotalLocked] = useState(0n);
   const [isLoading, setIsLoading] = useState(true);
@@ -205,17 +207,17 @@ export function useLockPositions() {
             args: [BigInt(i)],
           });
 
-          const pos = data as [string, bigint, number, bigint, bigint, bigint, bigint];
+          const pos = data as [string, bigint, bigint, bigint, bigint, bigint, bigint];
           if (pos[0].toLowerCase() === address.toLowerCase() && pos[1] > 0n) {
             userPositions.push({
               id: BigInt(i),
               position: {
                 owner: pos[0] as `0x${string}`,
                 shares: pos[1],
-                tier: pos[2],
+                duration: pos[2],
                 lockedAt: pos[3],
                 unlockAt: pos[4],
-                feeMultiplierBps: pos[5],
+                feeShareBps: pos[5],
                 rewardDebt: pos[6],
               },
             });
@@ -250,7 +252,7 @@ export function useLockPositions() {
 
 export function useLockStats() {
   const { address } = useAccount();
-  const lockVault = useDeployedContract("LockVault");
+  const lockVault = useDeployedContract("LockVaultV2");
 
   const totalLockedResult = useReadContract({
     address: lockVault?.address,

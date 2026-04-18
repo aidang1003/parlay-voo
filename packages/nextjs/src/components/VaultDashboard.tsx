@@ -18,6 +18,11 @@ import {
 } from "@/lib/hooks";
 import { useReadContract } from "wagmi";
 import { HOUSE_VAULT_ABI, contractAddresses } from "@/lib/contracts";
+import {
+  feeShareForDuration,
+  penaltyBpsForRemaining,
+  LOCK_MIN_DURATION_SECS,
+} from "@parlaycity/shared";
 
 function formatUSDC(amount: bigint | undefined): string {
   if (amount === undefined) return "---";
@@ -27,8 +32,58 @@ function formatUSDC(amount: bigint | undefined): string {
   });
 }
 
-const TIER_LABELS = ["30 Days (1.1x)", "60 Days (1.25x)", "90 Days (1.5x)"];
-const TIER_MULTIPLIERS = ["1.1x", "1.25x", "1.5x"];
+const SECS_PER_DAY = 86_400n;
+
+// Slider operates on days. Range: 7d → 3650d (10y). Curve is log-weighted
+// so the knee-over around 1-2yr lives in the middle of the slider travel.
+const LOCK_MIN_DAYS = 7;
+const LOCK_MAX_DAYS = 3650;
+const LOCK_DEFAULT_DAYS = 365;
+
+// Preset stops users can tap to snap the slider.
+const LOCK_PRESETS: { label: string; days: number }[] = [
+  { label: "1w", days: 7 },
+  { label: "1mo", days: 30 },
+  { label: "3mo", days: 90 },
+  { label: "6mo", days: 180 },
+  { label: "1yr", days: 365 },
+  { label: "2yr", days: 730 },
+  { label: "5yr", days: 1825 },
+  { label: "10yr", days: 3650 },
+];
+
+function formatDuration(days: number): string {
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"}`;
+  if (days < 365) return `${Math.round(days / 30)} months`;
+  const years = days / 365;
+  if (Math.abs(years - Math.round(years)) < 0.02) {
+    return `${Math.round(years)} year${Math.round(years) === 1 ? "" : "s"}`;
+  }
+  return `${years.toFixed(1)} years`;
+}
+
+function bpsToMultiplier(bps: bigint): string {
+  const x = Number(bps) / 10_000;
+  return `${x.toFixed(2)}x`;
+}
+
+function bpsToPercent(bps: bigint): string {
+  const pct = Number(bps) / 100;
+  return `${pct.toFixed(2)}%`;
+}
+
+// Log scale for the slider so small durations have proportional travel.
+function sliderToDays(value: number): number {
+  const logMin = Math.log(LOCK_MIN_DAYS);
+  const logMax = Math.log(LOCK_MAX_DAYS);
+  const days = Math.exp(logMin + (logMax - logMin) * (value / 1000));
+  return Math.max(LOCK_MIN_DAYS, Math.min(LOCK_MAX_DAYS, Math.round(days)));
+}
+function daysToSlider(days: number): number {
+  const logMin = Math.log(LOCK_MIN_DAYS);
+  const logMax = Math.log(LOCK_MAX_DAYS);
+  return Math.round(((Math.log(days) - logMin) / (logMax - logMin)) * 1000);
+}
 
 type Tab = "deposit" | "withdraw" | "lock";
 
@@ -50,9 +105,16 @@ export function VaultDashboard() {
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [lockAmount, setLockAmount] = useState("");
-  const [lockTier, setLockTier] = useState(0);
+  const [lockDays, setLockDays] = useState<number>(LOCK_DEFAULT_DAYS);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Live preview derived from selected duration.
+  const lockDurationSecs = BigInt(lockDays) * SECS_PER_DAY;
+  const lockFeeShareBps = lockDurationSecs >= LOCK_MIN_DURATION_SECS
+    ? feeShareForDuration(lockDurationSecs)
+    : 10_000n;
+  const lockDay0PenaltyBps = penaltyBpsForRemaining(lockDurationSecs);
 
   // User's vault share balance
   const { data: userShares } = useReadContract({
@@ -126,7 +188,7 @@ export function VaultDashboard() {
     const amount = parseFloat(lockAmount);
     if (!amount || amount <= 0) return;
     const shares = parseUnits(amount.toString(), 6);
-    const success = await lockHook.lock(shares, lockTier);
+    const success = await lockHook.lock(shares, lockDurationSecs);
     if (success) {
       setLockAmount("");
       await refetchPositions();
@@ -210,6 +272,7 @@ export function VaultDashboard() {
 
   function lockButtonLabel(): string {
     if (!isConnected) return "Connect Wallet";
+    if (!lockHook.ready) return "Not Deployed On This Network";
     if (!hasShares) return "Deposit USDC First";
     if (lockHook.isPending) return "Signing...";
     if (lockHook.isConfirming) return "Confirming...";
@@ -297,7 +360,7 @@ export function VaultDashboard() {
               { color: "bg-brand-purple-1", text: "The vault underwrites potential payouts. Reserved liquidity backs active tickets." },
               { color: "bg-neon-green", text: "Withdrawals are available up to the unreserved balance (max 80% utilization cap)." },
               { color: "bg-brand-gold", text: "When bettors lose, their stakes flow to the vault -- increasing share value for all depositors." },
-              { color: "bg-brand-blue", text: "Lock your vUSDC shares for 30/60/90 days to earn boosted fee share (up to 1.5x multiplier)." },
+              { color: "bg-brand-blue", text: "Lock your vUSDC shares for any duration (min 7 days). Longer locks earn a higher fee-share multiplier, up to ~4x at the asymptote." },
             ].map((item, i) => (
               <li key={i} className="flex gap-3">
                 <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${item.color}`} />
@@ -321,6 +384,9 @@ export function VaultDashboard() {
                   ? 0
                   : Math.ceil((Number(position.unlockAt) - now) / 86400);
 
+                const feeShareLabel = bpsToMultiplier(position.feeShareBps);
+                const durationDays = Number(position.duration / SECS_PER_DAY);
+
                 return (
                   <div
                     key={id.toString()}
@@ -331,7 +397,7 @@ export function VaultDashboard() {
                         {formatUSDC(position.shares)} vUSDC
                       </p>
                       <p className="text-xs text-gray-500">
-                        {TIER_MULTIPLIERS[position.tier]} fee boost
+                        {feeShareLabel} fee share -- {formatDuration(durationDays)}
                         {matured ? " -- Matured" : ` -- ${daysLeft}d left`}
                       </p>
                     </div>
@@ -560,22 +626,68 @@ export function VaultDashboard() {
                 )}
               </div>
 
-              {/* Tier selector */}
-              <div className="grid grid-cols-3 gap-2">
-                {TIER_LABELS.map((label, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setLockTier(i)}
-                    className={`rounded-lg border px-3 py-3 text-center text-xs font-semibold transition-all ${
-                      lockTier === i
-                        ? "border-brand-purple/50 gradient-bg text-white glow-purple"
-                        : "border-white/10 bg-white/5 text-gray-400 hover:border-white/20"
-                    }`}
-                  >
-                    <div>{label.split(" (")[0]}</div>
-                    <div className="mt-1 text-sm font-bold">{TIER_MULTIPLIERS[i]}</div>
-                  </button>
-                ))}
+              {/* Duration slider + live preview */}
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-gray-500">Lock duration</p>
+                    <p className="text-lg font-bold text-white">{formatDuration(lockDays)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wider text-gray-500">Fee share</p>
+                    <p className="text-lg font-bold text-brand-purple-1">
+                      {bpsToMultiplier(lockFeeShareBps)}
+                    </p>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min={0}
+                  max={1000}
+                  step={1}
+                  value={daysToSlider(lockDays)}
+                  onChange={(e) => setLockDays(sliderToDays(Number(e.target.value)))}
+                  aria-label="Lock duration"
+                  className="mt-3 w-full accent-brand-purple"
+                />
+
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {LOCK_PRESETS.map((p) => (
+                    <button
+                      key={p.days}
+                      onClick={() => setLockDays(p.days)}
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                        lockDays === p.days
+                          ? "bg-brand-purple/30 text-white"
+                          : "bg-white/5 text-gray-400 hover:bg-white/10"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-lg bg-black/20 px-3 py-2">
+                    <p className="text-gray-500">Day-0 exit penalty</p>
+                    <p className="text-sm font-semibold text-yellow-400">
+                      {bpsToPercent(lockDay0PenaltyBps)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-black/20 px-3 py-2">
+                    <p className="text-gray-500">Unlocks</p>
+                    <p className="text-sm font-semibold text-white">
+                      {mounted
+                        ? new Date(Date.now() + lockDays * 86_400_000).toLocaleDateString()
+                        : "--"}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] leading-snug text-gray-500">
+                  Fee share is your slice of incoming locker fees -- not an APY. Realized
+                  yield depends on protocol fee flow.
+                </p>
               </div>
 
               <div className="relative">
@@ -607,7 +719,7 @@ export function VaultDashboard() {
               )}
               <button
                 onClick={handleLock}
-                disabled={!isConnected || !hasShares || !lockAmount || lockNotANumber || lockBelowMinimum || lockExceedsShares || lockHook.isPending || lockHook.isConfirming}
+                disabled={!isConnected || !lockHook.ready || !hasShares || !lockAmount || lockNotANumber || lockBelowMinimum || lockExceedsShares || lockHook.isPending || lockHook.isConfirming}
                 className="btn-gradient w-full rounded-xl py-3 text-sm font-bold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:!bg-none disabled:!bg-gray-800 disabled:!text-gray-500 disabled:!shadow-none"
               >
                 {lockButtonLabel()}

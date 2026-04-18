@@ -7,7 +7,6 @@ out/
 cache/
 .next/
 dist/
-packages/foundry/deployments/
 
 # Foundry
 packages/foundry/out/

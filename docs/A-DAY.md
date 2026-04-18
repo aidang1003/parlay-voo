@@ -51,22 +51,14 @@ Mark tasks `✅ COMPLETE` when done. Don't delete — keeps a log of what shippe
 - **Files:** `packages/nextjs/src/lib/hooks.ts:149-216` (useVaultStats), `packages/nextjs/src/lib/hooks.ts:218-288` (useParlayConfig)
 - **Change:** replace clusters of `useReadContract` with a single `useReadContracts` per hook. wagmi auto-batches into Multicall3 (already deployed on Base Sepolia at `0xcA11bde05977b3631167028862bE2a173976CA11`). Preserve the same return shape so callers don't need to change.
 
-### S-7 — Move cache into `/api/quote` + `/api/agent-stats`
-- **Time:** 30 minutes each (after S-4)
-- **Value:** Medium. These are the other two routes with either broken or missing caching. Cheap to clean up once Redis is wired.
-- **Files:** `packages/nextjs/src/app/api/quote/route.ts`, `packages/nextjs/src/app/api/agent-stats/route.ts:58-64`
+### S-7 — Move cache into `/api/quote` + `/api/agent-stats` ❌ SKIPPED
+- Depended on S-4 (Redis) which was never implemented. `agent-stats/route.ts:67-69` already has a 60s in-memory cache that's doing its job. `quote/route.ts` intentionally has no cache — quotes are stake-dependent and must stay fresh. No work needed.
 
-### S-8 — Kill the Makefile (optional, Option A from planning)
-- **Time:** 1-2 hours
-- **Value:** Quality-of-life only. No performance impact. Do this if the Makefile is still annoying you by Sunday afternoon and you have spare cycles.
-- **Files:** `Makefile` (delete), `package.json` root (add scripts), `packages/nextjs/package.json` (tweak scripts), `packages/foundry/package.json` (add forge wrappers), possibly `scripts/dev.sh` for the multi-process dev loop
-- **Change:** replace `make dev / make deploy-local / make gate / make test-all` with `pnpm dev / pnpm deploy:local / pnpm gate / pnpm test`. Keep the same behavior, just through package.json scripts.
+### S-8 — Kill the Makefile ✅ COMPLETE
+- Shipped as part of "Structure Changes ✅ COMPLETE" item #3 (line 148). `Makefile` deleted, all targets live in root `package.json` as `pnpm <script>`.
 
-### S-9 — `deployedContracts.ts` auto-generation (optional, Option B from planning)
-- **Time:** 3-4 hours
-- **Value:** Medium-low. Kills the hand-maintained 407-line ABI file at `packages/nextjs/src/lib/contracts.ts`, which drifts every time you touch a contract. Worth doing if you're about to edit contracts heavily.
-- **Files:** new forge script `packages/foundry/script/GenerateAbis.s.sol` or a tsx script that reads `packages/foundry/out/**/*.json`, writes `packages/nextjs/src/contracts/deployedContracts.ts`. Update `hooks.ts` imports.
-- **Natural bundling:** do this during S-3 if you find yourself already rewriting how hooks consume ABIs.
+### S-9 — `deployedContracts.ts` auto-generation ✅ COMPLETE
+- Shipped. `scripts/generate-deployed-contracts.ts` reads forge broadcast JSON + `out/**/*.json` and writes `packages/nextjs/src/contracts/deployedContracts.ts`. Chained onto `pnpm deploy:*`. The old 407-line hand-maintained ABI file is now a 61-line backwards-compat shim at `packages/nextjs/src/lib/contracts.ts`.
 
 ### S-10 - Re-format database naming conventions ✅ COMPLETE
 - **Time:** 20 minutes
@@ -79,11 +71,40 @@ Mark tasks `✅ COMPLETE` when done. Don't delete — keeps a log of what shippe
 
 Add your own below. For each, jot down: time estimate, value, blockers (which scaling task it depends on, if any). Then slot them into the alternation sequence.
 
-### F-1 — Implement real AMM pool
-- **Time:** 1 day
-- **Value:** high, the product is not complete until we have an actual lock up mechanism driven by market dynamics
-- **Blockers:** currect lock functionality has return periods and values hard-coded 
-- **Notes:**
+### F-1 — Market-driven LP pool mechanics
+- **Value:** High. LPs act as the house; product needs real lock + risk-exposure dynamics, not hard-coded admin knobs.
+- **Blockers:** None. LockVault tiers (30/60/90d fixed) + uniform HouseVault exposure are the two weak pieces.
+- **Shape:** Split into two sub-items, shipped separately. C (full on-chain leg pricing AMM) is parked until we have liquidity — not documented here.
+
+#### F-1A — Continuous-duration lock curve (LockVaultV2)
+- **Time:** 1-2 days
+- **Replaces:** `LockVault.sol` tier model (`LockTier` enum, 1.1x/1.25x/1.5x, 30/60/90d).
+- **Design:**
+  - `lock(shares, duration)` + `extend(positionId, additionalDuration)`. Duration in `[7d, 180d]`.
+  - Linear weight: `weightBps = 10_000 + 10_000 * (duration - MIN) / (MAX - MIN)` → 1.0x@7d, 2.0x@180d.
+  - Dual-scaled penalty: `penaltyBps = MAX_PENALTY_BPS * remaining / MAX_LOCK_DURATION` (closes "lock long, exit day 0 for early-weighting arb"). 20% max at 180d day 0, 3.3% max at 30d day 0.
+  - Synthetix `accRewardPerWeightedShare` accumulator — unchanged from V1.
+- **Migration:** Old `LockVault` → withdraw-only (revert on `lock()`). Deploy `LockVaultV2` alongside. `HouseVault.setLockVault()` flips to new address. Existing positions mature naturally.
+- **Tests:** fuzz weight monotonicity, penalty bounds, `totalWeightedShares` invariant over random lock/extend/unlock sequences; parity test that old tiers don't pay more under new curve.
+
+#### F-1B — Utilization tranches (concentrated-risk LP positions)
+- **Time:** 3-5 days. Separate PR.
+- **Gate:** Draft `docs/TRANCHES.md` with math + open questions nailed down, user sign-off, *then* code.
+- **Design sketch:**
+  - 4 fixed tranches by utilization BPS: Senior 0-5000, Mezz 5000-7500, Junior 7500-8000, plus "full-range" (0-10000) for legacy/default LPs.
+  - LP position = `(shares, tickLower, tickUpper, feeGrowthInside, lossGrowthInside)`. Junior earns fattest fees, takes first loss.
+  - Uniswap V3 `feeGrowthGlobal` / `feeGrowthInside` pattern for accounting.
+  - Reserve hook in `HouseVault.reservePayout()` routes fee accrual + loss exposure by tick range crossed.
+- **Open questions to resolve in TRANCHES.md:**
+  1. Tick granularity — fixed 4 vs 100-BPS continuous
+  2. Overlay on existing vUSDC or replace with per-tranche share tokens
+  3. Default band for existing LPs (opt-in full-range recommended)
+- **Files:** new `packages/foundry/src/core/TrancheRegistry.sol`; `HouseVault.sol` gains reserve/pay hooks; `ParlayMath.sol` untouched.
+
+#### Ordering
+1. Ship F-1A to `main`. Low risk, clean rollback.
+2. Draft TRANCHES.md, sign-off.
+3. Ship F-1B.
 
 ### F-2 — Add live polymarket data ✅ COMPLETE
 - **Time:** 2 days
@@ -184,6 +205,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Funding my personal wallet with gas on the anvil chain should happen automatically on deploy
 - Some typescript module named parleycity is in there. Look into what this is later.
 - Messages returned to console on a contract deploy are not 100% accurate
+- Writing both deployment files on `pnpm deploy:sepolia`. Either the comment is wrong os this is overkill since we only want to deploy on sepolia
 
 ## Random Things I think of
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.

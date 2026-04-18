@@ -55,6 +55,28 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     /// @notice Bet-only credit balance issued to users who lost parlays and entered rehab.
     mapping(address => uint256) public creditBalance;
 
+    /// @notice Minimum parlay stake that triggers a rehab lock. Below this, the
+    ///         loss stays with LPs as implicit profit (gas-floor for batching).
+    uint256 public constant MIN_REHAB_STAKE = 1e6; // $1 USDC
+
+    /// @notice Minimum duration for a LEAST rehab lock issued from a loss.
+    uint256 public constant MIN_REHAB_DURATION = 365 days;
+
+    /// @notice Queued rehab loss awaiting flush. `stake` is `effectiveStake`
+    ///         (post-fee) and is also counted in `pendingRehabPrincipal`.
+    struct PendingLoss {
+        address owner;
+        uint256 stake;
+        uint256 duration;
+    }
+
+    PendingLoss[] public pendingLosses;
+
+    /// @notice Sum of all queued rehab principals. Subtracted from
+    ///         `totalAssets()` so LPs don't see a share-price spike between
+    ///         loss-time and flush-time.
+    uint256 public pendingRehabPrincipal;
+
     // ── Events ───────────────────────────────────────────────────────────
 
     event Deposited(address indexed depositor, address indexed receiver, uint256 assets, uint256 shares);
@@ -76,6 +98,9 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     event ProjectedAprChanged(uint256 oldBps, uint256 newBps);
     event CreditIssued(address indexed user, uint256 amount);
     event CreditSpent(address indexed user, uint256 amount);
+    event RehabLossQueued(address indexed loser, uint256 stake, uint256 duration, uint256 creditIssued);
+    event RehabLossFlushed(address indexed owner, uint256 stake, uint256 sharesMinted);
+    event LeastPrincipalBurned(uint256 shares);
 
     // ── Modifiers ────────────────────────────────────────────────────────
 
@@ -157,13 +182,14 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         return 6;
     }
 
-    /// @notice Total USDC managed by the vault (local + deployed to yield adapter).
+    /// @notice Total USDC managed by the vault (local + deployed to yield adapter),
+    ///         excluding queued rehab principal. Queued losses are earmarked for
+    ///         rehab locks and must not inflate LP share price between loss-time
+    ///         and flush-time.
     function totalAssets() public view returns (uint256) {
         uint256 local = asset.balanceOf(address(this));
-        if (address(yieldAdapter) != address(0)) {
-            return local + yieldAdapter.balance();
-        }
-        return local;
+        uint256 gross = address(yieldAdapter) != address(0) ? local + yieldAdapter.balance() : local;
+        return gross > pendingRehabPrincipal ? gross - pendingRehabPrincipal : 0;
     }
 
     /// @notice USDC held locally (not deployed to adapter).
@@ -350,5 +376,67 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     /// @notice Credit to issue for a given rehab principal at the current projected APR.
     function creditFor(uint256 principal) public view returns (uint256) {
         return (principal * projectedAprBps) / 10_000;
+    }
+
+    // ── Rehab (Phase 2) ──────────────────────────────────────────────────
+
+    /// @notice Queue a losing parlay stake for rehab conversion. Called by the
+    ///         engine on settlement when a ticket resolves as a loss. Sub-
+    ///         threshold losses fall through and stay with LPs as implicit
+    ///         profit. If `lockVault` is not configured, the loss also stays
+    ///         implicit — protocol degrades gracefully to pre-rehab behavior.
+    function distributeLoss(uint256 stake, address loser, uint256 duration) external onlyEngine nonReentrant {
+        if (address(lockVault) == address(0)) return;
+        if (stake < MIN_REHAB_STAKE) return;
+        require(loser != address(0), "HouseVault: zero loser");
+        require(duration >= MIN_REHAB_DURATION, "HouseVault: duration too short");
+
+        pendingLosses.push(PendingLoss({owner: loser, stake: stake, duration: duration}));
+        pendingRehabPrincipal += stake;
+
+        uint256 credit = creditFor(stake);
+        _issueCredit(loser, credit);
+
+        emit RehabLossQueued(loser, stake, duration, credit);
+    }
+
+    /// @notice Permissionless drain of the rehab queue. Mints VOO shares at
+    ///         the pre-flush price (which already excludes pendingRehabPrincipal)
+    ///         and hands them to LockVaultV2 via `rehabLock` under the LEAST
+    ///         tier. LP share price is neutral across queue → flush.
+    function flushRehabLosses(uint256 maxCount) external nonReentrant {
+        require(address(lockVault) != address(0), "HouseVault: lockVault not configured");
+        uint256 n = pendingLosses.length;
+        if (n == 0) return;
+        if (maxCount == 0 || maxCount > n) maxCount = n;
+
+        for (uint256 i = 0; i < maxCount; i++) {
+            PendingLoss memory loss = pendingLosses[pendingLosses.length - 1];
+            pendingLosses.pop();
+
+            uint256 shares = convertToShares(loss.stake);
+            pendingRehabPrincipal -= loss.stake;
+
+            _mint(address(this), shares);
+            _approve(address(this), address(lockVault), shares);
+            lockVault.rehabLock(loss.owner, shares, loss.duration, ILockVault.Tier.LEAST);
+
+            emit RehabLossFlushed(loss.owner, loss.stake, shares);
+        }
+    }
+
+    /// @notice Burn VOO shares held by LockVault. Called by LockVaultV2 when a
+    ///         LEAST position expires unused — the principal is retired back
+    ///         to LPs (USDC backing stays, share supply shrinks).
+    function burnFromLockVault(uint256 shares) external nonReentrant {
+        require(msg.sender == address(lockVault), "HouseVault: not lockVault");
+        require(shares > 0, "HouseVault: zero shares");
+        _burn(address(lockVault), shares);
+        emit LeastPrincipalBurned(shares);
+    }
+
+    /// @notice Length of the pending-loss queue. Useful for off-chain pagination.
+    function pendingLossesLength() external view returns (uint256) {
+        return pendingLosses.length;
     }
 }

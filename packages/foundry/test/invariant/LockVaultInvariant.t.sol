@@ -150,8 +150,8 @@ contract LockVaultInvariantTest is Test {
     /// @notice totalLockedShares must always equal the sum of all active position shares.
     ///         The VOO balance of the lock vault must be >= totalLockedShares.
     function invariant_lockedSharesConsistency() public view {
-        uint256 vUSDCBalance = vault.balanceOf(address(lockVault));
-        assertGe(vUSDCBalance, lockVault.totalLockedShares(), "VOO balance < totalLockedShares");
+        uint256 vooBalance = vault.balanceOf(address(lockVault));
+        assertGe(vooBalance, lockVault.totalLockedShares(), "VOO balance < totalLockedShares");
     }
 
     /// @notice totalWeightedShares should be zero iff totalLockedShares is zero.
@@ -178,8 +178,8 @@ contract LockVaultInvariantTest is Test {
     /// @notice Penalty shares from early withdrawals stay in LockVault.
     ///         The surplus (balance - totalLockedShares) is always non-negative.
     function invariant_penaltySurplusNonNegative() public view {
-        uint256 vUSDCBalance = vault.balanceOf(address(lockVault));
+        uint256 vooBalance = vault.balanceOf(address(lockVault));
         uint256 locked = lockVault.totalLockedShares();
-        assertGe(vUSDCBalance, locked, "negative penalty surplus");
+        assertGe(vooBalance, locked, "negative penalty surplus");
     }
 }

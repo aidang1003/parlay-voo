@@ -498,6 +498,14 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         if (anyLost) {
             ticket.status = TicketStatus.Lost;
             if (originalPayout > 0) vault.releasePayout(originalPayout);
+            // Rehab carve: the effective stake (post-fee) is queued for
+            // conversion into a LEAST lock. HouseVault silently drops sub-
+            // threshold losses and returns-to-LPs behaviour when lockVault
+            // isn't configured, so this call is unconditional.
+            uint256 effectiveStake = ticket.stake - ticket.feePaid;
+            if (effectiveStake > 0) {
+                vault.distributeLoss(effectiveStake, ownerOf(ticketId), vault.MIN_REHAB_DURATION());
+            }
         } else if (allWon) {
             ticket.status = TicketStatus.Won;
         } else {

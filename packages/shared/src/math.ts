@@ -184,6 +184,41 @@ export function computeCashoutValue(
   return { cashoutValue, penaltyBps, fairValue };
 }
 
+/**
+ * LockVaultV2 fee-share multiplier (BPS) for a committed duration (seconds).
+ * Mirrors LockVaultV2.feeShareForDuration exactly.
+ *
+ *   feeShareBps = 10_000 + MAX_BOOST_BPS * d / (d + HALF_LIFE_SECS)
+ *
+ * Asymptotic: base 10_000 at d=MIN, approaches 40_000 as d → ∞.
+ * Throws when duration < MIN_LOCK_DURATION (matches Solidity require).
+ */
+export const LOCK_MIN_DURATION_SECS = 7n * 86_400n;           // 7 days
+export const LOCK_HALF_LIFE_SECS = 730n * 86_400n;            // 2 years
+export const LOCK_MAX_BOOST_BPS = 30_000n;
+export const LOCK_MAX_PENALTY_BPS = 3_000n;
+
+export function feeShareForDuration(durationSecs: bigint): bigint {
+  if (durationSecs < LOCK_MIN_DURATION_SECS) {
+    throw new Error("feeShareForDuration: duration below minimum");
+  }
+  const boost = (LOCK_MAX_BOOST_BPS * durationSecs) / (durationSecs + LOCK_HALF_LIFE_SECS);
+  return 10_000n + boost;
+}
+
+/**
+ * LockVaultV2 early-exit penalty (BPS) given remaining lock time (seconds).
+ * Mirrors LockVaultV2.penaltyBpsForRemaining exactly.
+ *
+ *   penaltyBps = MAX_PENALTY_BPS * remaining / (remaining + HALF_LIFE_SECS)
+ *
+ * Returns 0 when remaining = 0 (lock has matured).
+ */
+export function penaltyBpsForRemaining(remainingSecs: bigint): bigint {
+  if (remainingSecs === 0n) return 0n;
+  return (LOCK_MAX_PENALTY_BPS * remainingSecs) / (remainingSecs + LOCK_HALF_LIFE_SECS);
+}
+
 function invalidQuote(
   legIds: number[],
   outcomes: string[],

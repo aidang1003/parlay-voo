@@ -147,13 +147,14 @@ describe("VaultDashboard", () => {
     expect(screen.getByText("You have no vault shares to withdraw.")).toBeInTheDocument();
   });
 
-  it("switches to lock tab and shows tier selector", () => {
+  it("switches to lock tab and shows duration slider + preview", () => {
     render(<VaultDashboard />);
     fireEvent.click(screen.getByText("Lock"));
     expect(screen.getByText(/Lock your vault shares/)).toBeInTheDocument();
-    expect(screen.getByText("1.1x")).toBeInTheDocument();
-    expect(screen.getByText("1.25x")).toBeInTheDocument();
-    expect(screen.getByText("1.5x")).toBeInTheDocument();
+    expect(screen.getByLabelText("Lock duration")).toBeInTheDocument();
+    // Default is 365d → exactly 2.00x fee share
+    expect(screen.getByText("2.00x")).toBeInTheDocument();
+    expect(screen.getByText("Day-0 exit penalty")).toBeInTheDocument();
   });
 
   it("deposit input accepts numeric value", () => {

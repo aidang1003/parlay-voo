@@ -9,7 +9,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {IYieldAdapter} from "../interfaces/IYieldAdapter.sol";
-import {LockVault} from "./LockVault.sol";
+import {ILockVault} from "../interfaces/ILockVault.sol";
 
 /// @title HouseVault
 /// @notice ERC4626-like vault that holds USDC liquidity for the ParlayCity house.
@@ -35,7 +35,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     address public engine;
 
     /// @notice LockVault for routing fee income to lockers.
-    LockVault public lockVault;
+    ILockVault public lockVault;
 
     /// @notice Safety module address for routing fee income to insurance buffer.
     address public safetyModule;
@@ -103,7 +103,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         emit MaxPayoutBpsSet(_bps);
     }
 
-    function setLockVault(LockVault _lockVault) external onlyOwner {
+    function setLockVault(ILockVault _lockVault) external onlyOwner {
         require(address(_lockVault) != address(0), "HouseVault: zero address");
         lockVault = _lockVault;
         emit LockVaultSet(address(_lockVault));

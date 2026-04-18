@@ -40,6 +40,7 @@ const CONTRACT_NAMES: Record<string, string> = {
   ParlayEngine: "ParlayEngine",
   LegRegistry: "LegRegistry",
   LockVault: "LockVault",
+  LockVaultV2: "LockVaultV2",
   AdminOracleAdapter: "AdminOracleAdapter",
   OptimisticOracleAdapter: "OptimisticOracleAdapter",
   MockYieldAdapter: "MockYieldAdapter",
@@ -153,7 +154,10 @@ export default deployedContracts;
 export type DeployedContracts = typeof deployedContracts;
 export type SupportedChainId = keyof DeployedContracts;
 export type SupportedDeployedChainId = SupportedChainId;
-export type ContractName<C extends SupportedChainId> = keyof DeployedContracts[C];
+// Union of all contract names across all chains (mapped-type so default C
+// does not collapse to intersection). Passing a specific C narrows to that chain.
+export type ContractName<C extends SupportedChainId = SupportedChainId> =
+  { [K in C]: keyof DeployedContracts[K] }[C];
 `;
 }
 

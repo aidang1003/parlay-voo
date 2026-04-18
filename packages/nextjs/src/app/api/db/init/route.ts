@@ -37,9 +37,9 @@ export async function GET(req: Request) {
           question: leg.question,
           category: market.category,
           yesLegId: leg.id - 1, // seed catalog 1..21 → on-chain 0..20
-          noLegId: null,
+          noLegId: leg.noId != null ? leg.noId - 1 : null,
           yesProbabilityPpm: leg.probabilityPPM,
-          noProbabilityPpm: null,
+          noProbabilityPpm: leg.noProbabilityPPM ?? null,
           cutoffTime: leg.cutoffTime,
           earliestResolve: leg.earliestResolve,
           active: leg.active,

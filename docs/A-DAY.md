@@ -189,6 +189,10 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
 - Admin page features: Syncing/initializing the database
 - Database doesn't need "poly:" prepending on the PK column
+- **Curate the betting data.** The market list is currently whatever Polymarket hands back in sync order — we should rank it. Two signals to start:
+  1. **Volume first.** Higher-volume markets float to the top of the list. Deep liquidity = tighter odds = more confidence the multiplier we quote is real.
+  2. **Prefer balanced markets.** Legs with YES/NO multipliers closer to 2x on both sides (i.e. probabilities near 50/50) are better parlay material — more interesting to build around, less likely to be a foregone conclusion, and the edge math behaves better away from the 1–99% clamp. Rank down heavily skewed markets (e.g. 95/5) even if they have volume.
+  - Implementation sketch: add a `curationScore` on `CuratedMarket` computed at sync time from `volume` + `abs(ppm - 500_000)` (distance from coinflip), sort the `/api/markets` response by it, tie-break on volume. No UI change needed; the frontend already renders in array order.
 
 ## Bailout rules
 

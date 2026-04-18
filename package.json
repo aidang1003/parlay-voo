@@ -7,6 +7,8 @@
     "dev-stop": "bash scripts/dev-stop.sh",
     "fund-wallet:local": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/FundWallet.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --sig \"run(uint256)\"",
     "fund-wallet:sepolia": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/FundWallet.s.sol --rpc-url base-sepolia --broadcast --sig \"run(uint256)\"",
+    "resolve-leg:local": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/ResolveLeg.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --sig \"run(string,uint8)\"",
+    "resolve-leg:sepolia": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/ResolveLeg.s.sol --rpc-url base-sepolia --broadcast --sig \"run(string,uint8)\"",
     "demo-seed:local": "dotenv -e .env -e packages/nextjs/.env.local -- bash -c 'cd packages/foundry && forge script script/DemoSeed.s.sol --rpc-url http://127.0.0.1:8545 --broadcast'",
     "demo-seed:sepolia": "dotenv -e .env -e packages/nextjs/.env.local -- bash -c 'cd packages/foundry && forge script script/DemoSeed.s.sol --rpc-url base-sepolia --broadcast --slow'",
     "build": "pnpm --filter web build",

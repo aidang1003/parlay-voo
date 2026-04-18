@@ -188,6 +188,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 ## Random Things I think of
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
 - Admin page features: Syncing/initializing the database
+- Database doesn't need "poly:" prepending on the PK column
 
 ## Bailout rules
 

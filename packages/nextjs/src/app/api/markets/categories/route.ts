@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { fetchMarketsFromDb } from "@/lib/polymarket/markets";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/markets/categories -- list available categories with counts.
  */

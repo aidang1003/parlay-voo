@@ -7,13 +7,9 @@
 ParlayCity has two pools of idle USDC that earn nothing today:
 
 1. **HouseVault idle capital** -- USDC sitting in the vault above the `yieldBufferBps` (25%) threshold and `totalReserved` floor. Currently routable to `AaveYieldAdapter` but the default deploy uses `MockYieldAdapter`.
-2. **Rehab-mode locked capital** (planned) -- 10% of every losing stake force-locked as vUSDC for 120 days. See `docs/REHAB_MODE.md`.
+2. **Rehab-mode locked capital** (planned) -- losing stakes locked as user principal, earning yield for the protocol. See `docs/REHAB_MODE.md`.
 
 Deploying this capital into Uniswap V3 stable-stable LP positions generates swap fee yield while preserving capital stability. The yield income flows back to the vault (increasing share price) and to the SafetyModule (insurance buffer).
-
-This also fulfills the economics spec in `docs/ECONOMICS.md`:
-
-> "$10 (10%) -> AMM liquidity pools (swap fees fund SafetyModule)"
 
 ## Pair Selection on Base
 

@@ -110,8 +110,17 @@ pnpm clean                    # forge clean + .next
 
 ## Docs
 
+### Doc style: two-part split (human + AI spec)
+
+Design docs in `docs/` follow a two-part structure:
+
+**Part 1 — Human Spec.** Skimmable. Bullet points over prose. Short flow diagrams only if the lines are tight. Formulas when they clarify. Sections: what the feature is, what it does, key design decisions with brief rationale, and what the user sees. No Solidity signatures, no contract state dumps, no invariant catalogs.
+
+**Part 2 — AI Spec Sheet.** Terse implementation reference for an LLM. Renames, constants, state additions per contract, access-control table, function signatures, call graphs (`X → Y → Z`), events, invariants, required tests, and files touched. Not meant to be read top-to-bottom by a human.
+
+When editing or adding a design doc, keep these two parts visually and semantically separated. Don't mix narrative into the spec sheet or state/signature noise into the human section. `docs/REHAB_MODE.md` is the canonical example.
+
 - `docs/ARCHITECTURE.md` -- system diagrams + contract architecture
-- `docs/ECONOMICS.md` -- fee routing 90/5/5, loss distribution
 - `docs/RISK_MODEL.md` -- utilization pricing, exposure caps
 - `docs/CASHOUT.md` -- crash-parlay cashout pricing
 - `docs/THREAT_MODEL.md` -- threat model + mitigations

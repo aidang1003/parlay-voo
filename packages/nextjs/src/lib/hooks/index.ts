@@ -8,8 +8,9 @@
  * - `lock.ts`   — `useLockVault`, `useUnlockVault`, `useEarlyWithdraw`,
  *                 `useLockPositions`, `useLockStats` (LockVault)
  * - `parlay.ts` — `useParlayConfig`, `useBuyTicket` (ParlayEngine config + JIT buy)
- * - `ticket.ts` — `useTicket`, `useUserTickets`, `useSettleTicket`,
- *                 `useClaimPayout`, `useCashoutEarly` (ParlayEngine ticket ops)
+ * - `ticket.ts` — `useTicket`, `useUserTickets`, `useAllTickets`,
+ *                 `useSettleTicket`, `useClaimPayout`, `useCashoutEarly`
+ *                 (ParlayEngine ticket ops)
  *
  * Internal helpers (`usePinnedChainId`, `useContractClient`, `EMPTY_ABI`) live
  * in `_internal.ts` and are intentionally not re-exported.

@@ -134,6 +134,97 @@ export function useUserTickets() {
   return { tickets, totalCount, isLoading, error, refetch: fetchTickets };
 }
 
+export interface TicketWithOwner {
+  id: bigint;
+  ticket: OnChainTicket;
+  owner: `0x${string}`;
+}
+
+/**
+ * Fetch every ticket in the engine, regardless of caller. Used by the admin
+ * view (`/admin/tickets`) to audit settlement across the whole population.
+ */
+export function useAllTickets() {
+  const publicClient = useContractClient();
+  const engine = useDeployedContract("ParlayEngine");
+  const [tickets, setTickets] = useState<TicketWithOwner[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const hasFetchedRef = useRef(false);
+  const fetchIdRef = useRef(0);
+  const inFlightRef = useRef(false);
+
+  const fetchAll = useCallback(async () => {
+    if (!publicClient || !engine) {
+      setTickets([]);
+      setIsLoading(false);
+      return;
+    }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    const localFetchId = ++fetchIdRef.current;
+    if (!hasFetchedRef.current) setIsLoading(true);
+
+    try {
+      const count = (await publicClient.readContract({
+        address: engine.address,
+        abi: engine.abi,
+        functionName: "ticketCount",
+      })) as bigint;
+      if (localFetchId !== fetchIdRef.current) return;
+
+      const total = Number(count);
+      const all: TicketWithOwner[] = [];
+      for (let i = 0; i < total; i++) {
+        if (localFetchId !== fetchIdRef.current) return;
+        try {
+          const [ticket, owner] = await Promise.all([
+            publicClient.readContract({
+              address: engine.address,
+              abi: engine.abi,
+              functionName: "getTicket",
+              args: [BigInt(i)],
+            }),
+            publicClient.readContract({
+              address: engine.address,
+              abi: engine.abi,
+              functionName: "ownerOf",
+              args: [BigInt(i)],
+            }),
+          ]);
+          all.push({
+            id: BigInt(i),
+            ticket: ticket as OnChainTicket,
+            owner: owner as `0x${string}`,
+          });
+        } catch (innerErr) {
+          console.error(`Failed to fetch ticket #${i}:`, innerErr);
+        }
+      }
+      if (localFetchId !== fetchIdRef.current) return;
+      setTickets(all);
+      setError(null);
+    } catch (err) {
+      if (localFetchId !== fetchIdRef.current) return;
+      setError(String(err));
+    } finally {
+      if (localFetchId === fetchIdRef.current) {
+        inFlightRef.current = false;
+        setIsLoading(false);
+        hasFetchedRef.current = true;
+      }
+    }
+  }, [publicClient, engine?.address]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 10_000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
+  return { tickets, isLoading, error, refetch: fetchAll };
+}
+
 export function useSettleTicket() {
   const publicClient = useContractClient();
   const engine = useDeployedContract("ParlayEngine");

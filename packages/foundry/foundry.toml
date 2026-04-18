@@ -24,6 +24,9 @@ depth = 32
 local = "http://127.0.0.1:8545"
 base-sepolia = "${BASE_SEPOLIA_RPC_URL}"
 
+[etherscan]
+base-sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api", chain = 84532 }
+
 [fmt]
 line_length = 120
 tab_width = 4

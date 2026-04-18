@@ -104,6 +104,20 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Blockers:** Admin functionality to view all tickets so we can verify
 - **Description:** The legs in a ticket should have a way of actually resolving. I envision we build a service using next's framework that reads from a list of currently active legs. When the leg resolves any tickets with that leg should update. If all legs resolve as successful then resolve the ticket and payout to the user's account. If one leg is unsuccesful designate the capital we were holding can be sent back to the pool (or marked as no longer in escrow) and the ticket can be resolved.
 
+### F-5 Trustless oracle — UMA OOv3 on Base (replace admin backdoor)
+- **Time:** 2-3 days
+- **Value:** High before any real-user launch. F-4 ships the settlement automation using `AdminOracleAdapter` (owner-resolved) behind a `block.chainid != 8453` guard so it can't be used on Base mainnet. This item is what unblocks mainnet.
+- **Blockers:** F-4 shipped.
+- **Problem:** Both existing oracle adapters route trust through the protocol owner:
+  - `AdminOracleAdapter.resolve()` is `onlyOwner` — owner writes any outcome, no challenge, no appeal.
+  - `OptimisticOracleAdapter.resolveDispute()` is `onlyOwner` — the propose/bond/challenge game is real, but disputes escalate to us, not to a decentralized vote. Weakens the economic guarantee.
+- **Preferred path:** Replace `OptimisticOracleAdapter.sol` with a thin wrapper around UMA Optimistic Oracle V3 (deployed on Base mainnet + Sepolia). Mechanics: our relayer `assertTruth()` on UMA with the Polymarket-derived outcome + a bond; anyone can dispute during liveness; unresolved disputes escalate to UMA's DVM token-holder vote. We keep the *automation* role (read Polymarket → post assertion) but lose the *arbiter* role. Remove the owner-only `resolveDispute()` from our codebase entirely.
+- **Alt paths (documented, not recommended):**
+  - **Chainlink CCIP** to read Polymarket CTF resolution cross-chain from Base. Inherits Polymarket's UMA resolution for free but adds a bridge dependency.
+  - **Deploy on Polygon** and read Polymarket's Conditional Token Framework directly. Cleanest decentralization story; loses the Base UX positioning and forces a full chain migration.
+- **Acceptance:** no `onlyOwner` function in the oracle path can alter a leg outcome. Ticket settlement remains permissionless. Unit + fork tests against UMA OOv3 on Base Sepolia.
+- **Consumer safeguard we ship with F-4 in the meantime:** `AdminOracleAdapter.resolve()` reverts on `block.chainid == 8453`, so the backdoor is literally unreachable on mainnet until F-5 lands.
+
 
 ## Parlay Builder Frontend Fixes ✅ COMPLETE
 1) Doesn't make sense to have a YES market for a parlay with a yes/no option and a NO option with a yes/no selection
@@ -124,7 +138,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 5) ✅ **294/294 forge tests pass** after the refactor. `pnpm deploy:local` + `pnpm demo:seed` verified end-to-end against a fresh Anvil.
 6) ✅ **Guiding question applied: "can this be a solidity script called via pnpm?"** Remaining `/scripts/` entries are kept because they genuinely aren't solidity:
    - `sync-env.ts` — writes `.env.local`, needs Node FS + string munging
-   - `settler-bot.ts` / `risk-agent.ts` / `demo-autopilot.ts` — long-running workers that call the Next.js API and read DB state
+   - `risk-agent.ts` / `demo-autopilot.ts` — long-running workers that call the Next.js API and read DB state (settlement moved in-process to `/api/settlement/run` as part of F-4)
    - `bootstrap.sh` / `dev.sh` / `dev-stop.sh` — process orchestration (installs, multi-daemon dev loop)
    - `lib/env.ts`, `lib/builder-code.ts` — shared helpers for the above
 
@@ -140,7 +154,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
    - **`demo-seed.sh`** — seeds a deployed stack with 5 legs, LP deposits, and 4 sample tickets across 2 wallets in Classic/Progressive/EarlyCashout modes. `pnpm demo:seed`.
    - **`gate.sh`** — old CI-gate wrapper (pre-pnpm-scripts). Safe to delete once `pnpm gate` replaces it everywhere; currently kept for anyone with muscle memory.
    - **`risk-agent.ts`** — autonomous betting agent. Discovers markets, builds candidate parlays, requests x402-paid AI risk assessment, makes sized decisions. `pnpm risk-agent` / `pnpm risk-agent:dry`.
-   - **`settler-bot.ts`** — permissionless ticket settlement loop. Polls for tickets whose legs are all oracle-resolved and calls `settleTicket()`. Runs as a cron on Vercel or `pnpm settler:sepolia` locally.
+   - ~~**`settler-bot.ts`**~~ — replaced by `/api/settlement/run` cron in F-4. The route unifies Phase A (relay Polymarket resolutions into `AdminOracleAdapter`) with Phase B (call `settleTicket()` when all legs are resolvable) in one request.
    - **`sync-env.ts`** — (new) reads forge broadcast JSON, writes `packages/nextjs/.env.local`. Replaces `sync-env.sh`.
    - **`lib/env.ts`** — shared env loader for the agent scripts (reads `.env.local`).
    - **`lib/builder-code.ts`** — ERC-8021 builder-code attribution suffix for agent transactions (Node mirror of the frontend's `builder-code.ts`).
@@ -169,9 +183,12 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Make dev.sh/dev-stop.sh use call the same scripts I call manually (pnpm chain, pnpm deploy:local, pnpm web-dev)
 - Funding my personal wallet with gas on the anvil chain should happen automatically on deploy
 - Some typescript module named parleycity is in there. Look into what this is later.
+- Messages returned to console on a contract deploy are not 100% accurate
 
 ## Random Things I think of
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
+- Admin page features: Syncing/initializing the database
+- Database doesn't need "poly:" prepending on the PK column
 
 ## Bailout rules
 

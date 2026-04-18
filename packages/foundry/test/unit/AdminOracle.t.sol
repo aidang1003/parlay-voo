@@ -62,4 +62,22 @@ contract AdminOracleTest is Test {
         vm.expectRevert();
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
     }
+
+    function test_resolve_revertsOnBaseMainnet() public {
+        vm.chainId(8453);
+        vm.expectRevert("AdminOracle: disabled on Base mainnet");
+        oracle.resolve(1, LegStatus.Won, keccak256("yes"));
+    }
+
+    function test_resolve_worksOnBaseSepolia() public {
+        vm.chainId(84532);
+        oracle.resolve(1, LegStatus.Won, keccak256("yes"));
+        assertTrue(oracle.canResolve(1));
+    }
+
+    function test_resolve_worksOnAnvil() public {
+        vm.chainId(31337);
+        oracle.resolve(1, LegStatus.Won, keccak256("yes"));
+        assertTrue(oracle.canResolve(1));
+    }
 }

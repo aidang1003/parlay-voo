@@ -139,3 +139,48 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       blnactive          = EXCLUDED.blnactive
   `;
 }
+
+// ---------------------------------------------------------------------------
+// Settlement helpers (F-4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Polymarket-sourced markets not yet relayed to AdminOracleAdapter. The
+ * tbpolymarketresolution row acts as the idempotency gate — once inserted,
+ * the market won't be picked up again. We don't filter on intyeslegid here
+ * because the JIT engine creates legs on-chain at ticket-buy time without
+ * writing back to the DB; the settlement route resolves the on-chain legId
+ * directly via LegRegistry.legIdBySourceRef().
+ */
+export async function getUnresolvedPolymarketLegs(): Promise<MarketRow[]> {
+  const db = sql();
+  const rows = await db`
+    SELECT m.* FROM tblegmapping m
+    LEFT JOIN tbpolymarketresolution r
+      ON r.txtconditionid = substr(m.txtsourceref, 6)
+    WHERE m.txtsource = 'polymarket'
+      AND m.blnactive = true
+      AND r.txtconditionid IS NULL
+    ORDER BY m.txtsourceref
+  `;
+  return (rows as Record<string, unknown>[]).map(coerceMarketRow);
+}
+
+export interface RecordResolutionInput {
+  conditionId: string;
+  outcome: "YES" | "NO" | "VOIDED";
+  yesTxHash: string | null;
+  noTxHash: string | null;
+}
+
+/**
+ * Write the audit row. Idempotent on conditionId — re-runs are a no-op.
+ */
+export async function recordResolution(input: RecordResolutionInput): Promise<void> {
+  const db = sql();
+  await db`
+    INSERT INTO tbpolymarketresolution (txtconditionid, txtoutcome, txtyestxhash, txtnotxhash)
+    VALUES (${input.conditionId}, ${input.outcome}, ${input.yesTxHash}, ${input.noTxHash})
+    ON CONFLICT (txtconditionid) DO NOTHING
+  `;
+}

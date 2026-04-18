@@ -89,7 +89,6 @@ pnpm clean                    # forge clean + .next
 **Scripts (`scripts/`):**
 - `generate-deployed-contracts.ts` -- reads forge broadcast + ABI JSON, writes `deployedContracts.ts` + `deployments/<chainId>.json`. Chained onto `pnpm deploy:*`.
 - `risk-agent.ts` -- autonomous betting agent (Kelly criterion sizing, 0G AI inference)
-- `settler-bot.ts` -- permissionless ticket settlement loop
 - `demo-autopilot.ts` -- auto-resolves legs on a running ticket for demos
 - `dev.sh` / `dev-stop.sh` / `bootstrap.sh` -- process orchestration
 - `lib/env.ts` -- shared env loading for scripts (reads .env.local)
@@ -125,7 +124,7 @@ pnpm clean                    # forge clean + .next
 
 **This file is checked into git** (SE2 convention) — Vercel builds from GitHub and needs it present, since Foundry doesn't run in the build env. After every `pnpm deploy:local` / `pnpm deploy:sepolia`, commit the refreshed `deployedContracts.ts` alongside any Solidity/TS changes in the same PR.
 
-**Keys:** `DEPLOYER_PRIVATE_KEY` is the single required signing key — deploys, admin calls, and agent scripts (settler-bot / demo-autopilot / risk-agent) all resolve to it. Locally it's optional (forge + agent scripts fall back to anvil defaults via `CodeConstants.ANVIL_ACCOUNT_0_KEY` / `scripts/lib/env.ts` `ANVIL_ACCOUNT_0_KEY`); required on Sepolia/mainnet. `QUOTE_SIGNER_PRIVATE_KEY` is **optional** — falls back to `DEPLOYER_PRIVATE_KEY` when unset. Set separately on mainnet only if you want the hot signer distinct from the cold deployer.
+**Keys:** `DEPLOYER_PRIVATE_KEY` is the single required signing key — deploys, admin calls, the settlement cron (`/api/settlement/run`), and agent scripts (demo-autopilot / risk-agent) all resolve to it. Locally it's optional (forge + agent scripts fall back to anvil defaults via `CodeConstants.ANVIL_ACCOUNT_0_KEY` / `scripts/lib/env.ts` `ANVIL_ACCOUNT_0_KEY`); required on Sepolia/mainnet. `QUOTE_SIGNER_PRIVATE_KEY` is **optional** — falls back to `DEPLOYER_PRIVATE_KEY` when unset. Set separately on mainnet only if you want the hot signer distinct from the cold deployer.
 
 **Dev wallet:** Rabby (not MetaMask). When giving wallet UI instructions (network switching, clearing pending txs, resetting nonce, adding custom networks), target Rabby's UI and always pair with a wallet-agnostic RPC fallback (`cast rpc anvil_setNonce …`) so the user can unstick regardless of wallet state. See README "Debugging stuck transactions".
 

@@ -401,7 +401,7 @@ export function ParlayBuilder() {
     !exceedsMaxPayout &&
     !insufficientBalance;
 
-  const vaultEmpty = false;
+  const vaultEmpty = mounted && freeLiquidity !== undefined && freeLiquidity === 0n;
 
   // ── Handlers ───────────────────────────────────────────────────────────
 

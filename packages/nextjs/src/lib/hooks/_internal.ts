@@ -32,11 +32,11 @@ export function useContractClient() {
 export function usePinnedWriteContract() {
   const chainId = usePinnedChainId();
   const wagmi = useWriteContract();
+  const wagmiWrite = wagmi.writeContractAsync;
   const writeContractAsync = useCallback(
-    ((args: Parameters<typeof wagmi.writeContractAsync>[0]) =>
-      wagmi.writeContractAsync({ ...args, chainId })) as typeof wagmi.writeContractAsync,
-    [wagmi.writeContractAsync, chainId],
-  );
+    (args: Parameters<typeof wagmiWrite>[0]) => wagmiWrite({ ...args, chainId } as typeof args),
+    [wagmiWrite, chainId],
+  ) as typeof wagmi.writeContractAsync;
   return { ...wagmi, writeContractAsync, chainId };
 }
 

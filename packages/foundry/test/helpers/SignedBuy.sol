@@ -101,4 +101,19 @@ abstract contract SignedBuy is Test {
         vm.prank(buyer);
         ticketId = engine.buyTicketSigned(q, sig);
     }
+
+    /// @dev Build + sign + call buyLosslessParlay.
+    function _buyLossless(
+        ParlayEngine engine,
+        address buyer,
+        ParlayEngine.SourceLeg[] memory legs,
+        uint256 stake,
+        uint256 deadline
+    ) internal returns (uint256 ticketId) {
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(buyer, stake, legs, deadline, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
+        vm.prank(buyer);
+        ticketId = engine.buyLosslessParlay(q, sig);
+    }
 }

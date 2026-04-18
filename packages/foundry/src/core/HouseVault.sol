@@ -101,6 +101,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     event RehabLossQueued(address indexed loser, uint256 stake, uint256 duration, uint256 creditIssued);
     event RehabLossFlushed(address indexed owner, uint256 stake, uint256 sharesMinted);
     event LeastPrincipalBurned(uint256 shares);
+    event LosslessWinRouted(address indexed owner, uint256 payout, uint256 sharesMinted);
 
     // ── Modifiers ────────────────────────────────────────────────────────
 
@@ -438,5 +439,43 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     /// @notice Length of the pending-loss queue. Useful for off-chain pagination.
     function pendingLossesLength() external view returns (uint256) {
         return pendingLosses.length;
+    }
+
+    // ── Rehab (Phase 3) ──────────────────────────────────────────────────
+
+    /// @notice Spend bet-only credit on behalf of a user. Called by the engine
+    ///         when a user buys a lossless parlay. Reverts if the user's
+    ///         credit balance is below `amount`.
+    function spendCredit(address user, uint256 amount) external onlyEngine {
+        _spendCredit(user, amount);
+    }
+
+    /// @notice Refund credit to a user — used by the engine to unwind a
+    ///         voided lossless ticket (stake was credit, not USDC).
+    function refundCredit(address user, uint256 amount) external onlyEngine {
+        _issueCredit(user, amount);
+    }
+
+    /// @notice Convert a lossless-parlay win into a PARTIAL-tier lock for the
+    ///         winner. Mints VOO shares at current share price, releases the
+    ///         reservation, and hands the shares to LockVaultV2 under PARTIAL.
+    ///         The USDC that was reserved for payout stays in the vault —
+    ///         backing the freshly minted shares and the released reservation.
+    function routeLosslessWin(address winner, uint256 payout) external onlyEngine nonReentrant {
+        require(address(lockVault) != address(0), "HouseVault: lockVault not configured");
+        require(winner != address(0), "HouseVault: zero winner");
+        require(payout > 0, "HouseVault: zero payout");
+        require(payout <= totalReserved, "HouseVault: payout exceeds reserved");
+
+        uint256 shares = convertToShares(payout);
+        require(shares > 0, "HouseVault: zero shares");
+
+        totalReserved -= payout;
+
+        _mint(address(this), shares);
+        _approve(address(this), address(lockVault), shares);
+        lockVault.rehabLock(winner, shares, MIN_REHAB_DURATION, ILockVault.Tier.PARTIAL);
+
+        emit LosslessWinRouted(winner, payout, shares);
     }
 }

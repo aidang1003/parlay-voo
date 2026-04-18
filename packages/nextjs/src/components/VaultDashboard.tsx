@@ -276,7 +276,7 @@ export function VaultDashboard() {
     if (lockHook.isPending) return "Signing...";
     if (lockHook.isConfirming) return "Confirming...";
     if (lockHook.isSuccess) return "Locked!";
-    if (lockBelowMinimum) return "Minimum 1 vUSDC";
+    if (lockBelowMinimum) return "Minimum 1 VOO";
     if (lockExceedsShares) return "Insufficient Shares";
     return "Lock Shares";
   }
@@ -306,7 +306,7 @@ export function VaultDashboard() {
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <p className="text-xs text-gray-500">Vault Shares</p>
-                <p className="text-lg font-semibold text-white">{formatUSDC(userSharesBigInt)} vUSDC</p>
+                <p className="text-lg font-semibold text-white">{formatUSDC(userSharesBigInt)} VOO</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Value</p>
@@ -315,7 +315,7 @@ export function VaultDashboard() {
               <div>
                 <p className="text-xs text-gray-500">Locked Shares</p>
                 <p className="text-lg font-semibold text-brand-purple-1">
-                  {formatUSDC(userTotalLocked)} vUSDC
+                  {formatUSDC(userTotalLocked)} VOO
                 </p>
               </div>
             </div>
@@ -359,7 +359,7 @@ export function VaultDashboard() {
               { color: "bg-brand-purple-1", text: "The vault underwrites potential payouts. Reserved liquidity backs active tickets." },
               { color: "bg-neon-green", text: "Withdrawals are available up to the unreserved balance (max 80% utilization cap)." },
               { color: "bg-brand-gold", text: "When bettors lose, their stakes flow to the vault -- increasing share value for all depositors." },
-              { color: "bg-brand-blue", text: "Lock your vUSDC shares for any duration (min 7 days). Longer locks earn a higher fee-share multiplier, up to ~4x at the asymptote." },
+              { color: "bg-brand-blue", text: "Lock your VOO shares for any duration (min 7 days). Longer locks earn a higher fee-share multiplier, up to ~4x at the asymptote." },
             ].map((item, i) => (
               <li key={i} className="flex gap-3">
                 <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${item.color}`} />
@@ -393,7 +393,7 @@ export function VaultDashboard() {
                   >
                     <div>
                       <p className="text-sm font-semibold text-white">
-                        {formatUSDC(position.shares)} vUSDC
+                        {formatUSDC(position.shares)} VOO
                       </p>
                       <p className="text-xs text-gray-500">
                         {feeShareLabel} fee share -- {formatDuration(durationDays)}
@@ -540,7 +540,7 @@ export function VaultDashboard() {
               </p>
               <div className="flex items-center justify-between text-xs text-gray-500">
                 <span>Available Shares</span>
-                <span className="font-semibold text-white">{formatUSDC(withdrawableShares)} vUSDC</span>
+                <span className="font-semibold text-white">{formatUSDC(withdrawableShares)} VOO</span>
               </div>
               <div className="relative">
                 <input
@@ -549,7 +549,7 @@ export function VaultDashboard() {
                   value={withdrawAmount}
                   onKeyDown={blockNonNumericKeys}
                   onChange={(e) => setWithdrawAmountAndReset(sanitizeNumericInput(e.target.value))}
-                  placeholder="Shares (vUSDC)"
+                  placeholder="Shares (VOO)"
                   disabled={!hasShares}
                   className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-16 text-white placeholder-gray-600 outline-none transition-colors focus:border-brand-pink/50 disabled:cursor-not-allowed disabled:opacity-50"
                 />
@@ -603,7 +603,7 @@ export function VaultDashboard() {
               {/* Available shares */}
               <div className="rounded-lg bg-white/5 px-4 py-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-400">Available vUSDC</span>
+                  <span className="text-sm text-gray-400">Available VOO</span>
                   <span className="text-lg font-bold text-white">
                     {formatUSDC(userSharesBigInt)}
                   </span>
@@ -696,7 +696,7 @@ export function VaultDashboard() {
                   value={lockAmount}
                   onKeyDown={blockNonNumericKeys}
                   onChange={(e) => setLockAmount(sanitizeNumericInput(e.target.value))}
-                  placeholder="vUSDC shares to lock"
+                  placeholder="VOO shares to lock"
                   disabled={!hasShares}
                   className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-16 text-white placeholder-gray-600 outline-none transition-colors focus:border-brand-purple/50 disabled:cursor-not-allowed disabled:opacity-50"
                 />
@@ -711,7 +711,7 @@ export function VaultDashboard() {
               </div>
 
               {lockBelowMinimum && (
-                <p className="text-center text-xs text-neon-red">Minimum lock is 1 vUSDC</p>
+                <p className="text-center text-xs text-neon-red">Minimum lock is 1 VOO</p>
               )}
               {lockExceedsShares && (
                 <p className="text-center text-xs text-neon-red">Exceeds your vault shares</p>

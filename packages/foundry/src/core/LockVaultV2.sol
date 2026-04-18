@@ -27,7 +27,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
 
     struct LockPosition {
         address owner;
-        uint256 shares;        // vUSDC shares locked
+        uint256 shares;        // VOO shares locked
         uint256 duration;      // total committed duration in seconds, from lockedAt
         uint256 lockedAt;
         uint256 unlockAt;
@@ -40,7 +40,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
     uint256 private constant PRECISION = 1e18;
     uint256 private constant BPS_BASE = 10_000;
 
-    uint256 public constant MIN_LOCK = 1e6;                 // 1 vUSDC
+    uint256 public constant MIN_LOCK = 1e6;                 // 1 VOO
     uint256 public constant MIN_LOCK_DURATION = 7 days;
     uint256 public constant HALF_LIFE_SECS = 730 days;      // 2 years — controls curve knee
     uint256 public constant MAX_BOOST_BPS = 30_000;         // asymptote adds +3.0x → 4.0x total
@@ -127,7 +127,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
 
     // ── Core ─────────────────────────────────────────────────────────────
 
-    /// @notice Lock vUSDC shares for a caller-chosen duration.
+    /// @notice Lock VOO shares for a caller-chosen duration.
     function lock(uint256 shares, uint256 duration) external nonReentrant returns (uint256 positionId) {
         require(shares >= MIN_LOCK, "LockVaultV2: lock below minimum");
         uint256 fsBps = feeShareForDuration(duration); // reverts on duration < MIN

@@ -74,7 +74,7 @@ credit = principal × projectedAprBps / 10_000
 
 ### Rename
 
-- `HouseVault` ERC20 symbol/name: `vUSDC` → `PLP` (pick at impl time; update literals in `HouseVault.sol` constructor, `deployedContracts.ts`, every `"vUSDC"` occurrence in `packages/nextjs/src/**`, all test assertions, all docs).
+- `HouseVault` ERC20: name `ParlayVoo`, symbol `VOO` (was `vUSDC`). Update `HouseVault.sol` constructor, `deployedContracts.ts`, every `"vUSDC"` occurrence in `packages/nextjs/src/**`, all test assertions, all docs.
 - Underlying asset (USDC) is unchanged.
 
 ### Constants / params

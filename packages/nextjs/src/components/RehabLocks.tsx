@@ -6,7 +6,7 @@ import { useUserTickets } from "@/lib/hooks";
 import { HOUSE_VAULT_ABI, contractAddresses } from "@/lib/contracts";
 
 const REHAB_LOCK_DAYS = 120;
-const SHARES_UNIT = 1_000_000n; // 1 vUSDC share (6 decimals)
+const SHARES_UNIT = 1_000_000n; // 1 VOO share (6 decimals)
 
 interface RehabLock {
   ticketId: string;
@@ -37,7 +37,7 @@ function daysUntil(date: Date): number {
 export function RehabLocks() {
   const { tickets } = useUserTickets();
 
-  // Read current vault share price: how much 1 vUSDC share is worth in USDC
+  // Read current vault share price: how much 1 VOO share is worth in USDC
   const { data: assetsPerShare } = useReadContract({
     address: contractAddresses.houseVault as `0x${string}`,
     abi: HOUSE_VAULT_ABI,
@@ -54,7 +54,7 @@ export function RehabLocks() {
 
   if (lostTickets.length === 0) return null;
 
-  // Share price: how many USDC per 1 vUSDC (as a float)
+  // Share price: how many USDC per 1 VOO (as a float)
   const sharePrice =
     typeof assetsPerShare === "bigint"
       ? Number(formatUnits(assetsPerShare, 6))
@@ -68,7 +68,7 @@ export function RehabLocks() {
     const rehabFloat = Number(formatUnits(rehabRaw, 6));
     const rehabUsd = rehabFloat.toFixed(2);
 
-    // Shares "minted" at 1:1 (rehab amount in vUSDC terms)
+    // Shares "minted" at 1:1 (rehab amount in VOO terms)
     const shares = rehabFloat.toFixed(2);
 
     // Current value = shares * current share price
@@ -142,7 +142,7 @@ export function RehabLocks() {
                     Ticket #{lock.ticketId}
                   </p>
                   <p className="text-sm font-bold tabular-nums text-white">
-                    {lock.shares} vUSDC{" "}
+                    {lock.shares} VOO{" "}
                     <span className="text-gray-500">(${lock.currentValue})</span>
                   </p>
                 </div>

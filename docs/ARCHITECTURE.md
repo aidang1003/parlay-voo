@@ -90,7 +90,7 @@ Registry of betting legs (questions). Each leg has a probability, cutoff time, o
 Core engine that mints ERC-721 ticket NFTs. Validates parlay construction, computes multipliers/fees via ParlayMath library, manages settlement lifecycle. Supports three payout modes: Classic, Progressive, and EarlyCashout.
 
 ### LockVault
-Staking contract for vUSDC shares. 30/60/90-day lock tiers with weight multipliers (1.1x/1.25x/1.5x). Synthetix-style fee accumulator distributes 90% of protocol fees to lockers, weighted by lock tier.
+Staking contract for VOO shares. 30/60/90-day lock tiers with weight multipliers (1.1x/1.25x/1.5x). Synthetix-style fee accumulator distributes 90% of protocol fees to lockers, weighted by lock tier.
 
 ### ParlayMath
 Pure library mirrored exactly in TypeScript (`packages/shared/src/math.ts`). Computes multipliers, edge, payout, progressive payout, and cashout values. PPM scale (1e6) for probability, BPS (1e4) for fees.

@@ -269,20 +269,15 @@ This is a post-hackathon enhancement. For MVP, single adapter is sufficient.
 
 ## Connection to Rehab Mode
 
-The rehab mode (see `docs/REHAB_MODE.md`) force-locks 10% of losing stakes as vUSDC for 120 days. These locked shares represent idle capital in the vault that backs the vUSDC.
-
-The connection is indirect but important:
+Rehab mode (see `docs/REHAB_MODE.md`) force-locks 100% of every losing parlay stake as VOO shares held on behalf of the loser. The stake never leaves the vault — it just gets reclassified as Least-tier locked capital (Partial and Full tiers stack on top for voluntary deposits / credit winnings).
 
 ```
 Gambler loses $100 stake
-  |-- $80 stays in vault (LP profit via share price)
-  |-- $10 -> AMM liquidity (deployed via UniswapYieldAdapter)
-  |-- $10 -> rehab lock (vUSDC in LockVault, backed by vault USDC)
+  |-- $100 stays in vault (backs locked VOO assigned to the loser)
+  |-- user gets ~$6 bet-only credit (one year of projected yield, forfeit if unused)
 ```
 
-The $10 sent to AMM liquidity is routed through the loss distribution mechanism in HouseVault. This USDC is deployed to the UniswapYieldAdapter. The swap fees generated fund the SafetyModule.
-
-The $10 in rehab locks does not get separately deployed -- it remains as vault-backed vUSDC. The vault itself can deploy idle capital (including capital backing rehab locks) through the yield adapter, but this is managed at the vault level, not per-lock.
+The locked VOO backing Least-tier positions isn't separately deployed — it remains vault-backed and earns yield through the vault's `IYieldAdapter` (Aave V3 on mainnet). Any unused credit is forfeited back to the vault; Least-tier positions that expire without a graduation also burn, which accrues share-price to surviving LPs.
 
 ## Connection to x402 Bazaar
 

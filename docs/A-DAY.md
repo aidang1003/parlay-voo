@@ -97,7 +97,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
   - Reserve hook in `HouseVault.reservePayout()` routes fee accrual + loss exposure by tick range crossed.
 - **Open questions to resolve in TRANCHES.md:**
   1. Tick granularity — fixed 4 vs 100-BPS continuous
-  2. Overlay on existing vUSDC or replace with per-tranche share tokens
+  2. Overlay on existing VOO or replace with per-tranche share tokens
   3. Default band for existing LPs (opt-in full-range recommended)
 - **Files:** new `packages/foundry/src/core/TrancheRegistry.sol`; `HouseVault.sol` gains reserve/pay hooks; `ParlayMath.sol` untouched.
 

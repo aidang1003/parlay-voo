@@ -52,10 +52,10 @@ pnpm clean                    # forge clean + .next
 ## Key Files (read these first)
 
 **Contracts (`packages/foundry/src/`):**
-- `core/HouseVault.sol` -- ERC4626-like LP vault, USDC deposits, vUSDC shares, reserve tracking, fee routing
+- `core/HouseVault.sol` -- ERC4626-like LP vault, USDC deposits, VOO shares, reserve tracking, fee routing
 - `core/ParlayEngine.sol` -- ERC721 ticket minting, settlement, cashout, payout modes
 - `core/LegRegistry.sol` -- admin-managed betting outcomes with probabilities (PPM)
-- `core/LockVault.sol` -- time-locked vUSDC positions, Synthetix-style reward distribution
+- `core/LockVault.sol` -- time-locked VOO positions, Synthetix-style reward distribution
 - `libraries/ParlayMath.sol` -- pure math library (multiplier, edge, payout). Mirrored in TS.
 - `oracle/AdminOracleAdapter.sol` -- bootstrap oracle (owner resolves)
 - `oracle/OptimisticOracleAdapter.sol` -- production oracle (propose/challenge)
@@ -102,7 +102,7 @@ pnpm clean                    # forge clean + .next
 
 ## Architecture
 
-**Contracts:** HouseVault (ERC4626-like, USDC/vUSDC, 80% util cap, 5% max payout, 90/5/5 fee routing). ParlayEngine (ERC721 tickets, baseFee=100bps + perLegFee=50bps). LegRegistry (admin-managed outcomes). LockVault (30/60/90 day locks, Synthetix-style rewards). ParlayMath (pure library). AdminOracleAdapter + OptimisticOracleAdapter. Deploy order in `script/Deploy.s.sol`.
+**Contracts:** HouseVault (ERC4626-like, USDC/VOO, 80% util cap, 5% max payout, 90/5/5 fee routing). ParlayEngine (ERC721 tickets, baseFee=100bps + perLegFee=50bps). LegRegistry (admin-managed outcomes). LockVault (30/60/90 day locks, Synthetix-style rewards). ParlayMath (pure library). AdminOracleAdapter + OptimisticOracleAdapter. Deploy order in `script/Deploy.s.sol`.
 
 **Frontend:** Next.js 14 App Router. wagmi 2 + viem 2 + ConnectKit. AI chat panel (Vercel AI SDK + Claude). All API routes are serverless (no Express). Deployed to Vercel.
 

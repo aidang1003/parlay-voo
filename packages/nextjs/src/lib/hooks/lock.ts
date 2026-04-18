@@ -27,6 +27,11 @@ export function useLockVault() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
+  // False when LockVaultV2 isn't deployed on the active chain (e.g. Sepolia
+  // broadcast pre-dates the V2 rollout). The UI uses this to disable the
+  // submit button with a clear label instead of silently no-oping.
+  const ready = !!vault && !!lockVault;
+
   const lock = async (shares: bigint, durationSecs: bigint): Promise<boolean> => {
     if (!address || !publicClient || !vault || !lockVault) return false;
 
@@ -75,7 +80,7 @@ export function useLockVault() {
     }
   };
 
-  return { lock, isPending, isConfirming, isSuccess, error };
+  return { lock, isPending, isConfirming, isSuccess, error, ready };
 }
 
 export function useUnlockVault() {

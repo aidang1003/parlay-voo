@@ -205,6 +205,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Funding my personal wallet with gas on the anvil chain should happen automatically on deploy
 - Some typescript module named parleycity is in there. Look into what this is later.
 - Messages returned to console on a contract deploy are not 100% accurate
+- Writing both deployment files on `pnpm deploy:sepolia`. Either the comment is wrong os this is overkill since we only want to deploy on sepolia
 
 ## Random Things I think of
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.

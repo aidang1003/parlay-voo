@@ -12,9 +12,12 @@ import {
   useLockVault,
   useUnlockVault,
   useEarlyWithdraw,
+  useGraduate,
   useLockPositions,
   useLockStats,
   useMintTestUSDC,
+  useCreditBalance,
+  LockTier,
 } from "@/lib/hooks";
 import { useReadContract } from "wagmi";
 import { HOUSE_VAULT_ABI, contractAddresses } from "@/lib/contracts";
@@ -97,9 +100,11 @@ export function VaultDashboard() {
   const lockHook = useLockVault();
   const unlockHook = useUnlockVault();
   const earlyWithdrawHook = useEarlyWithdraw();
+  const graduateHook = useGraduate();
   const { positions, userTotalLocked, refetch: refetchPositions } = useLockPositions();
   const lockStats = useLockStats();
   const mintHook = useMintTestUSDC();
+  const { credit } = useCreditBalance();
 
   const [tab, setTab] = useState<Tab>("deposit");
   const [depositAmount, setDepositAmount] = useState("");
@@ -136,7 +141,16 @@ export function VaultDashboard() {
   const userSharesBigInt = (userShares as bigint) ?? 0n;
   const userSharesValueBigInt = (sharesValue as bigint) ?? 0n;
 
-  // Convert locked shares to asset value
+  // Split locks by tier so the dashboard can tell FULL savings from PARTIAL
+  // rehab positions from LEAST (principal already routed back to LPs).
+  const fullPositions = positions.filter((p) => p.position.tier === LockTier.FULL);
+  const partialPositions = positions.filter((p) => p.position.tier === LockTier.PARTIAL);
+  const leastPositions = positions.filter((p) => p.position.tier === LockTier.LEAST);
+  const fullShares = fullPositions.reduce((s, p) => s + p.position.shares, 0n);
+  const partialShares = partialPositions.reduce((s, p) => s + p.position.shares, 0n);
+  const leastShares = leastPositions.reduce((s, p) => s + p.position.shares, 0n);
+
+  // Convert locked shares to asset value (total across all tiers)
   const { data: lockedValue } = useReadContract({
     address: contractAddresses.houseVault as `0x${string}`,
     abi: HOUSE_VAULT_ABI,
@@ -146,6 +160,7 @@ export function VaultDashboard() {
   });
   const lockedValueBigInt = (lockedValue as bigint) ?? 0n;
   const totalPositionValue = userSharesValueBigInt + lockedValueBigInt;
+  const creditBigInt = credit ?? 0n;
 
   const hasShares = userSharesBigInt > 0n;
 
@@ -204,6 +219,18 @@ export function VaultDashboard() {
   const handleEarlyWithdraw = async (positionId: bigint) => {
     await earlyWithdrawHook.earlyWithdraw(positionId);
     refetchPositions();
+  };
+
+  // Graduate always commits 2 years — it's the on-chain minimum for the FULL
+  // promotion and also the knee in the fee-share curve, so offering a slider
+  // here doesn't add real optionality.
+  const GRADUATE_DURATION_SECS = 730n * 86_400n;
+  const handleGraduate = async (positionId: bigint) => {
+    const ok = await graduateHook.graduate(positionId, GRADUATE_DURATION_SECS);
+    if (ok) {
+      await refetchPositions();
+      lockStats.refetch();
+    }
   };
 
   const depositTxSuccess = depositHook.isSuccess && !depositHook.error;
@@ -303,20 +330,47 @@ export function VaultDashboard() {
             <h3 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
               Your Vault Position
             </h3>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <div>
-                <p className="text-xs text-gray-500">Vault Shares</p>
-                <p className="text-lg font-semibold text-white">{formatUSDC(userSharesBigInt)} VOO</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Value</p>
-                <p className="text-lg font-semibold text-neon-green">${formatUSDC(userSharesValueBigInt)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Locked Shares</p>
-                <p className="text-lg font-semibold text-brand-purple-1">
-                  {formatUSDC(userTotalLocked)} VOO
+                <p className="text-xs text-gray-500">Vault VOO</p>
+                <p className="text-lg font-semibold text-white">
+                  {formatUSDC(userSharesBigInt)}
                 </p>
+                <p className="text-[10px] text-gray-600">
+                  ${formatUSDC(userSharesValueBigInt)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Full locks</p>
+                <p className="text-lg font-semibold text-brand-purple-1">
+                  {formatUSDC(fullShares)}
+                </p>
+                <p className="text-[10px] text-gray-600">{fullPositions.length} position(s)</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Partial locks</p>
+                <p className="text-lg font-semibold text-amber-300">
+                  {formatUSDC(partialShares)}
+                </p>
+                <p className="text-[10px] text-gray-600">
+                  {partialPositions.length} rehab position(s)
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Least locks</p>
+                <p className="text-lg font-semibold text-gray-400">
+                  {formatUSDC(leastShares)}
+                </p>
+                <p className="text-[10px] text-gray-600">
+                  principal routed to LPs
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Lossless credit</p>
+                <p className="text-lg font-semibold text-neon-green">
+                  ${formatUSDC(creditBigInt)}
+                </p>
+                <p className="text-[10px] text-gray-600">spend via lossless mode</p>
               </div>
             </div>
           </div>
@@ -360,6 +414,7 @@ export function VaultDashboard() {
               { color: "bg-neon-green", text: "Withdrawals are available up to the unreserved balance (max 80% utilization cap)." },
               { color: "bg-brand-gold", text: "When bettors lose, their stakes flow to the vault -- increasing share value for all depositors." },
               { color: "bg-brand-blue", text: "Lock your VOO shares for any duration (min 7 days). Longer locks earn a higher fee-share multiplier, up to ~4x at the asymptote." },
+              { color: "bg-amber-400", text: "Lossless wins mint a PARTIAL lock: principal stays in the vault forever, but you can graduate it to a 2-year FULL lock to unlock fee share and ~6% APR promo credit." },
             ].map((item, i) => (
               <li key={i} className="flex gap-3">
                 <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${item.color}`} />
@@ -378,51 +433,94 @@ export function VaultDashboard() {
             <div className="space-y-3">
               {positions.map(({ id, position }) => {
                 const now = Math.floor(Date.now() / 1000);
-                const matured = now >= Number(position.unlockAt);
-                const daysLeft = matured
+                const isPartial = position.tier === LockTier.PARTIAL;
+                const isLeast = position.tier === LockTier.LEAST;
+                const isFull = position.tier === LockTier.FULL;
+                const matured = !isPartial && now >= Number(position.unlockAt);
+                const daysLeft = matured || isPartial
                   ? 0
                   : Math.ceil((Number(position.unlockAt) - now) / 86400);
 
                 const feeShareLabel = bpsToMultiplier(position.feeShareBps);
                 const durationDays = Number(position.duration / SECS_PER_DAY);
 
+                const tierBadge = isPartial
+                  ? { label: "Partial", cls: "bg-amber-500/10 text-amber-300 border-amber-500/30" }
+                  : isLeast
+                    ? { label: "Least", cls: "bg-gray-500/10 text-gray-400 border-gray-500/30" }
+                    : { label: "Full", cls: "bg-brand-purple/10 text-brand-purple-1 border-brand-purple/30" };
+
                 return (
                   <div
                     key={id.toString()}
-                    className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3"
+                    className="rounded-lg bg-white/5 px-4 py-3"
                   >
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        {formatUSDC(position.shares)} VOO
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {feeShareLabel} fee share -- {formatDuration(durationDays)}
-                        {matured ? " -- Matured" : ` -- ${daysLeft}d left`}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      {matured ? (
-                        <button
-                          onClick={() => handleUnlock(id)}
-                          disabled={unlockHook.isPending}
-                          className="rounded-lg bg-neon-green/20 px-3 py-1.5 text-xs font-semibold text-neon-green transition-all hover:bg-neon-green/30 disabled:opacity-50"
-                        >
-                          {unlockHook.isPending ? "..." : "Unlock"}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleEarlyWithdraw(id)}
-                          disabled={earlyWithdrawHook.isPending}
-                          className="rounded-lg bg-yellow-500/20 px-3 py-1.5 text-xs font-semibold text-yellow-400 transition-all hover:bg-yellow-500/30 disabled:opacity-50"
-                        >
-                          {earlyWithdrawHook.isPending ? "..." : "Early Exit"}
-                        </button>
-                      )}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-white">
+                            {formatUSDC(position.shares)} VOO
+                          </p>
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${tierBadge.cls}`}>
+                            {tierBadge.label}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          {isPartial
+                            ? `${feeShareLabel} fee share -- locked until you graduate`
+                            : isLeast
+                              ? "Principal routed to LPs -- no further claim"
+                              : `${feeShareLabel} fee share -- ${formatDuration(durationDays)}${
+                                  matured ? " -- Matured" : ` -- ${daysLeft}d left`
+                                }`}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {isPartial && (
+                          <button
+                            onClick={() => handleGraduate(id)}
+                            disabled={graduateHook.isPending || graduateHook.isConfirming}
+                            title="Commit this position to a 2-year FULL lock. Earns fee share + promo credit."
+                            className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-all hover:bg-amber-500/30 disabled:opacity-50"
+                          >
+                            {graduateHook.isPending
+                              ? "Signing..."
+                              : graduateHook.isConfirming
+                                ? "Confirming..."
+                                : "Graduate to Full"}
+                          </button>
+                        )}
+                        {isFull && matured && (
+                          <button
+                            onClick={() => handleUnlock(id)}
+                            disabled={unlockHook.isPending}
+                            className="rounded-lg bg-neon-green/20 px-3 py-1.5 text-xs font-semibold text-neon-green transition-all hover:bg-neon-green/30 disabled:opacity-50"
+                          >
+                            {unlockHook.isPending ? "..." : "Unlock"}
+                          </button>
+                        )}
+                        {isFull && !matured && (
+                          <button
+                            onClick={() => handleEarlyWithdraw(id)}
+                            disabled={earlyWithdrawHook.isPending}
+                            className="rounded-lg bg-yellow-500/20 px-3 py-1.5 text-xs font-semibold text-yellow-400 transition-all hover:bg-yellow-500/30 disabled:opacity-50"
+                          >
+                            {earlyWithdrawHook.isPending ? "..." : "Early Exit"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
               })}
             </div>
+            {graduateHook.error && (
+              <p className="mt-2 rounded-lg bg-neon-red/10 px-3 py-2 text-center text-xs text-neon-red">
+                {graduateHook.error.message.length > 120
+                  ? graduateHook.error.message.slice(0, 120) + "..."
+                  : graduateHook.error.message}
+              </p>
+            )}
           </div>
         )}
 

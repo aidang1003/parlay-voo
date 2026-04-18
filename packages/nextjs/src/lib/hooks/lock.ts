@@ -6,6 +6,13 @@ import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
+/** On-chain tier enum mirrored from `ILockVault.Tier`. */
+export enum LockTier {
+  FULL = 0,
+  PARTIAL = 1,
+  LEAST = 2,
+}
+
 export interface LockPosition {
   owner: `0x${string}`;
   shares: bigint;
@@ -14,6 +21,7 @@ export interface LockPosition {
   unlockAt: bigint;
   feeShareBps: bigint;
   rewardDebt: bigint;
+  tier: LockTier;
 }
 
 export function useLockVault() {
@@ -117,6 +125,52 @@ export function useUnlockVault() {
   return { unlock, isPending, isSuccess, error };
 }
 
+export function useGraduate() {
+  const publicClient = useContractClient();
+  const lockVault = useDeployedContract("LockVaultV2");
+  const { writeContractAsync } = usePinnedWriteContract();
+  const [isPending, setIsPending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const graduate = async (positionId: bigint, newDurationSecs: bigint): Promise<boolean> => {
+    if (!publicClient || !lockVault) return false;
+
+    setIsPending(true);
+    setIsConfirming(false);
+    setIsSuccess(false);
+    setError(null);
+
+    try {
+      const hash = await writeContractAsync({
+        address: lockVault.address,
+        abi: lockVault.abi,
+        functionName: "graduate",
+        args: [positionId, newDurationSecs],
+        dataSuffix: BUILDER_SUFFIX,
+      });
+      setIsPending(false);
+      setIsConfirming(true);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === "reverted") {
+        throw new Error("Graduate transaction reverted on-chain");
+      }
+      setIsSuccess(true);
+      return true;
+    } catch (err) {
+      console.error("Graduate failed:", err);
+      setError(err instanceof Error ? err : new Error(String(err)));
+      return false;
+    } finally {
+      setIsPending(false);
+      setIsConfirming(false);
+    }
+  };
+
+  return { graduate, isPending, isConfirming, isSuccess, error };
+}
+
 export function useEarlyWithdraw() {
   const publicClient = useContractClient();
   const lockVault = useDeployedContract("LockVaultV2");
@@ -202,7 +256,16 @@ export function useLockPositions() {
             args: [BigInt(i)],
           });
 
-          const pos = data as [string, bigint, bigint, bigint, bigint, bigint, bigint];
+          const pos = data as [
+            string,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            number,
+          ];
           if (pos[0].toLowerCase() === address.toLowerCase() && pos[1] > 0n) {
             userPositions.push({
               id: BigInt(i),
@@ -214,6 +277,7 @@ export function useLockPositions() {
                 unlockAt: pos[4],
                 feeShareBps: pos[5],
                 rewardDebt: pos[6],
+                tier: pos[7] as LockTier,
               },
             });
           }

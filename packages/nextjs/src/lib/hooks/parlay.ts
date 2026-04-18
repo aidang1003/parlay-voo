@@ -198,3 +198,147 @@ export function useBuyTicket() {
     lastTicketId,
   };
 }
+
+/**
+ * Lossless parlay purchase: spends promo credit instead of USDC. No approval,
+ * no token transfer — the engine charges credit via HouseVault.spendCredit and
+ * reserves the payout against vault liquidity. Wins mint a PARTIAL lock; losses
+ * simply burn the credit.
+ */
+export function useBuyLosslessParlay() {
+  const publicClient = useContractClient();
+  const { address } = useAccount();
+  const engine = useDeployedContract("ParlayEngine");
+  const { writeContractAsync } = usePinnedWriteContract();
+  const [isPending, setIsPending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [lastTicketId, setLastTicketId] = useState<bigint | null>(null);
+
+  const resetSuccess = () => {
+    setIsSuccess(false);
+    setError(null);
+    setLastTicketId(null);
+  };
+
+  const buyLossless = async (
+    legs: Array<{ sourceRef: string; side: "yes" | "no" }>,
+    stakeUsdc: number
+  ): Promise<boolean> => {
+    if (!address || !publicClient || !engine) return false;
+
+    setIsPending(true);
+    setIsConfirming(false);
+    setIsSuccess(false);
+    setError(null);
+
+    try {
+      const stakeAmount = parseUnits(stakeUsdc.toString(), 6);
+
+      const quoteRes = await fetch("/api/quote-sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyer: address,
+          stake: stakeAmount.toString(),
+          legs,
+        }),
+      });
+      if (!quoteRes.ok) {
+        const msg = await quoteRes.text();
+        throw new Error(`Quote sign failed: ${msg}`);
+      }
+      const { quote, signature } = (await quoteRes.json()) as {
+        quote: {
+          buyer: `0x${string}`;
+          stake: string;
+          legs: Array<{
+            sourceRef: string;
+            outcome: `0x${string}`;
+            probabilityPPM: string;
+            cutoffTime: string;
+            earliestResolve: string;
+            oracleAdapter: `0x${string}`;
+          }>;
+          deadline: string;
+          nonce: string;
+        };
+        signature: `0x${string}`;
+      };
+
+      setIsPending(false);
+      setIsConfirming(true);
+
+      const quoteArg = {
+        buyer: quote.buyer,
+        stake: BigInt(quote.stake),
+        legs: quote.legs.map((l) => ({
+          sourceRef: l.sourceRef,
+          outcome: l.outcome,
+          probabilityPPM: BigInt(l.probabilityPPM),
+          cutoffTime: BigInt(l.cutoffTime),
+          earliestResolve: BigInt(l.earliestResolve),
+          oracleAdapter: l.oracleAdapter,
+        })),
+        deadline: BigInt(quote.deadline),
+        nonce: BigInt(quote.nonce),
+      };
+
+      const buyHash = await writeContractAsync({
+        address: engine.address,
+        abi: engine.abi,
+        functionName: "buyLosslessParlay",
+        args: [quoteArg, signature],
+        dataSuffix: BUILDER_SUFFIX,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
+
+      if (receipt.status === "reverted") {
+        throw new Error("Transaction reverted on-chain");
+      }
+
+      let newTicketId: bigint | undefined;
+      try {
+        const purchaseEvents = parseEventLogs({
+          abi: engine.abi,
+          logs: receipt.logs,
+          eventName: "TicketPurchased",
+        });
+        newTicketId = (purchaseEvents[0]?.args as { ticketId?: bigint } | undefined)?.ticketId;
+      } catch {
+        // ABI mismatch — fall through
+      }
+      if (newTicketId === undefined && publicClient) {
+        const count = await publicClient.readContract({
+          address: engine.address,
+          abi: engine.abi,
+          functionName: "ticketCount",
+        });
+        newTicketId = (count as bigint) - 1n;
+      }
+
+      setIsConfirming(false);
+      setIsSuccess(true);
+      setLastTicketId(newTicketId ?? null);
+      return true;
+    } catch (err) {
+      console.error("Buy lossless parlay failed:", err);
+      setError(err instanceof Error ? err : new Error(String(err)));
+      return false;
+    } finally {
+      setIsPending(false);
+      setIsConfirming(false);
+    }
+  };
+
+  return {
+    buyLossless,
+    resetSuccess,
+    isPending,
+    isConfirming,
+    isSuccess,
+    error,
+    lastTicketId,
+  };
+}

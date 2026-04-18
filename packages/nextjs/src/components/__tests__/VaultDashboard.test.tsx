@@ -48,6 +48,13 @@ vi.mock("@/lib/hooks", () => ({
     earlyWithdraw: vi.fn(),
     isPending: false,
   })),
+  useGraduate: vi.fn(() => ({
+    graduate: vi.fn(),
+    isPending: false,
+    isConfirming: false,
+    isSuccess: false,
+    error: null,
+  })),
   useLockPositions: vi.fn(() => ({
     positions: [],
     userTotalLocked: 0n,
@@ -64,6 +71,12 @@ vi.mock("@/lib/hooks", () => ({
     isConfirming: false,
     isSuccess: false,
   })),
+  useCreditBalance: vi.fn(() => ({
+    credit: 0n,
+    isLoading: false,
+    refetch: vi.fn(),
+  })),
+  LockTier: { FULL: 0, PARTIAL: 1, LEAST: 2 },
 }));
 
 // Mock contracts

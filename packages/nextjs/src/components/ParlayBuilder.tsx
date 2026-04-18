@@ -12,7 +12,15 @@ import {
   blockNonNumericKeys,
   useSessionState,
 } from "@/lib/utils";
-import { useBuyTicket, useParlayConfig, useUSDCBalance, useVaultStats, useMintTestUSDC } from "@/lib/hooks";
+import {
+  useBuyTicket,
+  useBuyLosslessParlay,
+  useCreditBalance,
+  useParlayConfig,
+  useUSDCBalance,
+  useVaultStats,
+  useMintTestUSDC,
+} from "@/lib/hooks";
 import { MultiplierClimb } from "./MultiplierClimb";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -220,11 +228,29 @@ function isValidRiskResponse(data: unknown): data is RiskAdviceData {
 export function ParlayBuilder() {
   const { isConnected } = useAccount();
   const { setOpen: openConnectModal } = useModal();
-  const { buyTicket, resetSuccess, isPending, isConfirming, isSuccess, error, lastTicketId } = useBuyTicket();
+  const buyHook = useBuyTicket();
+  const losslessHook = useBuyLosslessParlay();
+  const { credit } = useCreditBalance();
+  const [useLossless, setUseLossless] = useState(false);
   const { balance: usdcBalance } = useUSDCBalance();
   const mintHook = useMintTestUSDC();
   const { freeLiquidity, maxPayout } = useVaultStats();
   const { baseFeeBps, perLegFeeBps, maxLegs, minStakeUSDC } = useParlayConfig();
+
+  // Pick the active purchase hook so every downstream state read stays in sync
+  // with whichever flow the user is currently on.
+  const { buyTicket, resetSuccess, isPending, isConfirming, isSuccess, error, lastTicketId } =
+    useLossless
+      ? {
+          buyTicket: losslessHook.buyLossless,
+          resetSuccess: losslessHook.resetSuccess,
+          isPending: losslessHook.isPending,
+          isConfirming: losslessHook.isConfirming,
+          isSuccess: losslessHook.isSuccess,
+          error: losslessHook.error,
+          lastTicketId: losslessHook.lastTicketId,
+        }
+      : buyHook;
 
   // ── Market data state ───────────────────────────────────────────────────
 
@@ -389,7 +415,13 @@ export function ParlayBuilder() {
   const insufficientLiquidity = false;
   const exceedsMaxPayout = potentialPayout > 0 && maxPayout !== undefined && potentialPayout > maxPayoutNum;
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
-  const insufficientBalance = stakeNum > 0 && usdcBalance !== undefined && stakeNum > usdcBalanceNum;
+  const creditNum = credit !== undefined ? parseFloat(formatUnits(credit, 6)) : 0;
+  const insufficientBalance =
+    stakeNum > 0 &&
+    (useLossless
+      ? credit !== undefined && stakeNum > creditNum
+      : usdcBalance !== undefined && stakeNum > usdcBalanceNum);
+  const hasAnyCredit = credit !== undefined && credit > 0n;
 
   const canBuy =
     mounted &&
@@ -399,7 +431,8 @@ export function ParlayBuilder() {
     stakeNum >= effectiveMinStake &&
     !insufficientLiquidity &&
     !exceedsMaxPayout &&
-    !insufficientBalance;
+    !insufficientBalance &&
+    (!useLossless || hasAnyCredit);
 
   const vaultEmpty = mounted && freeLiquidity !== undefined && freeLiquidity === 0n;
 
@@ -532,15 +565,18 @@ export function ParlayBuilder() {
 
   function buyButtonLabel(): string {
     if (!mounted || !isConnected) return "Connect Wallet";
-    if (isPending) return "Waiting for approval...";
+    if (isPending) return useLossless ? "Signing..." : "Waiting for approval...";
     if (isConfirming) return "Confirming...";
     if (isSuccess) return "Ticket Bought!";
     if (vaultEmpty) return "No Vault Liquidity";
     if (selectedLegs.length < MIN_LEGS) return `Select at least ${MIN_LEGS} legs`;
-    if (insufficientBalance) return "Insufficient USDC Balance";
+    if (useLossless && !hasAnyCredit) return "No promo credit";
+    if (insufficientBalance) {
+      return useLossless ? "Insufficient Credit" : "Insufficient USDC Balance";
+    }
     if (exceedsMaxPayout) return `Max Payout $${maxPayoutNum.toFixed(0)}`;
     if (insufficientLiquidity) return "Insufficient Vault Liquidity";
-    return "Buy Ticket";
+    return useLossless ? "Place Lossless Parlay" : "Buy Ticket";
   }
 
   // ── Render ─────────────────────────────────────────────────────────────
@@ -745,25 +781,66 @@ export function ParlayBuilder() {
             </div>
           )}
 
+          {/* Lossless toggle — swaps the source of stake from USDC to promo credit */}
+          {hasAnyCredit && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">
+                    Lossless mode
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-amber-200/70">
+                    Use promo credit (${parseFloat(formatUnits(credit!, 6)).toFixed(2)})
+                    instead of USDC. Wins lock VOO; losses just burn credit.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={useLossless}
+                  onClick={() => {
+                    resetSuccess();
+                    setUseLossless((v) => !v);
+                  }}
+                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                    useLossless ? "bg-amber-500" : "bg-white/10"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                      useLossless ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Stake input */}
           <div id="stake-input">
             <div className="mb-1.5 flex items-center justify-between">
               <label className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                Stake (USDC)
+                {useLossless ? "Stake (Credit)" : "Stake (USDC)"}
               </label>
-              {usdcBalance !== undefined && (
-                <span className="flex items-center gap-2 text-xs text-gray-500">
-                  Balance: {parseFloat(formatUnits(usdcBalance, 6)).toFixed(2)}
-                  {isConnected && (
-                    <button
-                      onClick={() => mintHook.mint()}
-                      disabled={mintHook.isPending || mintHook.isConfirming}
-                      className="rounded-md bg-brand-pink/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand-pink transition-colors hover:bg-brand-pink/30 disabled:opacity-50"
-                    >
-                      {mintHook.isPending ? "..." : mintHook.isConfirming ? "Minting" : mintHook.isSuccess ? "Done!" : "+ Mint"}
-                    </button>
-                  )}
+              {useLossless ? (
+                <span className="text-xs text-gray-500">
+                  Credit: {creditNum.toFixed(2)}
                 </span>
+              ) : (
+                usdcBalance !== undefined && (
+                  <span className="flex items-center gap-2 text-xs text-gray-500">
+                    Balance: {parseFloat(formatUnits(usdcBalance, 6)).toFixed(2)}
+                    {isConnected && (
+                      <button
+                        onClick={() => mintHook.mint()}
+                        disabled={mintHook.isPending || mintHook.isConfirming}
+                        className="rounded-md bg-brand-pink/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand-pink transition-colors hover:bg-brand-pink/30 disabled:opacity-50"
+                      >
+                        {mintHook.isPending ? "..." : mintHook.isConfirming ? "Minting" : mintHook.isSuccess ? "Done!" : "+ Mint"}
+                      </button>
+                    )}
+                  </span>
+                )
               )}
               {mintHook.error && (
                 <p className="text-xs text-red-400">{mintHook.error}</p>
@@ -776,11 +853,20 @@ export function ParlayBuilder() {
                 value={stake}
                 onKeyDown={blockNonNumericKeys}
                 onChange={(e) => { resetSuccess(); setStake(sanitizeNumericInput(e.target.value)); }}
-                placeholder={`Min ${effectiveMinStake} USDC`}
+                placeholder={`Min ${effectiveMinStake} ${useLossless ? "credit" : "USDC"}`}
                 className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-24 text-lg font-semibold text-white placeholder-gray-600 outline-none transition-colors focus:border-brand-pink/50"
               />
               <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                {usdcBalance !== undefined && usdcBalance > 0n && (
+                {useLossless && credit !== undefined && credit > 0n && (
+                  <button
+                    type="button"
+                    onClick={() => setStake(formatUnits(credit, 6))}
+                    className="rounded-md bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/30"
+                  >
+                    MAX
+                  </button>
+                )}
+                {!useLossless && usdcBalance !== undefined && usdcBalance > 0n && (
                   <button
                     type="button"
                     onClick={() => setStake(formatUnits(usdcBalance!, 6))}
@@ -789,7 +875,9 @@ export function ParlayBuilder() {
                     MAX
                   </button>
                 )}
-                <span className="text-sm text-gray-500">USDC</span>
+                <span className="text-sm text-gray-500">
+                  {useLossless ? "CREDIT" : "USDC"}
+                </span>
               </div>
             </div>
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useReadContracts } from "wagmi";
+import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import { parseUnits } from "viem";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "../../hooks/useDeployedContract";
@@ -45,6 +45,30 @@ export function useVaultStats() {
     utilization,
     isLoading,
     refetch,
+  };
+}
+
+/**
+ * Tracks the connected user's promo credit balance — the ceiling for how much
+ * stake they can route through `buyLosslessParlay`. Credit is minted by the
+ * vault when a PARTIAL position graduates (see HouseVault.issuePromoCredit).
+ */
+export function useCreditBalance() {
+  const { address } = useAccount();
+  const vault = useDeployedContract("HouseVault");
+
+  const result = useReadContract({
+    address: vault?.address,
+    abi: vault?.abi ?? EMPTY_ABI,
+    functionName: "creditBalance",
+    args: address ? [address] : undefined,
+    query: { enabled: !!address && !!vault, refetchInterval: 10_000 },
+  });
+
+  return {
+    credit: result.data as bigint | undefined,
+    isLoading: result.isLoading,
+    refetch: result.refetch,
   };
 }
 

@@ -46,6 +46,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
     uint256 public constant HALF_LIFE_SECS = 730 days;      // 2 years — controls curve knee
     uint256 public constant MAX_BOOST_BPS = 30_000;         // asymptote adds +3.0x → 4.0x total
     uint256 public constant MAX_PENALTY_BPS = 3_000;        // 30% asymptote on day-0 max-lock exit
+    uint256 public constant MIN_GRADUATE_DURATION = 730 days; // 24mo floor for PARTIAL → FULL
 
     // ── State ────────────────────────────────────────────────────────────
 
@@ -102,6 +103,14 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         uint256 unlockAt
     );
     event LeastPrincipalBurned(uint256 indexed positionId, address indexed formerOwner, uint256 shares);
+    event Graduated(
+        uint256 indexed positionId,
+        address indexed owner,
+        uint256 newDuration,
+        uint256 newFeeShareBps,
+        uint256 newUnlockAt,
+        uint256 promoCredit
+    );
 
     // ── Modifiers ────────────────────────────────────────────────────────
 
@@ -310,6 +319,60 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         });
 
         emit RehabLocked(positionId, user, tier, shares, duration, unlockAt);
+    }
+
+    /// @notice Promote a PARTIAL rehab position to FULL by re-locking for at
+    ///         least MIN_GRADUATE_DURATION. Grants the FULL-tier fee-share
+    ///         weight (earnings on principal from here on) plus a one-shot
+    ///         promo credit sized like a fresh loss (principal × projectedApr).
+    ///         One-way: there is no FULL → PARTIAL path.
+    function graduate(uint256 positionId, uint256 newDuration) external nonReentrant {
+        LockPosition storage pos = positions[positionId];
+        require(pos.owner == msg.sender, "LockVaultV2: not owner");
+        require(pos.shares > 0, "LockVaultV2: empty position");
+        require(pos.tier == ILockVault.Tier.PARTIAL, "LockVaultV2: PARTIAL only");
+        require(newDuration >= MIN_GRADUATE_DURATION, "LockVaultV2: graduate duration too short");
+
+        uint256 newFsBps = feeShareForDuration(newDuration);
+        uint256 newWeighted = (pos.shares * newFsBps) / BPS_BASE;
+
+        // Sweep fees accrued while weight was zero to existing FULL lockers
+        // before adding the graduate's weight — mirrors lock()'s ordering so
+        // the freshly graduated position does not claim fees earned before it.
+        if (undistributedFees > 0 && totalWeightedShares > 0) {
+            uint256 fees = undistributedFees;
+            undistributedFees = 0;
+            accRewardPerWeightedShare += (fees * PRECISION) / totalWeightedShares;
+            emit FeesDistributed(fees, accRewardPerWeightedShare);
+        }
+
+        totalWeightedShares += newWeighted;
+        // totalLockedShares unchanged (shares stay locked, tier transitions).
+
+        pos.tier = ILockVault.Tier.FULL;
+        pos.duration = newDuration;
+        pos.lockedAt = block.timestamp;
+        pos.unlockAt = block.timestamp + newDuration;
+        pos.feeShareBps = newFsBps;
+        pos.rewardDebt = (newWeighted * accRewardPerWeightedShare) / PRECISION;
+
+        // First-locker bootstrap path — if totalWeightedShares was 0 before
+        // this graduation, assign any stranded fees to the graduate.
+        if (undistributedFees > 0) {
+            uint256 fees = undistributedFees;
+            undistributedFees = 0;
+            accRewardPerWeightedShare += (fees * PRECISION) / totalWeightedShares;
+            emit FeesDistributed(fees, accRewardPerWeightedShare);
+        }
+
+        // Size the promo credit off the current USDC-value of the locked shares.
+        uint256 principal = vault.convertToAssets(pos.shares);
+        uint256 promoCredit = vault.creditFor(principal);
+        if (promoCredit > 0) {
+            vault.issuePromoCredit(pos.owner, promoCredit);
+        }
+
+        emit Graduated(positionId, pos.owner, newDuration, newFsBps, pos.unlockAt, promoCredit);
     }
 
     /// @notice Settle accrued rewards on an active position without unlocking.

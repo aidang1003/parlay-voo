@@ -102,6 +102,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     event RehabLossFlushed(address indexed owner, uint256 stake, uint256 sharesMinted);
     event LeastPrincipalBurned(uint256 shares);
     event LosslessWinRouted(address indexed owner, uint256 payout, uint256 sharesMinted);
+    event PromoCreditIssued(address indexed user, uint256 amount);
 
     // ── Modifiers ────────────────────────────────────────────────────────
 
@@ -454,6 +455,17 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     ///         voided lossless ticket (stake was credit, not USDC).
     function refundCredit(address user, uint256 amount) external onlyEngine {
         _issueCredit(user, amount);
+    }
+
+    /// @notice Issue promo credit to a user who just graduated PARTIAL → FULL.
+    ///         Callable only by the configured lockVault. The credit is sized
+    ///         exactly like loss-time credit (principal * projectedAprBps) —
+    ///         the lockVault computes the amount based on the promoted shares'
+    ///         current USDC value.
+    function issuePromoCredit(address user, uint256 amount) external nonReentrant {
+        require(msg.sender == address(lockVault), "HouseVault: not lockVault");
+        _issueCredit(user, amount);
+        emit PromoCreditIssued(user, amount);
     }
 
     /// @notice Convert a lossless-parlay win into a PARTIAL-tier lock for the

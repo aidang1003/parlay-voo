@@ -627,4 +627,82 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
         vm.expectRevert();
         engine.unpause();
     }
+
+    // ── Leg Resolution Coverage ─────────────────────────────────────────
+    //
+    // Invariant #4 in CLAUDE.md: settlement is permissionless. These tests
+    // pin the settlement path's public surface — who can call it, what it
+    // emits, how it handles void-refunds — so future refactors can't silently
+    // close off settlement or drop the refund path.
+
+    /// @dev Anyone can settle a ticket after its legs resolve. Bob is neither
+    ///      the buyer, the owner, nor the leg admin.
+    function test_settleTicket_permissionless() public {
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+
+        oracle.resolve(0, LegStatus.Won, keccak256("yes"));
+        oracle.resolve(1, LegStatus.Won, keccak256("yes"));
+
+        vm.prank(bob);
+        engine.settleTicket(ticketId);
+
+        ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
+        assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Won));
+    }
+
+    /// @dev settleTicket emits TicketSettled(ticketId, finalStatus). Indexers
+    ///      and the /api/settlement watcher depend on this event firing.
+    function test_settleTicket_emitsTicketSettledEvent() public {
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+
+        oracle.resolve(0, LegStatus.Won, keccak256("yes"));
+        oracle.resolve(1, LegStatus.Lost, keccak256("no"));
+
+        vm.expectEmit(true, true, true, true, address(engine));
+        emit ParlayEngine.TicketSettled(ticketId, ParlayEngine.TicketStatus.Lost);
+        engine.settleTicket(ticketId);
+    }
+
+    /// @dev Full-void path: buyer is refunded stake - feePaid and the vault
+    ///      reserve is fully released. Existing test_settleTicket_allVoided
+    ///      only checks the status + reserve — this locks down the USDC flow.
+    function test_settleTicket_allVoided_refundsStakeMinusFee() public {
+        uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        ParlayEngine.Ticket memory tBefore = engine.getTicket(ticketId);
+        uint256 aliceBalBefore = usdc.balanceOf(alice);
+
+        oracle.resolve(0, LegStatus.Voided, bytes32(0));
+        oracle.resolve(1, LegStatus.Voided, bytes32(0));
+        engine.settleTicket(ticketId);
+
+        ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
+        assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Voided));
+        assertEq(vault.totalReserved(), 0);
+        // Buyer gets stake minus fee refunded. Fee is non-refundable because
+        // it was routed to lockers/safety/vault at buy time.
+        assertEq(usdc.balanceOf(alice), aliceBalBefore + (tBefore.stake - tBefore.feePaid));
+    }
+
+    /// @dev Partial-void path that falls below the 2-leg parlay minimum:
+    ///      3 legs, 2 voided, 1 won → remaining < 2 → ticket is voided + the
+    ///      buyer is refunded (effective stake), reserve released in full.
+    ///      The existing partialVoid test covers the happy recalc path
+    ///      (remaining >= 2); this covers the fallback.
+    function test_settleTicket_voidsAndRefundsWhenRemainingLegsBelowMinimum() public {
+        uint256 ticketId = _buySigned(engine, alice, _threeLegs(), 10e6, DEADLINE);
+        ParlayEngine.Ticket memory tBefore = engine.getTicket(ticketId);
+        uint256 aliceBalBefore = usdc.balanceOf(alice);
+
+        // Only one leg (#0) ends up Won; #1 and #2 are voided, collapsing the
+        // parlay below 2 remaining legs.
+        oracle.resolve(0, LegStatus.Won, keccak256("yes"));
+        oracle.resolve(1, LegStatus.Voided, bytes32(0));
+        oracle.resolve(2, LegStatus.Voided, bytes32(0));
+        engine.settleTicket(ticketId);
+
+        ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
+        assertEq(uint8(t.status), uint8(ParlayEngine.TicketStatus.Voided));
+        assertEq(vault.totalReserved(), 0);
+        assertEq(usdc.balanceOf(alice), aliceBalBefore + (tBefore.stake - tBefore.feePaid));
+    }
 }

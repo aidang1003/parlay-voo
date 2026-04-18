@@ -40,7 +40,7 @@ import {
   type MarketRow,
 } from "@/lib/db/client";
 import deployedContracts from "@/contracts/deployedContracts";
-import { TicketStatus, mapResolution } from "./run/lib";
+import { TicketStatus, mapResolution, stripPolyPrefix } from "./run/lib";
 
 // ── Minimal ABIs ─────────────────────────────────────────────────────────
 
@@ -164,9 +164,7 @@ async function resolveLegs(
   }
 
   for (const row of rows) {
-    const conditionId = row.txtsourceref.startsWith("poly:")
-      ? row.txtsourceref.slice(5)
-      : row.txtsourceref;
+    const conditionId = stripPolyPrefix(row.txtsourceref);
 
     try {
       const resolution = await poly.fetchResolution(conditionId);

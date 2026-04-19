@@ -38,7 +38,6 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 ### 4. Make autonomous agents a first-class user
 
-- `scripts/risk-agent.ts` — Kelly-criterion sized betting agent, uses the same signed-quote flow as the frontend
 - `/api/mcp` — six MCP tools so external LLM agents can list markets, quote parlays, assess risk, read vault health
 - Signed-quote architecture (trusted signer set at deploy time) so an agent's on-chain tx carries the same guarantees as a UI click
 
@@ -137,7 +136,7 @@ pnpm re-deploy:local # wipe .next + forge artifacts, redeploy
 packages/foundry/    Solidity 0.8.24, HelperConfig-driven deploy
 packages/nextjs/     Next.js 14 app, wagmi 2, ConnectKit
 packages/shared/     ParlayMath TS mirror, Zod schemas, types
-scripts/             generate-deployed-contracts, risk-agent, demo-autopilot
+scripts/             generate-deployed-contracts
 docs/                Human-readable reference + subsystem specs (see docs/README.md)
 docs/changes/        Chronological change log — one file per architectural change
 docs/llm-spec/       LLM-only mirror of subsystem specs; humans can ignore

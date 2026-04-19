@@ -29,7 +29,6 @@ Category filter values for `list_markets`: `crypto`, `defi`, `nft`, `policy`, `e
 
 - **In-app chat panel** (`ChatPanel.tsx`) — the Vercel AI SDK wraps the same tool implementations as AI SDK `tool()` definitions. Chat and MCP share one source of truth.
 - **External agents** — connect to `https://<host>/api/mcp`, issue `tools/list`, then `tools/call` with a tool name + arguments. No persistent session state.
-- **Settlement agent** — `scripts/risk-agent.ts` uses `get_quote` and `assess_risk` through the same `/api/` surface (via the standard HTTP routes, not MCP) when sizing bets.
 
 ## Adding a tool
 

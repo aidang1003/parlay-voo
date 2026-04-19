@@ -13,10 +13,9 @@ flowchart TB
         POLY[Polymarket<br/>gamma-api]
     end
 
-    subgraph "Crons + Agent Scripts"
+    subgraph "Crons"
         PSYNC[Polymarket Sync<br/>/api/polymarket/sync<br/>daily 08:00 UTC]
         SET[Settlement Cron<br/>/api/settlement/run]
-        RA[Risk Agent<br/>scripts/risk-agent.ts]
     end
 
     subgraph "Frontend -- Next.js 14 (Vercel)"
@@ -53,7 +52,6 @@ flowchart TB
     BDL --> API
     SET -->|settleTicket| PE
     SET -->|canResolve| OA
-    RA -->|quote + risk| API
 
     %% Human flows
     HU -->|wagmi/viem| UI
@@ -97,9 +95,9 @@ Pluggable settlement via `IOracleAdapter` interface:
 ### Hybrid Settlement
 `bootstrapEndsAt` timestamp determines mode at ticket purchase time. Before = FAST (admin resolved). After = OPTIMISTIC (challenge-based). Mode is immutable per ticket.
 
-## Crons + Agent Scripts
+## Crons
 
-Crons handle protocol infrastructure. Humans (and the risk agent when enabled) make all betting decisions.
+Crons handle protocol infrastructure. Humans make all betting decisions.
 
 ### Polymarket Sync (`/api/polymarket/sync`)
 
@@ -119,10 +117,6 @@ Poll ticketCount  -->  canResolve for each leg  -->  settleTicket()
 ```
 
 Signed with `DEPLOYER_PRIVATE_KEY`.
-
-### Risk Agent (`scripts/risk-agent.ts`)
-
-Standalone autonomous betting agent (Kelly-criterion sizing, optional 0G AI inference, x402 payment for premium risk assessments). Not on a cron — run by hand or scheduled externally. Not part of the core protocol loop; kept as a reference implementation for agent integration.
 
 ## MCP Server & AI Chat
 

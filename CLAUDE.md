@@ -37,8 +37,6 @@ pnpm deploy:sepolia           # Deploy to Base Sepolia, regenerate deployedContr
 
 pnpm fund-wallet:local 10000  # Mint MockUSDC + fund ETH on Anvil
 pnpm fund-wallet:sepolia 1000 # Mint MockUSDC on Base Sepolia
-pnpm demo-seed:local          # Seed LP + sample legs on Anvil
-pnpm demo-seed:sepolia        # Seed LP + sample legs on Sepolia
 
 pnpm test:contracts           # forge test -vvv
 pnpm test:web                 # vitest (nextjs)
@@ -89,15 +87,11 @@ pnpm clean                    # forge clean + .next
 
 **Scripts (`scripts/`):**
 - `generate-deployed-contracts.ts` -- reads forge broadcast + ABI JSON, writes `deployedContracts.ts` + `deployments/<chainId>.json`. Chained onto `pnpm deploy:*`.
-- `risk-agent.ts` -- autonomous betting agent (Kelly criterion sizing, 0G AI inference)
-- `demo-autopilot.ts` -- auto-resolves legs on a running ticket for demos
 - `dev.sh` / `dev-stop.sh` / `bootstrap.sh` -- process orchestration
-- `lib/env.ts` -- shared env loading for scripts (reads .env.local)
 
 **Foundry scripts (`packages/foundry/script/`):**
 - `HelperConfig.s.sol` -- per-chain config (USDC, oracle params, deployer key)
 - `Deploy.s.sol` -- composes `steps/*` under one broadcast; funds deployer from Anvil #0 on local; also runs SetTrustedSigner
-- `DemoSeed.s.sol` -- LP deposits + 5 sample legs (no ticket creation; JIT engine needs signed quotes)
 - `FundWallet.s.sol` -- mint MockUSDC (+ fund ETH on Anvil). Reads MockUSDC address from broadcast JSON, not env.
 - `SetTrustedSigner.s.sol` -- register JIT quote signer; composable + standalone
 
@@ -156,7 +150,7 @@ Any architectural change (adding/removing a contract, reorganizing docs, retirin
 
 **This file is checked into git** (SE2 convention) — Vercel builds from GitHub and needs it present, since Foundry doesn't run in the build env. After every `pnpm deploy:local` / `pnpm deploy:sepolia`, commit the refreshed `deployedContracts.ts` alongside any Solidity/TS changes in the same PR.
 
-**Keys:** `DEPLOYER_PRIVATE_KEY` is the single required signing key — deploys, admin calls, the settlement cron (`/api/settlement/run`), and agent scripts (demo-autopilot / risk-agent) all resolve to it. Locally it's optional (forge + agent scripts fall back to anvil defaults via `CodeConstants.ANVIL_ACCOUNT_0_KEY` / `scripts/lib/env.ts` `ANVIL_ACCOUNT_0_KEY`); required on Sepolia/mainnet. `QUOTE_SIGNER_PRIVATE_KEY` is **optional** — falls back to `DEPLOYER_PRIVATE_KEY` when unset. Set separately on mainnet only if you want the hot signer distinct from the cold deployer.
+**Keys:** `DEPLOYER_PRIVATE_KEY` is the single required signing key — deploys, admin calls, and the settlement cron (`/api/settlement/run`) all resolve to it. Locally it's optional (forge falls back to anvil defaults via `CodeConstants.ANVIL_ACCOUNT_0_KEY`); required on Sepolia/mainnet. `QUOTE_SIGNER_PRIVATE_KEY` is **optional** — falls back to `DEPLOYER_PRIVATE_KEY` when unset. Set separately on mainnet only if you want the hot signer distinct from the cold deployer.
 
 **Dev wallet:** Rabby (not MetaMask). When giving wallet UI instructions (network switching, clearing pending txs, resetting nonce, adding custom networks), target Rabby's UI and always pair with a wallet-agnostic RPC fallback (`cast rpc anvil_setNonce …`) so the user can unstick regardless of wallet state. See README "Debugging stuck transactions".
 
@@ -204,7 +198,7 @@ packages/nextjs/src/*/__tests__/   # Frontend + API tests (vitest)
 
 ## Scaffold-ETH-inspired structure
 
-This repo follows a Scaffold-ETH 2 layout: `packages/foundry` (contracts) + `packages/nextjs` (frontend) + `packages/shared` (shared code). All API routes are Next.js serverless (no separate Express server). Scripts run via `npx tsx scripts/<name>.ts`. Agent scripts use `API_URL` env var (defaults to `http://localhost:3000/api`).
+This repo follows a Scaffold-ETH 2 layout: `packages/foundry` (contracts) + `packages/nextjs` (frontend) + `packages/shared` (shared code). All API routes are Next.js serverless (no separate Express server). Scripts run via `npx tsx scripts/<name>.ts`.
 
 **Deploy → frontend flow (SE2-style):** `pnpm deploy:local` runs forge, then `generate-deployed-contracts.ts` reads broadcast JSON + forge `out/` ABIs and writes `deployedContracts.ts`. Next.js HMR picks up the change automatically (webpack `managedPaths: []` in `next.config.mjs`). No `.env.local` address vars needed.
 

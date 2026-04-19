@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useUserTickets, useLegDescriptions, useLegStatuses, type OnChainTicket, type LegInfo, type LegOracleResult } from "@/lib/hooks";
 import { TicketCard, type TicketData, type TicketLeg, type TicketStatus } from "@/components/TicketCard";
+import { RehabClaimBanner } from "@/components/RehabClaimBanner";
 import { mapStatus, parseOutcomeChoice, isLegWon } from "@/lib/utils";
 import { PPM, BASE_CASHOUT_PENALTY_BPS, computeClientCashoutValue } from "@/lib/cashout";
 
@@ -127,6 +128,7 @@ export default function TicketsPage() {
 
   return (
     <div className="space-y-8">
+      <RehabClaimBanner />
       <section className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black text-white">

@@ -72,6 +72,95 @@ export function useCreditBalance() {
   };
 }
 
+/**
+ * Tracks the connected user's rehab claim balance (unclaimed losses) plus the
+ * on-chain parameters needed to render the claim screen: projected APR for the
+ * advance-credit preview and the minimum lock duration enforced by
+ * `claimRehab`.
+ */
+export function useRehabClaimable() {
+  const { address } = useAccount();
+  const vault = useDeployedContract("HouseVault");
+  const baseContract = { address: vault?.address, abi: vault?.abi ?? EMPTY_ABI } as const;
+
+  const { data, isLoading, refetch } = useReadContracts({
+    contracts: [
+      { ...baseContract, functionName: "rehabClaimable", args: address ? [address] : undefined },
+      { ...baseContract, functionName: "projectedAprBps" },
+      { ...baseContract, functionName: "MIN_REHAB_DURATION" },
+    ],
+    query: { enabled: !!address && !!vault, refetchInterval: 10_000 },
+  });
+
+  const pick = (i: number) =>
+    data?.[i]?.status === "success" ? (data[i].result as bigint) : undefined;
+
+  return {
+    claimable: pick(0),
+    projectedAprBps: pick(1),
+    minDuration: pick(2),
+    isLoading,
+    refetch,
+  };
+}
+
+/**
+ * Calls `claimRehab(duration)` — converts the caller's entire rehab claimable
+ * balance into a LEAST-tier lock of the chosen duration and issues 12-month
+ * advance credit. `durationSeconds` is the user's picked lockup.
+ */
+export function useClaimRehab() {
+  const publicClient = useContractClient();
+  const vault = useDeployedContract("HouseVault");
+  const { writeContractAsync } = usePinnedWriteContract();
+  const [isPending, setIsPending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const claim = async (durationSeconds: bigint | number): Promise<boolean> => {
+    if (!publicClient || !vault) return false;
+
+    setIsPending(true);
+    setIsConfirming(false);
+    setIsSuccess(false);
+    setError(null);
+
+    try {
+      const duration = typeof durationSeconds === "bigint" ? durationSeconds : BigInt(durationSeconds);
+
+      setIsPending(false);
+      setIsConfirming(true);
+      const hash = await writeContractAsync({
+        address: vault.address,
+        abi: vault.abi,
+        functionName: "claimRehab",
+        args: [duration],
+        dataSuffix: BUILDER_SUFFIX,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === "reverted") {
+        throw new Error("claimRehab transaction reverted on-chain");
+      }
+
+      setIsConfirming(false);
+      setIsSuccess(true);
+      return true;
+    } catch (err) {
+      console.error("claimRehab failed:", err);
+      setError(err instanceof Error ? err : new Error(String(err)));
+      return false;
+    } finally {
+      setIsPending(false);
+      setIsConfirming(false);
+    }
+  };
+
+  const resetSuccess = () => { setIsSuccess(false); setError(null); };
+
+  return { claim, resetSuccess, isPending, isConfirming, isSuccess, error };
+}
+
 export function useDepositVault() {
   const { address } = useAccount();
   const publicClient = useContractClient();

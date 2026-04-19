@@ -8,7 +8,8 @@ import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
 import {ILockVault} from "../../src/interfaces/ILockVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Phase 2 rehab tests: loss queue, flush, LEAST burn, tier guards.
+/// @notice Rehab tests: loss accrues to per-user claimable balance, user
+///         converts it into a LEAST lock at their chosen duration.
 contract RehabTest is Test {
     MockUSDC usdc;
     HouseVault vault;
@@ -19,7 +20,7 @@ contract RehabTest is Test {
     address safetyModule = makeAddr("safetyModule");
     address lp = makeAddr("lp");
     address loser = makeAddr("loser");
-    address winner = makeAddr("winner"); // For PARTIAL-tier tests (Phase 3)
+    address winner = makeAddr("winner");
 
     uint256 constant YEAR = 365 days;
 
@@ -39,135 +40,160 @@ contract RehabTest is Test {
         vm.stopPrank();
     }
 
-    // ── distributeLoss access + queueing ─────────────────────────────────
+    // ── distributeLoss accrual ───────────────────────────────────────────
 
     function test_distributeLoss_onlyEngine() public {
         vm.expectRevert("HouseVault: caller is not engine");
-        vault.distributeLoss(10e6, loser, YEAR);
+        vault.distributeLoss(10e6, loser);
     }
 
-    function test_distributeLoss_queuesStake_issuesCredit_adjustsTotalAssets() public {
+    function test_distributeLoss_accrues_doesNotIssueCredit() public {
         uint256 taBefore = vault.totalAssets();
         uint256 stake = 100e6;
 
-        // Simulate engine having transferred stake into vault (normal ticket flow).
+        // Simulate engine having transferred stake into the vault.
         usdc.mint(address(vault), stake);
 
         vm.prank(engine);
-        vault.distributeLoss(stake, loser, YEAR);
+        vault.distributeLoss(stake, loser);
 
-        assertEq(vault.pendingLossesLength(), 1);
-        assertEq(vault.pendingRehabPrincipal(), stake);
-        // totalAssets reflects the rehab-carve: underlying balance grew by `stake`
-        // but pendingRehabPrincipal subtracts it, so LP-view totalAssets is flat.
+        assertEq(vault.rehabClaimable(loser), stake);
+        assertEq(vault.totalRehabClaimable(), stake);
+        // totalAssets is carved by the claimable balance: USDC grew by stake
+        // but totalRehabClaimable subtracts it, so LP-view totalAssets is flat.
         assertEq(vault.totalAssets(), taBefore);
-        // Credit = stake * projectedApr (6% default).
-        assertEq(vault.creditBalance(loser), vault.creditFor(stake));
+        // Credit is NOT issued at accrual time — only on claim.
+        assertEq(vault.creditBalance(loser), 0);
     }
 
-    function test_distributeLoss_subThreshold_skipsQueue() public {
+    function test_distributeLoss_subThreshold_staysWithLps() public {
         uint256 taBefore = vault.totalAssets();
         usdc.mint(address(vault), 0.5e6);
 
         vm.prank(engine);
-        vault.distributeLoss(0.5e6, loser, YEAR);
+        vault.distributeLoss(0.5e6, loser);
 
-        assertEq(vault.pendingLossesLength(), 0);
-        assertEq(vault.pendingRehabPrincipal(), 0);
-        assertEq(vault.creditBalance(loser), 0);
+        assertEq(vault.rehabClaimable(loser), 0);
+        assertEq(vault.totalRehabClaimable(), 0);
         // Sub-threshold loss flows to LPs as implicit profit.
         assertEq(vault.totalAssets(), taBefore + 0.5e6);
     }
 
-    function test_distributeLoss_shortDuration_reverts() public {
-        vm.prank(engine);
-        vm.expectRevert("HouseVault: duration too short");
-        vault.distributeLoss(10e6, loser, 30 days);
+    function test_distributeLoss_multipleLosses_sum() public {
+        usdc.mint(address(vault), 300e6);
+        vm.startPrank(engine);
+        vault.distributeLoss(100e6, loser);
+        vault.distributeLoss(100e6, loser);
+        vault.distributeLoss(100e6, loser);
+        vm.stopPrank();
+
+        assertEq(vault.rehabClaimable(loser), 300e6);
+        assertEq(vault.totalRehabClaimable(), 300e6);
     }
 
     function test_distributeLoss_noLockVault_silentlySkips() public {
-        // Deploy fresh vault without lockVault configured.
         HouseVault v = new HouseVault(IERC20(address(usdc)));
         v.setEngine(engine);
 
         usdc.mint(address(v), 10e6);
         vm.prank(engine);
-        v.distributeLoss(10e6, loser, YEAR);
+        v.distributeLoss(10e6, loser);
 
-        assertEq(v.pendingLossesLength(), 0);
-        assertEq(v.pendingRehabPrincipal(), 0);
+        assertEq(v.rehabClaimable(loser), 0);
+        assertEq(v.totalRehabClaimable(), 0);
     }
 
-    // ── flushRehabLosses ─────────────────────────────────────────────────
+    // ── claimRehab ───────────────────────────────────────────────────────
 
-    function test_flushRehabLosses_drainsQueue_mintsToLockVault() public {
+    function test_claimRehab_nothingToClaim_reverts() public {
+        vm.prank(loser);
+        vm.expectRevert("HouseVault: nothing to claim");
+        vault.claimRehab(YEAR);
+    }
+
+    function test_claimRehab_shortDuration_reverts() public {
         usdc.mint(address(vault), 100e6);
         vm.prank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
+        vault.distributeLoss(100e6, loser);
 
-        uint256 supplyBefore = vault.totalSupply();
-        uint256 taBefore = vault.totalAssets();
-
-        vault.flushRehabLosses(0);
-
-        assertEq(vault.pendingLossesLength(), 0);
-        assertEq(vault.pendingRehabPrincipal(), 0);
-        // Shares minted to LockVault — held on behalf of loser.
-        assertEq(vault.balanceOf(address(lockVault)), vault.totalSupply() - supplyBefore);
-        // totalAssets grows by the released pending principal.
-        assertEq(vault.totalAssets(), taBefore + 100e6);
+        vm.prank(loser);
+        vm.expectRevert("HouseVault: duration too short");
+        vault.claimRehab(30 days);
     }
 
-    function test_flushRehabLosses_priceNeutral() public {
-        // LP should see the same share price before loss and after flush.
+    function test_claimRehab_createsLeastLock_issuesCredit_consumesClaim() public {
+        usdc.mint(address(vault), 100e6);
+        vm.prank(engine);
+        vault.distributeLoss(100e6, loser);
+
+        uint256 supplyBefore = vault.totalSupply();
+
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
+
+        // Balance consumed.
+        assertEq(vault.rehabClaimable(loser), 0);
+        assertEq(vault.totalRehabClaimable(), 0);
+        // LockVault holds the freshly-minted shares.
+        assertEq(vault.balanceOf(address(lockVault)), vault.totalSupply() - supplyBefore);
+        // Credit issued at claim time only (stake × projectedApr).
+        assertEq(vault.creditBalance(loser), vault.creditFor(100e6));
+        // LEAST position created at the chosen duration.
+        LockVaultV2.LockPosition memory pos = lockVault.getPosition(0);
+        assertEq(pos.owner, loser);
+        assertEq(uint8(pos.tier), uint8(ILockVault.Tier.LEAST));
+        assertEq(pos.unlockAt, block.timestamp + YEAR);
+    }
+
+    function test_claimRehab_userPicksLongerDuration() public {
+        usdc.mint(address(vault), 100e6);
+        vm.prank(engine);
+        vault.distributeLoss(100e6, loser);
+
+        uint256 fiveYears = 5 * YEAR;
+
+        vm.prank(loser);
+        vault.claimRehab(fiveYears);
+
+        // Credit is 12mo of yield regardless of chosen duration.
+        assertEq(vault.creditBalance(loser), vault.creditFor(100e6));
+        LockVaultV2.LockPosition memory pos = lockVault.getPosition(0);
+        assertEq(pos.unlockAt, block.timestamp + fiveYears);
+    }
+
+    function test_claimRehab_priceNeutral() public {
         uint256 stake = 100e6;
         uint256 sharesBefore = vault.balanceOf(lp);
         uint256 lpAssetsBefore = vault.convertToAssets(sharesBefore);
 
         usdc.mint(address(vault), stake);
         vm.prank(engine);
-        vault.distributeLoss(stake, loser, YEAR);
-        vault.flushRehabLosses(0);
+        vault.distributeLoss(stake, loser);
+
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
 
         uint256 lpAssetsAfter = vault.convertToAssets(sharesBefore);
         // Allow 1 wei rounding from virtual-offset share math.
         assertApproxEqAbs(lpAssetsAfter, lpAssetsBefore, 2);
     }
 
-    function test_flushRehabLosses_createsLeastPosition() public {
-        usdc.mint(address(vault), 100e6);
-        vm.prank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.flushRehabLosses(0);
-
-        LockVaultV2.LockPosition memory pos = lockVault.getPosition(0);
-        assertEq(pos.owner, loser);
-        assertEq(uint8(pos.tier), uint8(ILockVault.Tier.LEAST));
-        assertEq(pos.feeShareBps, 0);
-        assertEq(pos.unlockAt, block.timestamp + YEAR);
-        assertGt(pos.shares, 0);
-    }
-
-    function test_flushRehabLosses_partialDrain() public {
+    function test_claimRehab_claimsEntireAccrual() public {
         usdc.mint(address(vault), 300e6);
         vm.startPrank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.distributeLoss(100e6, loser, YEAR);
+        vault.distributeLoss(100e6, loser);
+        vault.distributeLoss(100e6, loser);
+        vault.distributeLoss(100e6, loser);
         vm.stopPrank();
 
-        vault.flushRehabLosses(2);
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
 
-        assertEq(vault.pendingLossesLength(), 1);
-        assertEq(vault.pendingRehabPrincipal(), 100e6);
+        assertEq(vault.rehabClaimable(loser), 0);
+        assertEq(vault.creditBalance(loser), vault.creditFor(300e6));
     }
 
-    function test_flushRehabLosses_emptyQueue_noop() public {
-        vault.flushRehabLosses(0); // does not revert, no state changes
-        assertEq(vault.pendingLossesLength(), 0);
-    }
-
-    // ── rehabLock access control ─────────────────────────────────────────
+    // ── rehabLock access control (unchanged) ─────────────────────────────
 
     function test_rehabLock_onlyVault() public {
         vm.expectRevert("LockVaultV2: caller is not vault");
@@ -175,14 +201,12 @@ contract RehabTest is Test {
     }
 
     function test_rehabLock_rejectsFullTier() public {
-        // Even the vault can't use FULL via rehabLock — only voluntary `lock()`.
         vm.prank(address(vault));
         vm.expectRevert("LockVaultV2: invalid rehab tier");
         lockVault.rehabLock(loser, 1e6, YEAR, ILockVault.Tier.FULL);
     }
 
     function test_rehabLock_partialUnlockAtIsInfinite() public {
-        // Impersonate vault to test PARTIAL path directly.
         vm.prank(lp);
         IERC20(address(vault)).transfer(address(vault), 1e6);
         vm.startPrank(address(vault));
@@ -200,22 +224,20 @@ contract RehabTest is Test {
     function test_leastUnlock_burnsPrincipal_benefitsLps() public {
         usdc.mint(address(vault), 100e6);
         vm.prank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.flushRehabLosses(0);
+        vault.distributeLoss(100e6, loser);
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
 
         uint256 lpSharesBefore = vault.balanceOf(lp);
         uint256 lpAssetsBefore = vault.convertToAssets(lpSharesBefore);
         uint256 lvSharesBefore = vault.balanceOf(address(lockVault));
 
         vm.warp(block.timestamp + YEAR);
-        // Permissionless — anyone can retire an expired LEAST lock.
         address rando = makeAddr("rando");
         vm.prank(rando);
         lockVault.unlock(0);
 
-        // LockVault's share balance dropped by the burned amount.
         assertEq(vault.balanceOf(address(lockVault)), lvSharesBefore - lvSharesBefore);
-        // LP shares unchanged but entitle to strictly more USDC (supply shrank).
         assertEq(vault.balanceOf(lp), lpSharesBefore);
         uint256 lpAssetsAfter = vault.convertToAssets(lpSharesBefore);
         assertGt(lpAssetsAfter, lpAssetsBefore);
@@ -224,8 +246,9 @@ contract RehabTest is Test {
     function test_leastUnlock_beforeExpiry_reverts() public {
         usdc.mint(address(vault), 100e6);
         vm.prank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.flushRehabLosses(0);
+        vault.distributeLoss(100e6, loser);
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
 
         vm.expectRevert("LockVaultV2: still locked");
         lockVault.unlock(0);
@@ -236,8 +259,9 @@ contract RehabTest is Test {
     function test_extend_rejectsLeast() public {
         usdc.mint(address(vault), 100e6);
         vm.prank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.flushRehabLosses(0);
+        vault.distributeLoss(100e6, loser);
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
 
         vm.prank(loser);
         vm.expectRevert("LockVaultV2: FULL only");
@@ -247,8 +271,9 @@ contract RehabTest is Test {
     function test_earlyWithdraw_rejectsLeast() public {
         usdc.mint(address(vault), 100e6);
         vm.prank(engine);
-        vault.distributeLoss(100e6, loser, YEAR);
-        vault.flushRehabLosses(0);
+        vault.distributeLoss(100e6, loser);
+        vm.prank(loser);
+        vault.claimRehab(YEAR);
 
         vm.prank(loser);
         vm.expectRevert("LockVaultV2: FULL only");

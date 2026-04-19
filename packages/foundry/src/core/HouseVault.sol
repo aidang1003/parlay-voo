@@ -55,27 +55,26 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     /// @notice Bet-only credit balance issued to users who lost parlays and entered rehab.
     mapping(address => uint256) public creditBalance;
 
-    /// @notice Minimum parlay stake that triggers a rehab lock. Below this, the
-    ///         loss stays with LPs as implicit profit (gas-floor for batching).
+    /// @notice Minimum parlay stake that accrues to the user's rehab claim.
+    ///         Below this, the loss stays with LPs as implicit profit (the
+    ///         economics of a user redeeming a sub-dollar claim don't cover
+    ///         their own gas).
     uint256 public constant MIN_REHAB_STAKE = 1e6; // $1 USDC
 
-    /// @notice Minimum duration for a LEAST rehab lock issued from a loss.
+    /// @notice Minimum duration the user may pick when converting a rehab
+    ///         claim into a LEAST lock.
     uint256 public constant MIN_REHAB_DURATION = 365 days;
 
-    /// @notice Queued rehab loss awaiting flush. `stake` is `effectiveStake`
-    ///         (post-fee) and is also counted in `pendingRehabPrincipal`.
-    struct PendingLoss {
-        address owner;
-        uint256 stake;
-        uint256 duration;
-    }
+    /// @notice Per-user unredeemed rehab balance (USDC, 6-decimal). Lost
+    ///         stake accumulates here until the user calls `claimRehab` to
+    ///         convert it into a LEAST lock and receive advance credit.
+    mapping(address => uint256) public rehabClaimable;
 
-    PendingLoss[] public pendingLosses;
-
-    /// @notice Sum of all queued rehab principals. Subtracted from
-    ///         `totalAssets()` so LPs don't see a share-price spike between
-    ///         loss-time and flush-time.
-    uint256 public pendingRehabPrincipal;
+    /// @notice Sum of every user's `rehabClaimable`. Subtracted from
+    ///         `totalAssets()` so LP share price stays flat between a loss
+    ///         and the moment the user claims — the USDC is in the vault but
+    ///         earmarked, not LP-owned, until it gets minted into shares.
+    uint256 public totalRehabClaimable;
 
     // ── Events ───────────────────────────────────────────────────────────
 
@@ -98,8 +97,10 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     event ProjectedAprChanged(uint256 oldBps, uint256 newBps);
     event CreditIssued(address indexed user, uint256 amount);
     event CreditSpent(address indexed user, uint256 amount);
-    event RehabLossQueued(address indexed loser, uint256 stake, uint256 duration, uint256 creditIssued);
-    event RehabLossFlushed(address indexed owner, uint256 stake, uint256 sharesMinted);
+    event RehabLossAccrued(address indexed loser, uint256 stake, uint256 newClaimable);
+    event RehabClaimed(
+        address indexed user, uint256 stake, uint256 shares, uint256 duration, uint256 creditIssued
+    );
     event LeastPrincipalBurned(uint256 shares);
     event LosslessWinRouted(address indexed owner, uint256 payout, uint256 sharesMinted);
     event PromoCreditIssued(address indexed user, uint256 amount);
@@ -185,13 +186,14 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Total USDC managed by the vault (local + deployed to yield adapter),
-    ///         excluding queued rehab principal. Queued losses are earmarked for
-    ///         rehab locks and must not inflate LP share price between loss-time
-    ///         and flush-time.
+    ///         excluding unredeemed rehab claim balances. Claimable USDC is in
+    ///         the vault but earmarked — LP share price must not spike from a
+    ///         loss until the claim converts (at which point shares are minted
+    ///         for the user at the then-current price).
     function totalAssets() public view returns (uint256) {
         uint256 local = asset.balanceOf(address(this));
         uint256 gross = address(yieldAdapter) != address(0) ? local + yieldAdapter.balance() : local;
-        return gross > pendingRehabPrincipal ? gross - pendingRehabPrincipal : 0;
+        return gross > totalRehabClaimable ? gross - totalRehabClaimable : 0;
     }
 
     /// @notice USDC held locally (not deployed to adapter).
@@ -382,49 +384,53 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
 
     // ── Rehab (Phase 2) ──────────────────────────────────────────────────
 
-    /// @notice Queue a losing parlay stake for rehab conversion. Called by the
-    ///         engine on settlement when a ticket resolves as a loss. Sub-
-    ///         threshold losses fall through and stay with LPs as implicit
-    ///         profit. If `lockVault` is not configured, the loss also stays
-    ///         implicit — protocol degrades gracefully to pre-rehab behavior.
-    function distributeLoss(uint256 stake, address loser, uint256 duration) external onlyEngine nonReentrant {
+    /// @notice Accrue a losing parlay stake to the loser's redeemable rehab
+    ///         balance. Called by the engine on settlement. No lock is created
+    ///         here — the user picks their own duration and claims later via
+    ///         `claimRehab`. Sub-threshold losses fall through and stay with
+    ///         LPs as implicit profit. If `lockVault` is not configured, the
+    ///         loss stays implicit too — protocol degrades gracefully.
+    function distributeLoss(uint256 stake, address loser) external onlyEngine nonReentrant {
         if (address(lockVault) == address(0)) return;
         if (stake < MIN_REHAB_STAKE) return;
         require(loser != address(0), "HouseVault: zero loser");
-        require(duration >= MIN_REHAB_DURATION, "HouseVault: duration too short");
 
-        pendingLosses.push(PendingLoss({owner: loser, stake: stake, duration: duration}));
-        pendingRehabPrincipal += stake;
+        rehabClaimable[loser] += stake;
+        totalRehabClaimable += stake;
 
-        uint256 credit = creditFor(stake);
-        _issueCredit(loser, credit);
-
-        emit RehabLossQueued(loser, stake, duration, credit);
+        emit RehabLossAccrued(loser, stake, rehabClaimable[loser]);
     }
 
-    /// @notice Permissionless drain of the rehab queue. Mints VOO shares at
-    ///         the pre-flush price (which already excludes pendingRehabPrincipal)
-    ///         and hands them to LockVaultV2 via `rehabLock` under the LEAST
-    ///         tier. LP share price is neutral across queue → flush.
-    function flushRehabLosses(uint256 maxCount) external nonReentrant {
+    /// @notice Convert the caller's accumulated rehab balance into a LEAST
+    ///         lock for `duration` seconds and issue advance credit sized at
+    ///         the projected 12-month yield on the full balance. The user
+    ///         chooses `duration` — the choice is the teaching moment. Longer
+    ///         durations lock principal longer but don't earn bigger credits.
+    function claimRehab(uint256 duration) external nonReentrant returns (uint256 shares, uint256 credit) {
         require(address(lockVault) != address(0), "HouseVault: lockVault not configured");
-        uint256 n = pendingLosses.length;
-        if (n == 0) return;
-        if (maxCount == 0 || maxCount > n) maxCount = n;
+        require(duration >= MIN_REHAB_DURATION, "HouseVault: duration too short");
 
-        for (uint256 i = 0; i < maxCount; i++) {
-            PendingLoss memory loss = pendingLosses[pendingLosses.length - 1];
-            pendingLosses.pop();
+        uint256 amount = rehabClaimable[msg.sender];
+        require(amount > 0, "HouseVault: nothing to claim");
 
-            uint256 shares = convertToShares(loss.stake);
-            pendingRehabPrincipal -= loss.stake;
+        // Compute shares at the pre-claim price (stake is still carved out
+        // of totalAssets). Then un-carve and mint. Both totalAssets and
+        // totalSupply grow by `amount` worth of backing, so LP price stays
+        // neutral across the claim.
+        shares = convertToShares(amount);
+        require(shares > 0, "HouseVault: zero shares");
 
-            _mint(address(this), shares);
-            _approve(address(this), address(lockVault), shares);
-            lockVault.rehabLock(loss.owner, shares, loss.duration, ILockVault.Tier.LEAST);
+        rehabClaimable[msg.sender] = 0;
+        totalRehabClaimable -= amount;
 
-            emit RehabLossFlushed(loss.owner, loss.stake, shares);
-        }
+        _mint(address(this), shares);
+        _approve(address(this), address(lockVault), shares);
+        lockVault.rehabLock(msg.sender, shares, duration, ILockVault.Tier.LEAST);
+
+        credit = creditFor(amount);
+        _issueCredit(msg.sender, credit);
+
+        emit RehabClaimed(msg.sender, amount, shares, duration, credit);
     }
 
     /// @notice Burn VOO shares held by LockVault. Called by LockVaultV2 when a
@@ -435,11 +441,6 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         require(shares > 0, "HouseVault: zero shares");
         _burn(address(lockVault), shares);
         emit LeastPrincipalBurned(shares);
-    }
-
-    /// @notice Length of the pending-loss queue. Useful for off-chain pagination.
-    function pendingLossesLength() external view returns (uint256) {
-        return pendingLosses.length;
     }
 
     // ── Rehab (Phase 3) ──────────────────────────────────────────────────

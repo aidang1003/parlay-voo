@@ -55,12 +55,15 @@ contract LosslessParlayTest is SignedBuy {
         vault.deposit(10_000e6, lp);
         vm.stopPrank();
 
-        // Give bettor some credit by simulating an engine-originated loss.
+        // Give bettor some credit by simulating an engine-originated loss
+        // followed by the bettor claiming it at the minimum duration.
         uint256 principal = CREDIT * 10_000 / vault.projectedAprBps(); // 100 * 10000/600 = 1666.67e6
         uint256 minDuration = vault.MIN_REHAB_DURATION();
         usdc.mint(address(vault), principal);
         vm.prank(address(engine));
-        vault.distributeLoss(principal, bettor, minDuration);
+        vault.distributeLoss(principal, bettor);
+        vm.prank(bettor);
+        vault.claimRehab(minDuration);
         // creditBalance[bettor] = principal * 6% ≈ $100.
         assertEq(vault.creditBalance(bettor), vault.creditFor(principal));
     }
@@ -129,25 +132,20 @@ contract LosslessParlayTest is SignedBuy {
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed), "auto-claimed on lossless win");
-        // User received a PARTIAL lock (position 0 is created when flushed; but
-        // lossless-win skips the queue and goes straight to PARTIAL, so it's
-        // the first position — we assume no prior rehabLock was created).
-        // Find the position by scanning nextPositionId.
-        LockVaultV2.LockPosition memory pos = lockVault.getPosition(0);
+        // setUp claimed rehab → LEAST position at id 0. PARTIAL lands at id 1.
+        LockVaultV2.LockPosition memory pos = lockVault.getPosition(1);
         assertEq(pos.owner, bettor);
         assertEq(uint8(pos.tier), uint8(ILockVault.Tier.PARTIAL));
         assertEq(pos.unlockAt, type(uint256).max, "PARTIAL principal never unlocks");
         assertGt(pos.shares, 0);
         assertEq(vault.totalReserved(), 0, "reservation released");
-        // User received no USDC.
-        // Paid nothing in USDC; no claim step needed.
-        // potentialPayout on the ticket preserved for display.
         assertEq(tAfter.potentialPayout, t.potentialPayout);
     }
 
     function test_losslessWin_dilutesLpsByPayoutOnly() public {
         uint256 lpShares = vault.balanceOf(lp);
         uint256 lpClaimBefore = vault.convertToAssets(lpShares);
+        uint256 lvSharesBefore = vault.balanceOf(address(lockVault));
 
         uint256 ticketId = _buyLossless(engine, bettor, _twoLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
@@ -157,29 +155,26 @@ contract LosslessParlayTest is SignedBuy {
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
         engine.settleTicket(ticketId);
 
-        // By spec: lossless win mints PARTIAL shares worth `payout` at current
-        // price, which dilutes LPs by at most `payout` (the bettor bet with
-        // credit, not USDC — the payout backing comes from the LP pool).
-        // LPs are compensated indirectly: the PARTIAL principal is locked
-        // forever in the pool generating fees.
+        // Lossless win mints PARTIAL shares worth `payout`. Dilution is shared
+        // pro-rata across LP + any pre-existing locked shares (the LEAST lock
+        // from setUp). LP absorbs their proportional fraction of `payout`.
         uint256 lpClaimAfter = vault.convertToAssets(lpShares);
         uint256 lpDrop = lpClaimBefore - lpClaimAfter;
-        // LP dilution is bounded by payout — share math with virtual offset
-        // can trim a fraction off due to post-dilution convertToAssets.
         assertLe(lpDrop, payout, "LP dilution must not exceed payout");
-        // And dilution is close to payout (within 1% — virtual offset plus
-        // post-mint share-price recomputation accounts for the small gap).
-        assertApproxEqRel(lpDrop, payout, 1e16, "LP dilution ~= payout");
+        uint256 poolSharesBefore = lpShares + lvSharesBefore;
+        uint256 expectedLpDrop = payout * lpShares / poolSharesBefore;
+        assertApproxEqRel(lpDrop, expectedLpDrop, 2e16, "LP drop ~= pro-rata share of payout");
 
-        // Bettor's PARTIAL lock holds shares convertible to ~payout.
-        LockVaultV2.LockPosition memory pos = lockVault.getPosition(0);
+        // Bettor's PARTIAL lock (position 1; LEAST from setUp is position 0).
+        LockVaultV2.LockPosition memory pos = lockVault.getPosition(1);
         assertApproxEqRel(vault.convertToAssets(pos.shares), payout, 1e16, "PARTIAL shares ~= payout");
     }
 
     // ── settle: loss → burns credit, no LEAST carve ──────────────────────
 
     function test_losslessLoss_noNewLeastLock() public {
-        uint256 pendingBefore = vault.pendingRehabPrincipal();
+        uint256 claimableBefore = vault.rehabClaimable(bettor);
+        uint256 totalClaimableBefore = vault.totalRehabClaimable();
         uint256 creditAfterBuy = vault.creditBalance(bettor); // already reduced by buy
 
         uint256 ticketId = _buyLossless(engine, bettor, _twoLegs(), 10e6, DEADLINE);
@@ -190,8 +185,9 @@ contract LosslessParlayTest is SignedBuy {
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Lost));
-        // No new queued loss, no new credit.
-        assertEq(vault.pendingRehabPrincipal(), pendingBefore);
+        // Lossless losses burn credit only — no new claimable accrues.
+        assertEq(vault.rehabClaimable(bettor), claimableBefore);
+        assertEq(vault.totalRehabClaimable(), totalClaimableBefore);
         assertEq(vault.creditBalance(bettor), creditAfterBuy - 10e6);
         assertEq(vault.totalReserved(), 0);
     }

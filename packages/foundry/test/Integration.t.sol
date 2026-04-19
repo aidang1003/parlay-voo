@@ -124,14 +124,15 @@ contract IntegrationTest is FeeRouterSetup, SignedBuy {
         uint256 feeToLockers = (t.feePaid * 9000) / 10_000;
         uint256 feeToSafety = (t.feePaid * 500) / 10_000;
         uint256 feeToVault = t.feePaid - feeToLockers - feeToSafety;
-        // Rehab: the effective stake is queued as pendingRehabPrincipal and
-        // subtracted from totalAssets(). LPs retain only the 5% vault fee cut.
+        // Rehab: the effective stake accrues to the bettor's claimable
+        // balance and is subtracted from totalAssets(). LPs retain only the
+        // 5% vault fee cut. Credit is issued only when the user claims.
         assertEq(vault.totalAssets(), vaultBefore + feeToVault);
         assertEq(vault.totalReserved(), 0);
         uint256 effectiveStake = t.stake - t.feePaid;
-        assertEq(vault.pendingRehabPrincipal(), effectiveStake);
-        assertEq(vault.pendingLossesLength(), 1);
-        assertEq(vault.creditBalance(bettor), vault.creditFor(effectiveStake));
+        assertEq(vault.rehabClaimable(bettor), effectiveStake);
+        assertEq(vault.totalRehabClaimable(), effectiveStake);
+        assertEq(vault.creditBalance(bettor), 0);
     }
 
     // ── Lifecycle 3: Partial void ────────────────────────────────────────

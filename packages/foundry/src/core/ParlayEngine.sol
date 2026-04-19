@@ -578,10 +578,10 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             if (!ticket.isLossless) {
                 // Rehab carve applies to USDC-funded tickets only. Lossless
                 // tickets already consumed credit at buy; a loss simply burns
-                // the credit with no new LEAST lock.
+                // the credit with no new claimable accrual.
                 uint256 effectiveStake = ticket.stake - ticket.feePaid;
                 if (effectiveStake > 0) {
-                    vault.distributeLoss(effectiveStake, ownerOf(ticketId), vault.MIN_REHAB_DURATION());
+                    vault.distributeLoss(effectiveStake, ownerOf(ticketId));
                 }
             }
         } else if (allWon) {

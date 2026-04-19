@@ -108,18 +108,18 @@ function DatabaseSection() {
   return (
     <Section title="Database">
       <p className="mb-4 text-xs text-gray-500">
-        Runs against the CRON-authorized routes. Locally these pass without a
-        token (cron auth returns true off Vercel).
+        Proxies attach CRON_SECRET server-side so Vercel-hosted testnets can
+        still trigger these without the token reaching the browser.
       </p>
       <div className="grid gap-4 md:grid-cols-2">
-        <DbButton label="Initialize DB" url="/api/db/init" method="GET" />
-        <DbButton label="Sync Polymarket" url="/api/polymarket/sync" method="GET" />
+        <DbButton label="Initialize DB" url="/api/admin/db-init" />
+        <DbButton label="Sync Polymarket" url="/api/admin/sync" />
       </div>
     </Section>
   );
 }
 
-function DbButton({ label, url, method }: { label: string; url: string; method: "GET" | "POST" }) {
+function DbButton({ label, url }: { label: string; url: string }) {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [response, setResponse] = useState<string | null>(null);
 
@@ -127,7 +127,7 @@ function DbButton({ label, url, method }: { label: string; url: string; method: 
     setState("loading");
     setResponse(null);
     try {
-      const res = await fetch(url, { method });
+      const res = await fetch(url, { method: "POST" });
       const body = await res.text();
       setResponse(prettyJson(body));
       setState(res.ok ? "done" : "error");

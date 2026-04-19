@@ -1,0 +1,10 @@
+{
+  "AdminOracleAdapter": "0x9d2a52b29e509884ac172cc26f3ef8dce2840ed9",
+  "HouseVault": "0xc232129fa72304ec630c2a6ee0757edd704e6ca3",
+  "LegRegistry": "0x774d67193b331df28aecd22f644ea30bb66bdd5e",
+  "LockVaultV2": "0xae944149c7ca694a19168adefeb01521f7e834e1",
+  "MockUSDC": "0xbd836e1a0228b28227b2d69426ce270149e14041",
+  "MockYieldAdapter": "0xb4b831f5519252a0cc452a1b267917d5eea0f353",
+  "OptimisticOracleAdapter": "0x4d4b7dc9ea36595e1379c15f55efe243dd77e30a",
+  "ParlayEngine": "0x6fd9359459a2aaf748229acf03fbf02744f7f863"
+}

@@ -299,6 +299,7 @@ export function VaultDashboard() {
 
   function lockButtonLabel(): string {
     if (!isConnected) return "Connect Wallet";
+    if (!lockHook.ready) return "Not Deployed On This Network";
     if (!hasShares) return "Deposit USDC First";
     if (lockHook.isPending) return "Signing...";
     if (lockHook.isConfirming) return "Confirming...";
@@ -816,7 +817,7 @@ export function VaultDashboard() {
               )}
               <button
                 onClick={handleLock}
-                disabled={!isConnected || !hasShares || !lockAmount || lockNotANumber || lockBelowMinimum || lockExceedsShares || lockHook.isPending || lockHook.isConfirming}
+                disabled={!isConnected || !lockHook.ready || !hasShares || !lockAmount || lockNotANumber || lockBelowMinimum || lockExceedsShares || lockHook.isPending || lockHook.isConfirming}
                 className="btn-gradient w-full rounded-xl py-3 text-sm font-bold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:!bg-none disabled:!bg-gray-800 disabled:!text-gray-500 disabled:!shadow-none"
               >
                 {lockButtonLabel()}

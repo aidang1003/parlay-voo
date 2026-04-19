@@ -27,3 +27,13 @@ export function mapResolution(
       return { status: LegStatus.Voided, outcome: ZERO_OUTCOME };
   }
 }
+
+/**
+ * Polymarket conditionIds are stored in the markets table prefixed with
+ * `poly:` so the sourceRef column stays self-describing across data providers
+ * (seed: …, poly: …, etc.). Phase A of settlement needs the raw conditionId
+ * to hit Polymarket's API, so strip the prefix if present.
+ */
+export function stripPolyPrefix(sourceRef: string): string {
+  return sourceRef.startsWith("poly:") ? sourceRef.slice(5) : sourceRef;
+}

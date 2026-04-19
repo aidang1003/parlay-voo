@@ -6,6 +6,7 @@ import {
   NO_OUTCOME,
   ZERO_OUTCOME,
   mapResolution,
+  stripPolyPrefix,
 } from "../lib";
 
 describe("settlement route enums mirror Solidity", () => {
@@ -46,5 +47,56 @@ describe("mapResolution", () => {
 
   it("VOIDED → Voided + 0x00", () => {
     expect(mapResolution("VOIDED")).toEqual({ status: LegStatus.Voided, outcome: ZERO_OUTCOME });
+  });
+
+  it("every output is a valid 32-byte 0x hex the AdminOracleAdapter will accept", () => {
+    const hex32 = /^0x[0-9a-f]{64}$/;
+    for (const input of ["YES", "NO", "VOIDED"] as const) {
+      const { status, outcome } = mapResolution(input);
+      expect(status).toBeGreaterThanOrEqual(LegStatus.Won);
+      expect(status).toBeLessThanOrEqual(LegStatus.Voided);
+      expect(outcome).toMatch(hex32);
+    }
+  });
+
+  it("status never reports Unresolved — settlement only relays terminal outcomes", () => {
+    for (const input of ["YES", "NO", "VOIDED"] as const) {
+      expect(mapResolution(input).status).not.toBe(LegStatus.Unresolved);
+    }
+  });
+});
+
+describe("stripPolyPrefix", () => {
+  it("strips a single poly: prefix", () => {
+    const cond = "0x" + "ab".repeat(32);
+    expect(stripPolyPrefix(`poly:${cond}`)).toBe(cond);
+  });
+
+  it("leaves seed refs untouched", () => {
+    expect(stripPolyPrefix("seed:3")).toBe("seed:3");
+  });
+
+  it("leaves a bare conditionId untouched", () => {
+    const cond = "0xdeadbeef";
+    expect(stripPolyPrefix(cond)).toBe(cond);
+  });
+
+  it("only strips one prefix — a doubled prefix is only single-stripped", () => {
+    // Defensive: malformed input should round-trip to *something* the
+    // Polymarket client will simply fail to resolve, never a silent
+    // truncation of the real id.
+    expect(stripPolyPrefix("poly:poly:xyz")).toBe("poly:xyz");
+  });
+
+  it("is case-sensitive (matches the DB column convention)", () => {
+    expect(stripPolyPrefix("POLY:xyz")).toBe("POLY:xyz");
+  });
+
+  it("handles the empty string", () => {
+    expect(stripPolyPrefix("")).toBe("");
+  });
+
+  it("handles an exact 'poly:' with nothing after it", () => {
+    expect(stripPolyPrefix("poly:")).toBe("");
   });
 });

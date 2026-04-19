@@ -39,6 +39,7 @@ vi.mock("@/lib/hooks", () => ({
     isConfirming: false,
     isSuccess: false,
     error: null,
+    ready: true,
   })),
   useUnlockVault: vi.fn(() => ({
     unlock: vi.fn(),
@@ -597,6 +598,7 @@ describe("VaultDashboard", () => {
         isConfirming: false,
         isSuccess: false,
         error: null,
+        ready: true,
         ...overrides,
       } as any);
     }
@@ -611,6 +613,21 @@ describe("VaultDashboard", () => {
       fireEvent.click(screen.getByText("Lock"));
       const btn = screen.getAllByRole("button").find((b) => b.textContent === "Connect Wallet");
       expect(btn).toBeDefined();
+    });
+
+    it("'Not Deployed On This Network' takes priority over missing shares", () => {
+      vi.mocked(useAccount).mockReturnValue({
+        isConnected: true,
+        address: "0xAlice",
+      } as unknown as ReturnType<typeof useAccount>);
+      mockLockState({ ready: false });
+      render(<VaultDashboard />);
+      fireEvent.click(screen.getByText("Lock"));
+      const btn = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent === "Not Deployed On This Network");
+      expect(btn).toBeDefined();
+      expect(btn).toBeDisabled();
     });
 
     it("'Deposit USDC First' takes priority over validation", () => {

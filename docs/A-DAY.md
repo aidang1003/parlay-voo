@@ -76,16 +76,15 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Blockers:** None. LockVault tiers (30/60/90d fixed) + uniform HouseVault exposure are the two weak pieces.
 - **Shape:** Split into two sub-items, shipped separately. C (full on-chain leg pricing AMM) is parked until we have liquidity — not documented here.
 
-#### F-1A — Continuous-duration lock curve (LockVaultV2)
-- **Time:** 1-2 days
-- **Replaces:** `LockVault.sol` tier model (`LockTier` enum, 1.1x/1.25x/1.5x, 30/60/90d).
-- **Design:**
-  - `lock(shares, duration)` + `extend(positionId, additionalDuration)`. Duration in `[7d, 180d]`.
-  - Linear weight: `weightBps = 10_000 + 10_000 * (duration - MIN) / (MAX - MIN)` → 1.0x@7d, 2.0x@180d.
-  - Dual-scaled penalty: `penaltyBps = MAX_PENALTY_BPS * remaining / MAX_LOCK_DURATION` (closes "lock long, exit day 0 for early-weighting arb"). 20% max at 180d day 0, 3.3% max at 30d day 0.
-  - Synthetix `accRewardPerWeightedShare` accumulator — unchanged from V1.
-- **Migration:** Old `LockVault` → withdraw-only (revert on `lock()`). Deploy `LockVaultV2` alongside. `HouseVault.setLockVault()` flips to new address. Existing positions mature naturally.
-- **Tests:** fuzz weight monotonicity, penalty bounds, `totalWeightedShares` invariant over random lock/extend/unlock sequences; parity test that old tiers don't pay more under new curve.
+#### F-1A — Continuous-duration lock curve (LockVaultV2) ✅ COMPLETE
+- **Shipped:** `packages/foundry/src/core/LockVaultV2.sol`. Replaces `LockVault.sol`'s tier model.
+- **API:** `lock(shares, duration)` + `extend(positionId, additionalDuration)`. `MIN_LOCK_DURATION = 7 days`. No hard max — the curve's diminishing returns shape the tail.
+- **Weight curve:** `feeShareBps = 10_000 + MAX_BOOST_BPS * d / (d + HALF_LIFE_SECS)` with `MAX_BOOST_BPS = 30_000`, `HALF_LIFE_SECS = 730 days`. Base 1.0x at 7d, exactly 2.0x at 1yr, asymptote 4.0x as d→∞.
+- **Penalty curve:** `penaltyBps = MAX_PENALTY_BPS * remaining / (remaining + HALF_LIFE_SECS)` with `MAX_PENALTY_BPS = 3_000`. Same shape as weight, applied to `remaining`. 30% asymptote on a fresh long lock. Asymptotic (not linear) penalty closes the "commit long, exit day 0 for early-weighting arb" without a hard duration cap.
+- **Synthetix `accRewardPerWeightedShare` accumulator:** preserved.
+- **Tier field on `LockPosition` (rehab-mode integration):** `FULL | PARTIAL | LEAST`. `extend()` is FULL-only. `LEAST` unlock is permissionless and burns principal back to LPs. `PARTIAL` principal never unlocks (`unlockAt = type(uint256).max`). See `docs/REHAB_MODE.md`.
+- **Migration:** `LockVaultV2` deployed alongside old `LockVault`; `HouseVault.setLockVault()` points at V2. Old V1 positions mature naturally.
+- **Tests:** `test/unit/LockVaultV2.t.sol`, `test/invariant/LockVaultInvariant.t.sol`.
 
 #### F-1B — Utilization tranches (concentrated-risk LP positions)
 - **Time:** 3-5 days. Separate PR.
@@ -138,6 +137,16 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
   - **Deploy on Polygon** and read Polymarket's Conditional Token Framework directly. Cleanest decentralization story; loses the Base UX positioning and forces a full chain migration.
 - **Acceptance:** no `onlyOwner` function in the oracle path can alter a leg outcome. Ticket settlement remains permissionless. Unit + fork tests against UMA OOv3 on Base Sepolia.
 - **Consumer safeguard we ship with F-4 in the meantime:** `AdminOracleAdapter.resolve()` reverts on `block.chainid == 8453`, so the backdoor is literally unreachable on mainnet until F-5 lands.
+
+### F-6 Debug Admin Commands ✅ COMPLETE
+Shipped as a single `/admin/debug` page plus a testnet-only banner; replaces the dismissible `DemoBanner`.
+
+- **Gating.** `useIsTestnet()` (chain 31337 / 84532). `TestnetBanner` renders null on Base mainnet and the page itself shows "Disabled on this chain". API routes return 404 off testnet. `AdminOracleAdapter.resolve()` still has its `block.chainid != 8453` revert as the last line of defense.
+- **Mint MockUSDC.** Slider (1 – 100,000) + numeric input. Reuses `useMintTestUSDC(amount)` — the existing hook already accepted an optional amount override, no signature change needed.
+- **DB buttons.** "Initialize DB" and "Sync Polymarket" call two thin testnet-gated proxy routes (`/api/admin/db-init`, `/api/admin/sync`) that import the existing cron handlers in-process and pass `Authorization: Bearer $CRON_SECRET`. Avoids looping through Vercel's SSO gate on preview URLs (which was 401-ing the first HTTP-fetch attempt).
+- **Leg resolver.** Lists every unresolved leg referenced by any ticket. Question + yes/no probabilities are joined from `/api/markets` (DB) rather than the on-chain `LegRegistry` snapshot, which can drift from the latest CLOB mid. Per-row YES / NO / VOID buttons post `{ legId, status }` to `/api/admin/resolve-leg`, which signs `AdminOracleAdapter.resolve()` with `DEPLOYER_PRIVATE_KEY` via viem. The original plan was to shell out to `pnpm resolve-leg:*`, but Vercel functions don't have pnpm/forge on PATH (`spawn pnpm ENOENT`), so we call the contract directly instead.
+- **Files:** `components/TestnetBanner.tsx`, `app/admin/debug/page.tsx`, `app/api/admin/{resolve-leg,db-init,sync}/route.ts`, `lib/hooks/debug.ts`. `DemoBanner` + its test deleted.
+
 
 
 ## Parlay Builder Frontend Fixes ✅ COMPLETE
@@ -200,16 +209,15 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Console error for pageProvider.js:2 POST https://eth.merkle.io/ net::ERR_FAILED 429 (Too Many Requests)
   > Access to fetch at 'https://eth.merkle.io/' from origin 'http://localhost:3000' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. If an opaque response serves your needs, set the request's mode to 'no-cors' to fetch the resource with CORS disabled.
 - Warning in the `forge build` command that should be silenced
-- Solidify difference between, DEPLOYER WALLET, SIGNER WALLET, MY WALLET. The overhead of managing these is becoming high and it could very easily lead to errors. ✅ COMLPETE
+- ✅ COMPLETE **Solidify difference between DEPLOYER / SIGNER / MY WALLET.** CLAUDE.md now documents that `DEPLOYER_PRIVATE_KEY` is the single required key (deploys, admin calls, settlement cron, agent scripts) and `QUOTE_SIGNER_PRIVATE_KEY` falls back to it when unset.
 - Make dev.sh/dev-stop.sh use call the same scripts I call manually (pnpm chain, pnpm deploy:local, pnpm web-dev)
-- Funding my personal wallet with gas on the anvil chain should happen automatically on deploy
-- Some typescript module named parleycity is in there. Look into what this is later.
+- ✅ COMPLETE **Auto-fund personal wallet on Anvil deploy.** `Deploy.s.sol` tops up the deployer from Anvil account #0 when `block.chainid == 31337` and balance < 0.01 ETH. `FundWallet.s.sol` does the same for deployer + target wallet.
+- Some typescript module named parlaycity is in there. Look into what this is later.
 - Messages returned to console on a contract deploy are not 100% accurate
 - Writing both deployment files on `pnpm deploy:sepolia`. Either the comment is wrong os this is overkill since we only want to deploy on sepolia
 
 ## Random Things I think of
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
-- Admin page features: Syncing/initializing the database
 - Database doesn't need "poly:" prepending on the PK column
 - Postgres jsonb data type allows us to store the entire API call in json, which can later be retrieved with indexes. Key sell here is that this greatly reduces read times
 - **Curate the betting data.** The market list is currently whatever Polymarket hands back in sync order — we should rank it. Two signals to start:

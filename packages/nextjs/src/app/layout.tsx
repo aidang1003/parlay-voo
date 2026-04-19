@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Providers } from "@/components/providers";
 import { Header } from "@/components/Header";
-import { DemoBanner } from "@/components/DemoBanner";
+import { TestnetBanner } from "@/components/TestnetBanner";
 import { ChainGuard } from "@/components/ChainGuard";
 import { FTUESpotlight, FTUEProvider } from "@/components/FTUESpotlight";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -32,7 +32,7 @@ export default function RootLayout({
             <div className="relative z-10">
               <Header />
               <ChainGuard />
-              <DemoBanner />
+              <TestnetBanner />
               <FTUESpotlight />
               <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
                 {children}

@@ -1,11 +1,11 @@
 /**
- * Testnet-only proxy for /api/db/init from the F-6 debug page. Chain-gates on
- * NEXT_PUBLIC_CHAIN_ID (31337 or 84532) and forwards with the CRON_SECRET
- * bearer so the browser never touches the secret.
+ * Testnet-only proxy for /api/db/init from the F-6 debug page. Invokes the
+ * cron handler in-process so we don't loop back through Vercel's SSO gate.
  */
 
 import { NextResponse } from "next/server";
 import { LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "@parlaycity/shared";
+import { GET as dbInit } from "../../db/init/route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,15 +16,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Not available on this chain" }, { status: 404 });
   }
 
-  const target = new URL("/api/db/init", req.url);
-  const headers: Record<string, string> = {};
+  const headers = new Headers();
   const secret = process.env.CRON_SECRET;
-  if (secret) headers.authorization = `Bearer ${secret}`;
+  if (secret) headers.set("authorization", `Bearer ${secret}`);
 
-  const res = await fetch(target, { headers, cache: "no-store" });
-  const body = await res.text();
-  return new NextResponse(body, {
-    status: res.status,
-    headers: { "content-type": res.headers.get("content-type") ?? "application/json" },
-  });
+  return dbInit(new Request(new URL("/api/db/init", req.url), { headers }));
 }

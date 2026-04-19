@@ -5,10 +5,10 @@ pragma solidity ^0.8.24;
 /// @notice Interface HouseVault uses to route fees and mint rehab positions.
 ///         Implemented by LockVaultV2.
 interface ILockVault {
-    /// @notice Position classification. Phase 2 onward.
+    /// @notice Position classification.
     /// - FULL    : voluntary LP lock, withdrawable at unlockAt, counts in fee-share weight.
-    /// - PARTIAL : credit-win lock, principal locked forever, earnings liquid. Phase 3.
-    /// - LEAST   : loss-driven rehab lock, principal burns at unlockAt. Phase 2.
+    /// - PARTIAL : credit-win lock, principal locked forever, earnings liquid.
+    /// - LEAST   : loss-driven rehab lock, principal burns at unlockAt.
     enum Tier {
         FULL,
         PARTIAL,

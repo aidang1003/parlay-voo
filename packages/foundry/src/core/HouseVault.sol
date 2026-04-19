@@ -358,12 +358,11 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         yieldAdapter.emergencyWithdraw();
     }
 
-    // ── Credit Ledger (Phase 1 scaffolding) ──────────────────────────────
+    // ── Credit Ledger ────────────────────────────────────────────────────
     //
-    // External callers (distributeLoss / flushRehabLosses / spendCredit)
-    // land in Phase 2 + 3. Internals are kept here so the ledger storage,
-    // events, and arithmetic are already in place when those entrypoints
-    // are added.
+    // Internal helpers shared by rehab-mode entrypoints below
+    // (distributeLoss, claimRehab, spendCredit, refundCredit,
+    // issuePromoCredit). See docs/REHAB_MODE.md for the credit model.
 
     function _issueCredit(address user, uint256 amount) internal {
         if (amount == 0) return;
@@ -382,7 +381,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         return (principal * projectedAprBps) / 10_000;
     }
 
-    // ── Rehab (Phase 2) ──────────────────────────────────────────────────
+    // ── Rehab (loss → LEAST lock) ────────────────────────────────────────
 
     /// @notice Accrue a losing parlay stake to the loser's redeemable rehab
     ///         balance. Called by the engine on settlement. No lock is created
@@ -433,9 +432,9 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         emit RehabClaimed(msg.sender, amount, shares, duration, credit);
     }
 
-    /// @notice Burn VOO shares held by LockVault. Called by LockVaultV2 when a
-    ///         LEAST position expires unused — the principal is retired back
-    ///         to LPs (USDC backing stays, share supply shrinks).
+    /// @notice Burn VOO shares held by the lock vault. Called when a LEAST
+    ///         position expires unused — the principal is retired back to LPs
+    ///         (USDC backing stays, share supply shrinks).
     function burnFromLockVault(uint256 shares) external nonReentrant {
         require(msg.sender == address(lockVault), "HouseVault: not lockVault");
         require(shares > 0, "HouseVault: zero shares");
@@ -443,7 +442,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         emit LeastPrincipalBurned(shares);
     }
 
-    // ── Rehab (Phase 3) ──────────────────────────────────────────────────
+    // ── Rehab (credit spend + promo) ─────────────────────────────────────
 
     /// @notice Spend bet-only credit on behalf of a user. Called by the engine
     ///         when a user buys a lossless parlay. Reverts if the user's
@@ -471,7 +470,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
 
     /// @notice Convert a lossless-parlay win into a PARTIAL-tier lock for the
     ///         winner. Mints VOO shares at current share price, releases the
-    ///         reservation, and hands the shares to LockVaultV2 under PARTIAL.
+    ///         reservation, and hands the shares to the lock vault under PARTIAL.
     ///         The USDC that was reserved for payout stays in the vault —
     ///         backing the freshly minted shares and the released reservation.
     function routeLosslessWin(address winner, uint256 payout) external onlyEngine nonReentrant {

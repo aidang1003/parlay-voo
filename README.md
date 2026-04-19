@@ -26,9 +26,9 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 - ERC4626-style HouseVault, VOO shares, permissionless deposit/withdraw
 - `totalReserved <= totalAssets()` invariant enforced on every path
 - Utilization cap (80%) and per-payout cap (5% TVL) so a single lucky ticket can't drain the vault
-- LockVault tiers (30/60/90 days at 1.1× / 1.25× / 1.5× weight) routing fee income Synthetix-style
+- LockVaultV2: continuous-duration VOO locks (7-day min, no upper cap) with a fee-share curve (2.0× at 1yr, 4.0× asymptote), routing fee income Synthetix-style
 - Yield on idle capital via pluggable adapter (Aave V3 on mainnet, mock locally)
-- Planned: rehab mode (losing stakes auto-locked as VOO, lossless-parlay credit) — design in `docs/REHAB_MODE.md`
+- Rehab mode: losing stakes auto-lock as LEAST VOO, PARTIAL credit-wins route principal back to LPs — design in `docs/REHAB_MODE.md`
 
 ### 3. Replace admin-managed legs with live market data
 

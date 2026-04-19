@@ -5,7 +5,7 @@ import {MockUSDC} from "../../src/MockUSDC.sol";
 import {HouseVault} from "../../src/core/HouseVault.sol";
 import {LegRegistry} from "../../src/core/LegRegistry.sol";
 import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {LockVault} from "../../src/core/LockVault.sol";
+import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
 import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
@@ -17,7 +17,7 @@ contract FeeRoutingFuzzTest is FeeRouterSetup, SignedBuy {
     HouseVault vault;
     LegRegistry registry;
     ParlayEngine engine;
-    LockVault lockVault;
+    LockVaultV2 lockVault;
     AdminOracleAdapter oracle;
 
     address owner = address(this);
@@ -54,7 +54,7 @@ contract FeeRoutingFuzzTest is FeeRouterSetup, SignedBuy {
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(50_000e6, locker);
         IERC20(address(vault)).approve(address(lockVault), type(uint256).max);
-        lockVault.lock(50_000e6, LockVault.LockTier.THIRTY);
+        lockVault.lock(50_000e6, 30 days);
         vm.stopPrank();
     }
 

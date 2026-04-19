@@ -9,21 +9,21 @@
 
 ## Contract Details
 
-Subdirectories: `core/` (HouseVault, ParlayEngine, LegRegistry, LockVault), `oracle/`, `yield/`, `libraries/`, `interfaces/`.
+Subdirectories: `core/` (HouseVault, ParlayEngine, LegRegistry, LockVaultV2), `oracle/`, `yield/`, `libraries/`, `interfaces/`.
 
 All contracts use Ownable + Pausable + ReentrancyGuard, SafeERC20 on all token ops.
 
 - **HouseVault** -- ERC4626-like LP vault. Holds USDC, mints VOO shares. Tracks `totalReserved` exposure. Utilization cap 80% (`maxUtilizationBps=8000`), max single payout 5% TVL (`maxPayoutBps=500`). Yield buffer 25%. *Current: no fee routing -- fees stay as implicit vault profit.*
 - **ParlayEngine** -- Core betting engine. Mints ERC721 tickets. Validates legs, computes multipliers via ParlayMath, reserves vault exposure, handles settlement. *Current fee: `feePaid = stake * (baseFee + perLegFee * nLegs) / 10_000`. baseFee=100bps, perLegFee=50bps. No routing.*
 - **LegRegistry** -- Admin-managed registry of betting outcomes. Each leg: `probabilityPPM`, `cutoffTime`, `oracleAdapter`.
-- **LockVault** -- Lock VOO for 30/60/90 days. Synthetix-style `accRewardPerWeightedShare` accumulator. Tier weights: 1.1x/1.25x/1.5x. 10% linear early-exit penalty. Fee income via `notifyFees()` called by HouseVault during fee routing. `sweepPenaltyShares()` manual.*
+- **LockVaultV2** -- Continuous-duration VOO lock (7-day min, no upper cap). Fee share curve `10_000 + MAX_BOOST * d / (d + HALF_LIFE)`: 1.0x base, 2.0x at 1yr, 4.0x asymptote. Synthetix-style `accRewardPerWeightedShare` accumulator. Early-exit penalty decays from 30% (day 0, max-lock) to 0. Three tiers (`FULL`, `PARTIAL`, `LEAST`) — FULL is the standard path; PARTIAL/LEAST serve rehab-mode credit backing (see `docs/REHAB_MODE.md`). Fee income via `notifyFees()` called by HouseVault during fee routing.
 - **ParlayMath** -- Pure library: multiplier (PPM), edge (BPS), payout math.
 - **AdminOracleAdapter / OptimisticOracleAdapter** -- Bootstrap vs production oracles. `bootstrapEndsAt` determines mode per ticket at purchase (immutable).
 - **AaveYieldAdapter / MockYieldAdapter** -- Route idle USDC to Aave V3. Default deploy uses MockYieldAdapter only.
 
-Key interfaces: `IOracleAdapter`, `IYieldAdapter`, `IHedgeAdapter` (interface exists, no implementation).
+Key interfaces: `IOracleAdapter`, `IYieldAdapter`, `ILockVault`.
 
-Deployment order: MockUSDC -> HouseVault -> LegRegistry -> Oracles -> ParlayEngine -> vault.setEngine -> LockVault -> MockYieldAdapter -> sample legs.
+Deployment order: MockUSDC -> HouseVault -> LegRegistry -> Oracles -> ParlayEngine -> vault.setEngine -> LockVaultV2 -> MockYieldAdapter -> sample legs.
 
 **Local Anvil:** `Deploy.s.sol` auto-funds the deployer from Anvil account #0 if balance < 0.01 ETH. `FundWallet.s.sol` does the same for the deployer + user wallet. Both scripts read MockUSDC address from `broadcast/Deploy.s.sol/<chainId>/run-latest.json` (enabled by `fs_permissions` in `foundry.toml`).
 

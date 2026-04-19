@@ -13,7 +13,7 @@ import {
   getRpcUrl,
   type SupportedChainId,
 } from "@parlaycity/shared";
-import { contractAddresses } from "@/lib/contracts";
+import deployedContracts from "@/contracts/deployedContracts";
 
 const AGENT_WALLET = (process.env.NEXT_PUBLIC_AGENT_WALLET ??
   "0x1214ACab3De95D9C72354562D223f45e16a80389") as `0x${string}`;
@@ -79,12 +79,17 @@ export async function GET() {
       transport: http(RPC_URL),
     });
 
-    const ZERO = "0x0000000000000000000000000000000000000000" as `0x${string}`;
-    const usdcAddr = contractAddresses.usdc !== ZERO ? contractAddresses.usdc : undefined;
-    const registryAddr =
-      contractAddresses.legRegistry !== ZERO ? contractAddresses.legRegistry : undefined;
-    const engineAddr =
-      contractAddresses.parlayEngine !== ZERO ? contractAddresses.parlayEngine : undefined;
+    const chainContracts =
+      (deployedContracts[STATS_CHAIN_ID as keyof typeof deployedContracts] ??
+        Object.values(deployedContracts)[0]) as Record<
+        string,
+        { address: `0x${string}` }
+      >;
+    const usdcAddr = chainContracts.MockUSDC?.address;
+    const registryAddr = chainContracts.LegRegistry?.address;
+    const engineAddr = chainContracts.ParlayEngine?.address;
+    const houseVaultAddr = chainContracts.HouseVault?.address;
+    const lockVaultAddr = chainContracts.LockVaultV2?.address;
 
     // Parallel on-chain reads
     const [ethBalance, usdcBalance, legCount, ticketCount] = await Promise.all([
@@ -183,8 +188,8 @@ export async function GET() {
       contracts: {
         parlayEngine: engineAddr ?? null,
         legRegistry: registryAddr ?? null,
-        houseVault: contractAddresses.houseVault !== ZERO ? contractAddresses.houseVault : null,
-        lockVault: contractAddresses.lockVault !== ZERO ? contractAddresses.lockVault : null,
+        houseVault: houseVaultAddr ?? null,
+        lockVault: lockVaultAddr ?? null,
         usdc: usdcAddr ?? null,
       },
       chainId: STATS_CHAIN_ID,

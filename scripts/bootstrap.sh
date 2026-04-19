@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ParlayCity — install all dev prerequisites
+# ParlayVoo — install host-level dev prerequisites (Node, pnpm, Foundry)
+# Run this once on a fresh machine; afterwards use `pnpm dev-setup` for repo deps.
 # Usage: ./scripts/bootstrap.sh
 
 RED='\033[0;31m'
@@ -57,25 +58,5 @@ else
     info "Foundry ($(forge --version | head -1)) OK"
 fi
 
-# -- Docker --
-if ! check docker; then
-    warn "Docker not found — needed for 'make ci' (act)"
-    warn "Install Docker Desktop: https://docs.docker.com/desktop/"
-else
-    info "Docker $(docker --version | awk '{print $3}' | tr -d ',') OK"
-fi
-
-# -- act (local CI runner) --
-if ! check act; then
-    info "Installing act..."
-    if check brew; then
-        brew install act
-    else
-        warn "Install act manually: https://github.com/nektos/act#installation"
-    fi
-else
-    info "act $(act --version | awk '{print $NF}') OK"
-fi
-
 echo ""
-info "All prerequisites checked. Run 'make setup' to install project dependencies."
+info "Host tools ready. Run 'pnpm dev-setup' to install repo dependencies."

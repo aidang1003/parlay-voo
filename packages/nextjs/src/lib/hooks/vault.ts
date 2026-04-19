@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import { parseUnits } from "viem";
 import { BUILDER_SUFFIX } from "../builder-code";
-import { useDeployedContract } from "../../hooks/useDeployedContract";
+import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export function useVaultStats() {

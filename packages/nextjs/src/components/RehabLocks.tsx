@@ -4,7 +4,7 @@ import Link from "next/link";
 import { formatUnits } from "viem";
 import { useReadContract } from "wagmi";
 import { useLockPositions, LockTier } from "@/lib/hooks";
-import { HOUSE_VAULT_ABI, contractAddresses } from "@/lib/contracts";
+import { useDeployedContract } from "@/lib/hooks/useDeployedContract";
 
 const SHARES_UNIT = 1_000_000n; // 1 VOO share (6 decimals)
 
@@ -21,15 +21,17 @@ export function RehabLocks() {
     (p) => p.position.tier === LockTier.LEAST,
   );
 
+  const vault = useDeployedContract("HouseVault");
+
   // Read current share price so we can label what each LEAST share would have
   // been worth at the moment the principal got burned.
   const { data: assetsPerShare } = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
+    address: vault?.address,
+    abi: vault?.abi,
     functionName: "convertToAssets",
     args: [SHARES_UNIT],
     query: {
-      enabled: !!contractAddresses.houseVault,
+      enabled: !!vault?.address,
       refetchInterval: 10_000,
     },
   });

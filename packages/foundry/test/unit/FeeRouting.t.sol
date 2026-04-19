@@ -5,7 +5,8 @@ import {MockUSDC} from "../../src/MockUSDC.sol";
 import {HouseVault} from "../../src/core/HouseVault.sol";
 import {LegRegistry} from "../../src/core/LegRegistry.sol";
 import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {LockVault} from "../../src/core/LockVault.sol";
+import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
+import {ILockVault} from "../../src/interfaces/ILockVault.sol";
 import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
@@ -17,7 +18,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     HouseVault vault;
     LegRegistry registry;
     ParlayEngine engine;
-    LockVault lockVault;
+    LockVaultV2 lockVault;
     AdminOracleAdapter oracle;
 
     address owner = address(this);
@@ -59,7 +60,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(5_000e6, locker);
         IERC20(address(vault)).approve(address(lockVault), type(uint256).max);
-        lockVault.lock(5_000e6, LockVault.LockTier.THIRTY);
+        lockVault.lock(5_000e6, 30 days);
         vm.stopPrank();
     }
 
@@ -151,7 +152,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         LegRegistry freshRegistry = new LegRegistry();
         ParlayEngine freshEngine =
             new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
-        LockVault freshLockVault = new LockVault(freshVault);
+        LockVaultV2 freshLockVault = new LockVaultV2(freshVault);
         freshVault.setEngine(address(freshEngine));
         freshRegistry.setEngine(address(freshEngine));
         freshEngine.setTrustedQuoteSigner(_signerAddr());
@@ -233,7 +234,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
 
     function test_notifyFees_onlyFeeDistributor() public {
         vm.prank(alice);
-        vm.expectRevert("LockVault: caller is not fee distributor");
+        vm.expectRevert("LockVaultV2: caller is not fee distributor");
         lockVault.notifyFees(1e6);
     }
 
@@ -263,7 +264,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
 
     function test_setLockVault_zeroAddress_reverts() public {
         vm.expectRevert("HouseVault: zero address");
-        vault.setLockVault(LockVault(address(0)));
+        vault.setLockVault(ILockVault(address(0)));
     }
 
     function test_setSafetyModule_zeroAddress_reverts() public {
@@ -272,7 +273,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_setFeeDistributor_zeroAddress_reverts() public {
-        vm.expectRevert("LockVault: zero address");
+        vm.expectRevert("LockVaultV2: zero address");
         lockVault.setFeeDistributor(address(0));
     }
 
@@ -294,7 +295,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
 
     function test_notifyFees_noLockers_isNoOp() public {
         HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
-        LockVault freshLockVault = new LockVault(freshVault);
+        LockVaultV2 freshLockVault = new LockVaultV2(freshVault);
         freshLockVault.setFeeDistributor(address(freshVault));
 
         usdc.mint(address(freshLockVault), 1e6);
@@ -308,7 +309,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     function test_undistributedFees_flowToFirstLocker() public {
         HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
         LegRegistry freshRegistry = new LegRegistry();
-        LockVault freshLockVault = new LockVault(freshVault);
+        LockVaultV2 freshLockVault = new LockVaultV2(freshVault);
         ParlayEngine freshEngine =
             new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
         freshVault.setEngine(address(freshEngine));
@@ -342,7 +343,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         usdc.approve(address(freshVault), type(uint256).max);
         uint256 shares = freshVault.deposit(5_000e6, firstLocker);
         IERC20(address(freshVault)).approve(address(freshLockVault), type(uint256).max);
-        freshLockVault.lock(shares, LockVault.LockTier.THIRTY);
+        freshLockVault.lock(shares, 30 days);
         vm.stopPrank();
 
         assertEq(freshLockVault.undistributedFees(), 0, "cleared");
@@ -362,7 +363,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(5_000e6, locker2);
         IERC20(address(vault)).approve(address(lockVault), type(uint256).max);
-        lockVault.lock(5_000e6, LockVault.LockTier.NINETY);
+        lockVault.lock(5_000e6, 90 days);
         vm.stopPrank();
 
         uint256 ticketId = _buySigned(engine, alice, _legs(), 50e6, DEADLINE);
@@ -405,7 +406,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
 
     function test_notifyFees_zeroAmount_reverts() public {
         vm.prank(address(vault));
-        vm.expectRevert("LockVault: zero amount");
+        vm.expectRevert("LockVaultV2: zero amount");
         lockVault.notifyFees(0);
     }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useDeployedContract } from "../../hooks/useDeployedContract";
+import { useDeployedContract } from "./useDeployedContract";
 import { useContractClient } from "./_internal";
 
 export interface LegInfo {

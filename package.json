@@ -2,7 +2,7 @@
   "name": "parlaycity",
   "private": true,
   "scripts": {
-    "bootstrap": "pnpm install && cd packages/foundry && (forge install foundry-rs/forge-std --no-git 2>/dev/null || true) && (forge install OpenZeppelin/openzeppelin-contracts --no-git 2>/dev/null || true)",
+    "dev-setup": "pnpm install && cd packages/foundry && (forge install foundry-rs/forge-std --no-git 2>/dev/null || true) && (forge install OpenZeppelin/openzeppelin-contracts --no-git 2>/dev/null || true)",
     "dev-start": "bash scripts/dev.sh",
     "dev-stop": "bash scripts/dev-stop.sh",
     "fund-wallet:local": "cd packages/foundry && dotenv -e ../../.env -e ../nextjs/.env.local -- forge script script/FundWallet.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --sig \"run(uint256)\"",

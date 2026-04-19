@@ -6,7 +6,7 @@ import {HouseVault} from "../src/core/HouseVault.sol";
 import {LegRegistry} from "../src/core/LegRegistry.sol";
 import {ParlayEngine} from "../src/core/ParlayEngine.sol";
 import {AdminOracleAdapter} from "../src/oracle/AdminOracleAdapter.sol";
-import {LockVault} from "../src/core/LockVault.sol";
+import {LockVaultV2} from "../src/core/LockVaultV2.sol";
 import {MockYieldAdapter} from "../src/yield/MockYieldAdapter.sol";
 import {IYieldAdapter} from "../src/interfaces/IYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -21,7 +21,7 @@ contract IntegrationTest is FeeRouterSetup, SignedBuy {
     LegRegistry registry;
     ParlayEngine engine;
     AdminOracleAdapter oracle;
-    LockVault lockVault;
+    LockVaultV2 lockVault;
     MockYieldAdapter yieldAdapter;
 
     address owner = address(this);
@@ -171,7 +171,7 @@ contract IntegrationTest is FeeRouterSetup, SignedBuy {
 
     function test_lockVault_integration() public {
         vm.prank(lp);
-        uint256 posId = lockVault.lock(5_000e6, LockVault.LockTier.THIRTY);
+        uint256 posId = lockVault.lock(5_000e6, 30 days);
 
         assertEq(lockVault.totalLockedShares(), 5_000e6);
         assertEq(vault.balanceOf(address(lockVault)), 5_000e6);
@@ -188,7 +188,7 @@ contract IntegrationTest is FeeRouterSetup, SignedBuy {
 
     function test_lifecycle_feeRouting_endToEnd() public {
         vm.prank(lp);
-        uint256 posId = lockVault.lock(5_000e6, LockVault.LockTier.THIRTY);
+        uint256 posId = lockVault.lock(5_000e6, 30 days);
 
         uint256 lockVaultUsdcBefore = usdc.balanceOf(address(lockVault));
         address safetyModule = vault.safetyModule();

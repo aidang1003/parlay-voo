@@ -6,6 +6,9 @@ import { VaultDashboard } from "../VaultDashboard";
 vi.mock("wagmi", () => ({
   useAccount: vi.fn(() => ({ isConnected: false, address: undefined })),
   useReadContract: vi.fn(() => ({ data: undefined })),
+  useChainId: vi.fn(() => 31337),
+  usePublicClient: vi.fn(() => undefined),
+  useWriteContract: vi.fn(() => ({ writeContractAsync: vi.fn() })),
 }));
 
 // Mock hooks
@@ -78,15 +81,6 @@ vi.mock("@/lib/hooks", () => ({
     refetch: vi.fn(),
   })),
   LockTier: { FULL: 0, PARTIAL: 1, LEAST: 2 },
-}));
-
-// Mock contracts
-vi.mock("@/lib/contracts", () => ({
-  HOUSE_VAULT_ABI: [],
-  contractAddresses: {
-    houseVault: "0x1234",
-    lockVault: "0x5678",
-  },
 }));
 
 import { useAccount, useReadContract } from "wagmi";

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAccount, useReadContract, usePublicClient } from "wagmi";
 import { parseUnits } from "viem";
 import { BUILDER_SUFFIX } from "../builder-code";
-import { useDeployedContract } from "../../hooks/useDeployedContract";
+import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, usePinnedWriteContract } from "./_internal";
 
 export function useUSDCBalance() {

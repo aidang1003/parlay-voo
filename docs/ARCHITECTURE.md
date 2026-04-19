@@ -2,45 +2,39 @@
 
 ## Overview
 
-ParlayVoo (protocol name: ParlayCity) is an onchain parlay betting platform on Base. Users build 2-5 leg parlays, LPs provide house liquidity via a vault, and settlement uses a hybrid model (fast admin resolution for bootstrap, optimistic challenge-based resolution thereafter). Autonomous agents handle market discovery and settlement -- humans make all betting decisions.
+ParlayVoo (protocol name: ParlayCity) is an onchain parlay betting platform on Base. Users build 2-5 leg parlays, LPs provide house liquidity via a vault, and settlement uses a hybrid model (fast admin resolution for bootstrap, optimistic challenge-based resolution thereafter). Curated Polymarket conditions feed real binary markets into the app; a unified cron relays resolutions and settles tickets.
 
 ## System Diagram
 
 ```mermaid
 flowchart TB
     subgraph "External Data Sources"
-        BDL[BallDontLie API<br/>Real NBA Games]
+        BDL[BallDontLie API<br/>Live NBA games]
+        POLY[Polymarket<br/>gamma-api]
     end
 
-    subgraph "Autonomous Agents"
-        MA[Market Discovery Agent<br/>scripts/market-agent.ts]
-        SB[Settlement Cron<br/>/api/settlement/run]
+    subgraph "Crons + Agent Scripts"
+        PSYNC[Polymarket Sync<br/>/api/polymarket/sync<br/>daily 08:00 UTC]
+        SET[Settlement Cron<br/>/api/settlement/run]
+        RA[Risk Agent<br/>scripts/risk-agent.ts]
     end
 
     subgraph "Frontend -- Next.js 14 (Vercel)"
         UI[Parlay Builder / Vault / Tickets / Ticket Detail / About]
         CHAT[AI Chat Panel<br/>Vercel AI SDK + Claude]
-        MCP[MCP JSON-RPC Endpoint<br/>/api/mcp]
-        AQN[Agent Quote API<br/>/api/premium/agent-quote]
+        API[API Routes<br/>/api/markets · /api/quote-sign<br/>/api/mcp · /api/premium/agent-quote]
     end
 
-    subgraph "Services API :3001"
-        MK[/markets<br/>Multi-category catalog]
-        QT[/quote]
-        AQ[/premium/agent-quote<br/>x402-gated]
-        VH[/vault/health<br/>/vault/yield-report]
-        EX[/exposure]
-    end
-
-    subgraph "0G Compute Network"
-        ZG[0G Inference<br/>A0GI token payment]
+    subgraph "Neon Postgres"
+        LM[tblegmapping]
+        PR[tbpolymarketresolution]
     end
 
     subgraph "Base Sepolia -- Contracts"
         PE[ParlayEngine<br/>ERC-721 tickets]
         HV[HouseVault<br/>ERC-4626 vault]
         LR[LegRegistry]
-        LV[LockVault<br/>Synthetix rewards]
+        LV2[LockVaultV2<br/>continuous-duration<br/>Synthetix rewards]
         OA[AdminOracleAdapter]
         OO[OptimisticOracleAdapter]
         PM[ParlayMath<br/>pure library]
@@ -50,30 +44,30 @@ flowchart TB
         HU[Browse markets<br/>Buy tickets<br/>Cashout / Claim<br/>Deposit / Lock]
     end
 
-    %% Agent flows
-    BDL --> MA
-    MA -->|createLeg| LR
-    MA -->|resolve| OA
-    MA -->|x402 payment| AQ
-    AQ -->|A0GI tokens| ZG
-    SB -->|settleTicket| PE
-    SB -->|canResolve| OA
+    %% Cron + agent flows
+    POLY --> PSYNC
+    PSYNC --> LM
+    PSYNC --> PR
+    PSYNC -->|createLeg| LR
+    PSYNC -->|resolve YES/NO/VOIDED| OA
+    BDL --> API
+    SET -->|settleTicket| PE
+    SET -->|canResolve| OA
+    RA -->|quote + risk| API
 
     %% Human flows
     HU -->|wagmi/viem| UI
-    UI --> MK
-    UI --> QT
-    UI --> VH
+    UI --> API
     HU -->|buyTicket / cashoutEarly| PE
     HU -->|deposit / withdraw| HV
-    HU -->|lock / unlock| LV
+    HU -->|lock / unlock| LV2
     HU -->|natural language| CHAT
-    CHAT -->|tool calls| MCP
+    CHAT -->|tool calls| API
 
     %% Contract internals
     PE -->|reserve / release / pay| HV
     PE --> PM
-    HV -->|routeFees / notifyFees| LV
+    HV -->|notifyFees| LV2
     LR --> OA
     LR --> OO
 ```
@@ -81,67 +75,54 @@ flowchart TB
 ## Contract Architecture
 
 ### HouseVault
-ERC4626-like vault holding USDC. LPs deposit to earn the house edge. Tracks reserved exposure for active tickets. Pull-based payouts. Fee routing: 90% to LockVault lockers, 5% to safety buffer, 5% stays in vault (via `routeFees`).
+ERC4626-like vault holding USDC. LPs deposit to earn the house edge. Tracks reserved exposure for active tickets. Pull-based payouts. Fee routing: 90% to LockVaultV2 lockers, 5% to safety buffer, 5% stays in vault (via `routeFees`).
 
 ### LegRegistry
-Registry of betting legs (questions). Each leg has a probability, cutoff time, oracle adapter reference, and optional `sourceRef` for external data provenance (e.g., `bdl:game:12345`). Legs are created by the Market Discovery Agent or admin.
+Registry of betting legs (questions). Each leg has a probability, cutoff time, oracle adapter reference, and optional `sourceRef` for external data provenance (e.g., `polymarket:0xabc...:yes`). Legs are created by admin or the Polymarket sync route.
 
 ### ParlayEngine
-Core engine that mints ERC-721 ticket NFTs. Validates parlay construction, computes multipliers/fees via ParlayMath library, manages settlement lifecycle. Supports three payout modes: Classic, Progressive, and EarlyCashout.
+Core engine that mints ERC-721 ticket NFTs. Validates parlay construction, computes multipliers/fees via ParlayMath library, manages settlement lifecycle. JIT-signed EIP-712 quotes gate every purchase (deterministic pricing, math-parity invariant).
 
-### LockVault
-Staking contract for VOO shares. 30/60/90-day lock tiers with weight multipliers (1.1x/1.25x/1.5x). Synthetix-style fee accumulator distributes 90% of protocol fees to lockers, weighted by lock tier.
+### LockVaultV2
+Staking contract for VOO shares. **Continuous-duration lock curve** (no fixed 30/60/90 tiers): fee share `= 10_000 + MAX_BOOST * d / (d + HALF_LIFE)`, base 1.0x at 7-day min, asymptote 4.0x as `d → ∞`, exactly 2.0x at 1 year. `MAX_PENALTY_BPS = 30%` on day-0 max-lock exit, decaying with elapsed time. Three tiers (`FULL`, `PARTIAL`, `LEAST`) serve rehab mode — FULL is the normal LP path; PARTIAL / LEAST are credit-backing positions. Synthetix-style `accRewardPerWeightedShare` accumulator distributes 90% of protocol fees, weighted by committed duration and shares.
 
 ### ParlayMath
 Pure library mirrored exactly in TypeScript (`packages/shared/src/math.ts`). Computes multipliers, edge, payout, progressive payout, and cashout values. PPM scale (1e6) for probability, BPS (1e4) for fees.
 
 ### Oracle Adapters
 Pluggable settlement via `IOracleAdapter` interface:
-- **AdminOracleAdapter**: Owner (or Market Discovery Agent) resolves legs directly. Used during bootstrap.
+- **AdminOracleAdapter**: Owner resolves legs directly. Used during bootstrap and by the Polymarket sync route.
 - **OptimisticOracleAdapter**: Permissionless propose/challenge with bonds and liveness window. Production path.
 
 ### Hybrid Settlement
 `bootstrapEndsAt` timestamp determines mode at ticket purchase time. Before = FAST (admin resolved). After = OPTIMISTIC (challenge-based). Mode is immutable per ticket.
 
-## Autonomous Agents
+## Crons + Agent Scripts
 
-Agents handle protocol infrastructure. Humans make all betting decisions.
+Crons handle protocol infrastructure. Humans (and the risk agent when enabled) make all betting decisions.
 
-### Market Discovery Agent (`scripts/market-agent.ts`)
+### Polymarket Sync (`/api/polymarket/sync`)
 
-Discovers real NBA games from BallDontLie API, registers them as bettable legs on LegRegistry, and auto-resolves completed games via AdminOracleAdapter. Optionally pays for x402 risk assessment (with 0G AI inference) before resolution.
+Daily Vercel cron at 08:00 UTC. Two phases, one route:
 
-```
-BDL API  -->  Discovery (upcoming games)  -->  createLeg() on LegRegistry
-BDL API  -->  Resolution (completed games) -->  resolve() on AdminOracleAdapter
-                                           -->  x402 /agent-quote (optional AI insight from 0G)
-```
+- **Phase A — discovery + registration.** Walks `packages/shared/src/polymarket/curated.ts`. For each new entry, fetches current odds from Polymarket, registers a leg on `LegRegistry`, records the `conditionId → legId` mapping in Neon Postgres (`tblegmapping`).
+- **Phase B — resolution relay.** Walks active `tblegmapping` rows past cutoff. For each, polls Polymarket for a resolved outcome. When it lands, calls `AdminOracleAdapter.resolve()` for both YES and NO legs and writes a resolution row.
+
+Odds are **frozen at registration time** — deterministic pricing is required by the math-parity invariant. Full detail: [POLYMARKET.md](POLYMARKET.md).
 
 ### Settlement Cron (`/api/settlement/run`)
 
-Unified two-phase settlement running on a Vercel cron. Phase A pulls unresolved Polymarket conditions from `tblegmapping`, calls `PolymarketClient.fetchResolution()`, and relays exact YES/NO/VOIDED outcomes into `AdminOracleAdapter.resolve()`. Phase B iterates `ticketCount`, and for each active ticket whose legs all return `canResolve=true`, calls `ParlayEngine.settleTicket()` to finalize payouts and release vault reserves.
+Iterates `ticketCount`; for each active ticket whose legs all return `canResolve=true`, calls `ParlayEngine.settleTicket()` to finalize payouts and release vault reserves. Idempotent — already-settled tickets are skipped.
 
 ```
-Poll unresolved conditions  -->  fetchResolution  -->  AdminOracleAdapter.resolve()
-Poll ticketCount            -->  canResolve for each leg  -->  settleTicket()
+Poll ticketCount  -->  canResolve for each leg  -->  settleTicket()
 ```
 
-Idempotent: `tbpolymarketresolution` is the Phase A gate, already-settled tickets are skipped in Phase B. Signed with `DEPLOYER_PRIVATE_KEY`. Replaced the old `scripts/settler-bot.ts` worker.
+Signed with `DEPLOYER_PRIVATE_KEY`.
 
-### Payment Flows
+### Risk Agent (`scripts/risk-agent.ts`)
 
-```mermaid
-flowchart LR
-    MA[Market Discovery Agent] -->|X-402-Payment header| SVC[Services API]
-    SVC -->|402 + accepts array| MA
-    MA -->|payment proof| SVC
-    SVC -->|200 + quote + risk| MA
-    SVC -->|A0GI tokens| ZG[0G Inference]
-    ZG -->|verified AI response| SVC
-```
-
-1. **x402 (USDC on Base):** Agent pays for risk assessment via x402 payment header. Services verifies on-chain USDC transfer via facilitator.
-2. **0G Compute (A0GI tokens):** Services API optionally invokes 0G inference for AI risk narrative. Each call costs A0GI tokens on the 0G testnet.
+Standalone autonomous betting agent (Kelly-criterion sizing, optional 0G AI inference, x402 payment for premium risk assessments). Not on a cron — run by hand or scheduled externally. Not part of the core protocol loop; kept as a reference implementation for agent integration.
 
 ## MCP Server & AI Chat
 
@@ -160,26 +141,28 @@ Six protocol tools callable by any MCP-compatible AI agent:
 
 ### MCP Endpoint (`/api/mcp`)
 
-Stateless JSON-RPC endpoint implementing MCP protocol (`tools/list` + `tools/call`). External AI agents (Claude Desktop, etc.) connect here for programmatic protocol access. GET returns tool discovery metadata.
+Stateless JSON-RPC endpoint implementing MCP protocol (`tools/list` + `tools/call`). External AI agents (Claude Desktop, etc.) connect here for programmatic protocol access. GET returns tool discovery metadata. Full detail: [MCP.md](MCP.md).
 
 ### AI Chat (`/api/chat` + `ChatPanel.tsx`)
 
 Floating chat panel (Vercel AI SDK + Claude) available on all pages. Uses the same tool implementations as the MCP endpoint via AI SDK `tool()` wrappers. Streaming responses with inline tool call results.
 
-## Offchain Services
+## Data + API Surface
 
-Express-based API on port 3001:
-- **`/markets`**: Multi-category catalog (7 seeded categories + BDL NBA). Category filtering via `?category=`.
-- **`/markets/categories`**: Available category list.
-- **`/quote`**: Parlay quote computation using shared math library.
-- **`/exposure`**: Exposure tracking (mock).
-- **`/premium/sim`**: x402-gated Monte Carlo simulation.
-- **`/premium/risk-assess`**: x402-gated risk assessment.
-- **`/premium/agent-quote`**: x402-gated combined quote + risk for autonomous agents, with optional 0G AI insight.
-- **`/vault/health`**: Vault utilization and health metrics.
-- **`/vault/yield-report`**: LP yield analysis.
+All offchain services run as Next.js serverless routes under `packages/nextjs/src/app/api/`. There is no separate Express server.
 
-Catalog subsystem: `registry.ts` (unified leg map merging seed + BDL), `seed.ts` (7 hardcoded categories), `bdl.ts` (live NBA markets via BallDontLie API, 5-min cache).
+| Route | Purpose |
+|---|---|
+| `/api/markets` | Merged catalog: seed markets + curated Polymarket |
+| `/api/quote-sign` | EIP-712 signed JIT quote for `buyTicketSigned` |
+| `/api/mcp` | JSON-RPC endpoint exposing the 6 MCP tools |
+| `/api/chat` | AI chat panel (streaming + tool calls) |
+| `/api/premium/agent-quote` | Combined quote + risk for autonomous agents |
+| `/api/polymarket/sync` | Daily cron — discovery + resolution relay |
+| `/api/settlement/run` | Cron — settle tickets whose legs are all resolved |
+| `/api/db/init` | One-shot — apply Neon schema + backfill seed legs |
+
+Live NBA markets are fetched inline from BallDontLie (`packages/nextjs/src/lib/bdl.ts`, 5-min cache). Seed markets live in `packages/shared/src/seed.ts`. Curated Polymarket entries live in `packages/shared/src/polymarket/curated.ts`.
 
 ## Security Model
 
@@ -193,3 +176,4 @@ Key properties:
 - Pausable emergency stop on all contracts
 - Permissionless settlement (no keeper dependency)
 - Engine never holds USDC (stateless routing layer)
+- JIT quote signer is a dedicated hot key; `DEPLOYER_PRIVATE_KEY` is the admin/cron cold fallback.

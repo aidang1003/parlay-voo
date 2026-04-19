@@ -4,7 +4,6 @@ import { getAddress, isAddress, type Hex } from "viem";
 import { getActiveMarkets } from "@/lib/db/client";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
-import { contractAddresses } from "@/lib/contracts";
 import deployedContracts from "@/contracts/deployedContracts";
 import {
   ANVIL_ACCOUNT_0_KEY,
@@ -63,12 +62,10 @@ export async function POST(req: Request) {
   const signerKey = (process.env.QUOTE_SIGNER_PRIVATE_KEY
     || process.env.DEPLOYER_PRIVATE_KEY
     || (chainId === LOCAL_CHAIN_ID ? ANVIL_ACCOUNT_0_KEY : undefined)) as Hex | undefined;
-  const ZERO = "0x0000000000000000000000000000000000000000";
-  const engineAddr =
-    contractAddresses.parlayEngine !== ZERO ? contractAddresses.parlayEngine : undefined;
   const chainContracts =
     (deployedContracts[chainId as keyof typeof deployedContracts] ??
       Object.values(deployedContracts)[0]) as Record<string, {address: string}>;
+  const engineAddr = chainContracts.ParlayEngine?.address;
   const oracleAddr = chainContracts.AdminOracleAdapter?.address;
 
   if (!signerKey) {

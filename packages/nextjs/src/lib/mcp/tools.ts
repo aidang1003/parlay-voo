@@ -1,4 +1,4 @@
-import { createPublicClient, http, formatUnits } from "viem";
+import { createPublicClient, http, formatUnits, type Abi } from "viem";
 import { baseSepolia, foundry } from "viem/chains";
 import {
   computeMultiplier,
@@ -18,7 +18,7 @@ import {
   type SupportedChainId,
 } from "@parlaycity/shared";
 import type { RiskProfile, Market, Leg } from "@parlaycity/shared";
-import { HOUSE_VAULT_ABI, LEG_REGISTRY_ABI, PARLAY_ENGINE_ABI, contractAddresses } from "../contracts";
+import deployedContracts from "../../contracts/deployedContracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
 import { getRegisteredActiveMarkets } from "../db/client";
 
@@ -35,15 +35,24 @@ const rpcUrl = getRpcUrl(chainId);
 const client = createPublicClient({ chain, transport: http(rpcUrl) });
 
 // ---------------------------------------------------------------------------
-// Contract addresses (sourced from src/contracts/deployedContracts.ts via
-// the lib/contracts shim, which honors NEXT_PUBLIC_CHAIN_ID).
+// Contract addresses + ABIs (sourced from src/contracts/deployedContracts.ts,
+// pinned by NEXT_PUBLIC_CHAIN_ID; falls back to the first available chain).
 // ---------------------------------------------------------------------------
 
+const chainContracts =
+  (deployedContracts[chainId as keyof typeof deployedContracts] ??
+    Object.values(deployedContracts)[0]) as Record<string, { address: `0x${string}`; abi: Abi }>;
+
+const HOUSE_VAULT_ABI: Abi = chainContracts.HouseVault?.abi ?? [];
+const LEG_REGISTRY_ABI: Abi = chainContracts.LegRegistry?.abi ?? [];
+const PARLAY_ENGINE_ABI: Abi = chainContracts.ParlayEngine?.abi ?? [];
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as `0x${string}`;
 const addr = {
-  houseVault: contractAddresses.houseVault,
-  parlayEngine: contractAddresses.parlayEngine,
-  legRegistry: contractAddresses.legRegistry,
-  usdc: contractAddresses.usdc,
+  houseVault: chainContracts.HouseVault?.address ?? ZERO_ADDRESS,
+  parlayEngine: chainContracts.ParlayEngine?.address ?? ZERO_ADDRESS,
+  legRegistry: chainContracts.LegRegistry?.address ?? ZERO_ADDRESS,
+  usdc: chainContracts.MockUSDC?.address ?? ZERO_ADDRESS,
 };
 
 // SEED_MARKETS imported from @parlaycity/shared

@@ -4,9 +4,9 @@ import type {Abi} from "viem";
 import deployedContracts, {
   type SupportedDeployedChainId,
   type ContractName,
-} from "../contracts/deployedContracts";
+} from "../../contracts/deployedContracts";
 import {LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID} from "@parlaycity/shared";
-import {usePinnedChainId} from "../lib/hooks/_internal";
+import {usePinnedChainId} from "./_internal";
 
 const availableChainIds = Object.keys(deployedContracts).map(Number) as SupportedDeployedChainId[];
 const FALLBACK_CHAIN_ID: SupportedDeployedChainId = availableChainIds[0];

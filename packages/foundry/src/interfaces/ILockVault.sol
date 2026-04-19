@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 /// @title ILockVault
 /// @notice Interface HouseVault uses to route fees and mint rehab positions.
-///         Implemented by both LockVault (V1, deprecated) and LockVaultV2.
+///         Implemented by LockVaultV2.
 interface ILockVault {
     /// @notice Position classification. Phase 2 onward.
     /// - FULL    : voluntary LP lock, withdrawable at unlockAt, counts in fee-share weight.

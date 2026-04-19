@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { BUILDER_SUFFIX } from "../builder-code";
-import { useDeployedContract } from "../../hooks/useDeployedContract";
+import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export interface OnChainTicket {

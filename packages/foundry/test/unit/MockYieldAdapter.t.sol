@@ -100,7 +100,7 @@ contract MockYieldAdapterTest is Test {
 
     // ── SafeDeployable ────────────────────────────────────────────────────
 
-    function test_safeDeployable_respectsBuffer() public {
+    function test_safeDeployable_respectsBuffer() public view {
         // Buffer = 25% of 10k = 2.5k. So deployable = 10k - 2.5k = 7.5k
         uint256 deployable = vault.safeDeployable();
         assertEq(deployable, 7_500e6);

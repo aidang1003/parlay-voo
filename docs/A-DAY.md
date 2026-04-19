@@ -138,8 +138,14 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Acceptance:** no `onlyOwner` function in the oracle path can alter a leg outcome. Ticket settlement remains permissionless. Unit + fork tests against UMA OOv3 on Base Sepolia.
 - **Consumer safeguard we ship with F-4 in the meantime:** `AdminOracleAdapter.resolve()` reverts on `block.chainid == 8453`, so the backdoor is literally unreachable on mainnet until F-5 lands.
 
-### F-6 Debug Admin Commands
-- Admin page features: Syncing/initializing the database. Leg resolving (only available on testnet chains)
+### F-6 Debug Admin Commands ✅ COMPLETE
+Shipped as a single `/admin/debug` page plus a testnet-only banner; replaces the dismissible `DemoBanner`.
+
+- **Gating.** `useIsTestnet()` (chain 31337 / 84532). `TestnetBanner` renders null on Base mainnet and the page itself shows "Disabled on this chain". API routes return 404 off testnet. `AdminOracleAdapter.resolve()` still has its `block.chainid != 8453` revert as the last line of defense.
+- **Mint MockUSDC.** Slider (1 – 100,000) + numeric input. Reuses `useMintTestUSDC(amount)` — the existing hook already accepted an optional amount override, no signature change needed.
+- **DB buttons.** "Initialize DB" and "Sync Polymarket" call two thin testnet-gated proxy routes (`/api/admin/db-init`, `/api/admin/sync`) that import the existing cron handlers in-process and pass `Authorization: Bearer $CRON_SECRET`. Avoids looping through Vercel's SSO gate on preview URLs (which was 401-ing the first HTTP-fetch attempt).
+- **Leg resolver.** Lists every unresolved leg referenced by any ticket. Question + yes/no probabilities are joined from `/api/markets` (DB) rather than the on-chain `LegRegistry` snapshot, which can drift from the latest CLOB mid. Per-row YES / NO / VOID buttons post `{ legId, status }` to `/api/admin/resolve-leg`, which signs `AdminOracleAdapter.resolve()` with `DEPLOYER_PRIVATE_KEY` via viem. The original plan was to shell out to `pnpm resolve-leg:*`, but Vercel functions don't have pnpm/forge on PATH (`spawn pnpm ENOENT`), so we call the contract directly instead.
+- **Files:** `components/TestnetBanner.tsx`, `app/admin/debug/page.tsx`, `app/api/admin/{resolve-leg,db-init,sync}/route.ts`, `lib/hooks/debug.ts`. `DemoBanner` + its test deleted.
 
 
 

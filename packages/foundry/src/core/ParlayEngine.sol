@@ -51,6 +51,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         SettlementMode mode;
         TicketStatus status;
         uint256 createdAt;
+        bool isLossless; // credit-funded; winnings route to PARTIAL lock, losses burn credit only
     }
 
     // ── Signed-quote types ───────────────────────────────────────────────
@@ -171,6 +172,10 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     event MaxLegsUpdated(uint256 oldMaxLegs, uint256 newMaxLegs);
     event TrustedQuoteSignerUpdated(address indexed oldSigner, address indexed newSigner);
     event QuoteConsumed(uint256 indexed nonce, address indexed buyer, uint256 indexed ticketId);
+    event LosslessTicketPurchased(
+        uint256 indexed ticketId, address indexed buyer, uint256 creditSpent, uint256 potentialPayout
+    );
+    event LosslessTicketWon(uint256 indexed ticketId, address indexed winner, uint256 payout);
 
     // ── Constructor ──────────────────────────────────────────────────────
 
@@ -328,6 +333,22 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         return _buyTicketSigned(quote);
     }
 
+    /// @notice Purchase a parlay funded by rehab credit instead of USDC. The
+    ///         stake is deducted from `creditBalance[msg.sender]`; no USDC
+    ///         moves and no fee is charged (protocol pays "fair odds on paper"
+    ///         — the win is routed into a PARTIAL lock rather than paid in
+    ///         cash). Quote flow and leg validation are identical to
+    ///         `buyTicketSigned`.
+    function buyLosslessParlay(Quote calldata quote, bytes calldata signature)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 ticketId)
+    {
+        _verifyQuote(quote, signature);
+        return _buyLosslessParlay(quote);
+    }
+
     function _buyTicketSigned(Quote calldata quote) internal returns (uint256 ticketId) {
         require(quote.legs.length >= 2, "ParlayEngine: need >= 2 legs");
         require(quote.legs.length <= maxLegs, "ParlayEngine: too many legs");
@@ -358,7 +379,8 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             feePaid: feePaid,
             mode: mode,
             status: TicketStatus.Active,
-            createdAt: block.timestamp
+            createdAt: block.timestamp,
+            isLossless: false
         });
 
         // Snapshot per-leg oracle + quote PPM so settle/cashout don't re-read
@@ -380,6 +402,61 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             emit TicketPurchased(
                 ticketId, msg.sender, t.legIds, t.outcomes, quote.stake, multiplierX1e6, potentialPayout, mode
             );
+        }
+    }
+
+    /// @dev Inner implementation for buyLosslessParlay. Factored out of the
+    ///      external entry to keep stack depth under limit.
+    function _buyLosslessParlay(Quote calldata quote) internal returns (uint256 ticketId) {
+        require(quote.legs.length >= 2, "ParlayEngine: need >= 2 legs");
+        require(quote.legs.length <= maxLegs, "ParlayEngine: too many legs");
+        require(quote.stake >= minStake, "ParlayEngine: stake too low");
+
+        (uint256[] memory legIdsMem, bytes32[] memory outcomesMem, uint256 multiplierX1e6) = _resolveQuoteLegs(quote);
+        // Lossless: no fee deduction, full stake used as effective stake.
+        uint256 potentialPayout = ParlayMath.computePayout(quote.stake, multiplierX1e6);
+
+        require(potentialPayout <= vault.maxPayout(), "ParlayEngine: exceeds vault max payout");
+        require(potentialPayout <= vault.freeLiquidity(), "ParlayEngine: insufficient vault liquidity");
+
+        vault.spendCredit(msg.sender, quote.stake);
+        vault.reservePayout(potentialPayout);
+
+        ticketId = _nextTicketId++;
+        _mint(msg.sender, ticketId);
+
+        SettlementMode mode = block.timestamp < bootstrapEndsAt ? SettlementMode.FAST : SettlementMode.OPTIMISTIC;
+
+        _tickets[ticketId] = Ticket({
+            buyer: msg.sender,
+            stake: quote.stake,
+            legIds: legIdsMem,
+            outcomes: outcomesMem,
+            multiplierX1e6: multiplierX1e6,
+            potentialPayout: potentialPayout,
+            feePaid: 0,
+            mode: mode,
+            status: TicketStatus.Active,
+            createdAt: block.timestamp,
+            isLossless: true
+        });
+
+        LegSnapshot[] storage snaps = _ticketSnapshots[ticketId];
+        for (uint256 i = 0; i < quote.legs.length; i++) {
+            snaps.push(
+                LegSnapshot({probabilityPPM: quote.legs[i].probabilityPPM, oracleAdapter: quote.legs[i].oracleAdapter})
+            );
+        }
+
+        usedQuoteNonces[quote.nonce] = true;
+        emit QuoteConsumed(quote.nonce, msg.sender, ticketId);
+
+        {
+            Ticket storage t = _tickets[ticketId];
+            emit TicketPurchased(
+                ticketId, msg.sender, t.legIds, t.outcomes, quote.stake, multiplierX1e6, potentialPayout, mode
+            );
+            emit LosslessTicketPurchased(ticketId, msg.sender, quote.stake, potentialPayout);
         }
     }
 
@@ -498,8 +575,23 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         if (anyLost) {
             ticket.status = TicketStatus.Lost;
             if (originalPayout > 0) vault.releasePayout(originalPayout);
+            if (!ticket.isLossless) {
+                // Rehab carve applies to USDC-funded tickets only. Lossless
+                // tickets already consumed credit at buy; a loss simply burns
+                // the credit with no new claimable accrual.
+                uint256 effectiveStake = ticket.stake - ticket.feePaid;
+                if (effectiveStake > 0) {
+                    vault.distributeLoss(effectiveStake, ownerOf(ticketId));
+                }
+            }
         } else if (allWon) {
-            ticket.status = TicketStatus.Won;
+            if (ticket.isLossless) {
+                vault.routeLosslessWin(ownerOf(ticketId), originalPayout);
+                ticket.status = TicketStatus.Claimed;
+                emit LosslessTicketWon(ticketId, ownerOf(ticketId), originalPayout);
+            } else {
+                ticket.status = TicketStatus.Won;
+            }
         } else {
             // Some legs voided, rest won. Recalculate with remaining legs.
             uint256 remainingLegs = ticket.legIds.length - voidedCount;
@@ -508,8 +600,13 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
                 // refund the effective stake.
                 ticket.status = TicketStatus.Voided;
                 if (originalPayout > 0) vault.releasePayout(originalPayout);
-                uint256 refundAmount = ticket.stake - ticket.feePaid;
-                if (refundAmount > 0) vault.refundVoided(ownerOf(ticketId), refundAmount);
+                if (ticket.isLossless) {
+                    // Refund credit (stake was credit, not USDC).
+                    vault.refundCredit(ownerOf(ticketId), ticket.stake);
+                } else {
+                    uint256 refundAmount = ticket.stake - ticket.feePaid;
+                    if (refundAmount > 0) vault.refundVoided(ownerOf(ticketId), refundAmount);
+                }
             } else {
                 // Recalculate multiplier with only the non-voided legs.
                 uint256[] memory remainingProbs = new uint256[](remainingLegs);
@@ -534,7 +631,13 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
 
                 ticket.potentialPayout = newPayout;
                 ticket.multiplierX1e6 = newMultiplier;
-                ticket.status = TicketStatus.Won;
+                if (ticket.isLossless) {
+                    vault.routeLosslessWin(ownerOf(ticketId), newPayout);
+                    ticket.status = TicketStatus.Claimed;
+                    emit LosslessTicketWon(ticketId, ownerOf(ticketId), newPayout);
+                } else {
+                    ticket.status = TicketStatus.Won;
+                }
             }
         }
 
@@ -568,6 +671,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         Ticket storage ticket = _tickets[ticketId];
         require(ticket.status == TicketStatus.Active, "ParlayEngine: not active");
         require(ownerOf(ticketId) == msg.sender, "ParlayEngine: not ticket owner");
+        require(!ticket.isLossless, "ParlayEngine: no cashout on lossless");
 
         uint256 wonCount;
         uint256 unresolvedCount;

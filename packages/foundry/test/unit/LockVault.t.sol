@@ -30,14 +30,14 @@ contract LockVaultTest is Test {
         vault = new HouseVault(IERC20(address(usdc)));
         lockVault = new LockVault(vault);
 
-        // Fund alice and bob with USDC, deposit into vault to get vUSDC
+        // Fund alice and bob with USDC, deposit into vault to get VOO
         _mintBulk(alice, 50_000e6);
         _mintBulk(bob, 50_000e6);
 
         vm.startPrank(alice);
         usdc.approve(address(vault), type(uint256).max);
         vault.deposit(10_000e6, alice);
-        // Approve lockVault to take vUSDC
+        // Approve lockVault to take VOO
         IERC20(address(vault)).approve(address(lockVault), type(uint256).max);
         vm.stopPrank();
 
@@ -99,7 +99,7 @@ contract LockVaultTest is Test {
     function test_lock_belowMinimum_reverts() public {
         vm.prank(alice);
         vm.expectRevert("LockVault: lock below minimum");
-        lockVault.lock(0.5e6, LockVault.LockTier.THIRTY); // 0.5 vUSDC < 1 vUSDC minimum
+        lockVault.lock(0.5e6, LockVault.LockTier.THIRTY); // 0.5 VOO < 1 VOO minimum
     }
 
     function test_lock_insufficientBalance_reverts() public {
@@ -328,11 +328,11 @@ contract LockVaultTest is Test {
     // ── sweepPenaltyShares ──────────────────────────────────────────────
 
     function test_sweepPenaltyShares_recoversStrandedShares() public {
-        // Simulate stranded penalty shares by transferring vUSDC directly to lockVault
+        // Simulate stranded penalty shares by transferring VOO directly to lockVault
         vm.prank(alice);
         IERC20(address(vault)).transfer(address(lockVault), 50e6);
 
-        // No locked positions, so all vUSDC in lockVault is penalty shares
+        // No locked positions, so all VOO in lockVault is penalty shares
         uint256 receiverBefore = vault.balanceOf(address(vault));
         lockVault.sweepPenaltyShares(address(vault));
         assertEq(vault.balanceOf(address(vault)) - receiverBefore, 50e6);

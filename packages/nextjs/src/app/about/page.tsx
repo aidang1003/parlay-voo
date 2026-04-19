@@ -88,7 +88,7 @@ export default function AboutPage() {
             {
               icon: Sprout,
               label: "Earning Yield",
-              sub: "vUSDC locked 120d",
+              sub: "VOO locked 120d",
               color: "text-neon-green",
               bg: "from-neon-green/10 to-transparent",
             },

@@ -13,7 +13,7 @@ import {ILockVault} from "../interfaces/ILockVault.sol";
 
 /// @title HouseVault
 /// @notice ERC4626-like vault that holds USDC liquidity for the ParlayCity house.
-///         LPs deposit USDC and receive vUSDC shares. The ParlayEngine reserves
+///         LPs deposit USDC and receive VOO shares. The ParlayEngine reserves
 ///         exposure against the vault when tickets are purchased.
 contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -49,6 +49,33 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     /// @notice Minimum deposit amount (1 USDC). Mitigates first-depositor inflation attack.
     uint256 public constant MIN_DEPOSIT = 1e6;
 
+    /// @notice Projected 12-month APR used to size rehab credits (basis points). Default 6%.
+    uint256 public projectedAprBps = 600;
+
+    /// @notice Bet-only credit balance issued to users who lost parlays and entered rehab.
+    mapping(address => uint256) public creditBalance;
+
+    /// @notice Minimum parlay stake that accrues to the user's rehab claim.
+    ///         Below this, the loss stays with LPs as implicit profit (the
+    ///         economics of a user redeeming a sub-dollar claim don't cover
+    ///         their own gas).
+    uint256 public constant MIN_REHAB_STAKE = 1e6; // $1 USDC
+
+    /// @notice Minimum duration the user may pick when converting a rehab
+    ///         claim into a LEAST lock.
+    uint256 public constant MIN_REHAB_DURATION = 365 days;
+
+    /// @notice Per-user unredeemed rehab balance (USDC, 6-decimal). Lost
+    ///         stake accumulates here until the user calls `claimRehab` to
+    ///         convert it into a LEAST lock and receive advance credit.
+    mapping(address => uint256) public rehabClaimable;
+
+    /// @notice Sum of every user's `rehabClaimable`. Subtracted from
+    ///         `totalAssets()` so LP share price stays flat between a loss
+    ///         and the moment the user claims — the USDC is in the vault but
+    ///         earmarked, not LP-owned, until it gets minted into shares.
+    uint256 public totalRehabClaimable;
+
     // ── Events ───────────────────────────────────────────────────────────
 
     event Deposited(address indexed depositor, address indexed receiver, uint256 assets, uint256 shares);
@@ -67,6 +94,16 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     event LockVaultSet(address indexed lockVault);
     event SafetyModuleSet(address indexed safetyModule);
     event FeesRouted(uint256 feeToLockers, uint256 feeToSafety, uint256 feeToVault);
+    event ProjectedAprChanged(uint256 oldBps, uint256 newBps);
+    event CreditIssued(address indexed user, uint256 amount);
+    event CreditSpent(address indexed user, uint256 amount);
+    event RehabLossAccrued(address indexed loser, uint256 stake, uint256 newClaimable);
+    event RehabClaimed(
+        address indexed user, uint256 stake, uint256 shares, uint256 duration, uint256 creditIssued
+    );
+    event LeastPrincipalBurned(uint256 shares);
+    event LosslessWinRouted(address indexed owner, uint256 payout, uint256 sharesMinted);
+    event PromoCreditIssued(address indexed user, uint256 amount);
 
     // ── Modifiers ────────────────────────────────────────────────────────
 
@@ -77,7 +114,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
 
     // ── Constructor ──────────────────────────────────────────────────────
 
-    constructor(IERC20 _asset) ERC20("ParlayCity Vault USDC", "vUSDC") Ownable(msg.sender) {
+    constructor(IERC20 _asset) ERC20("ParlayVoo", "VOO") Ownable(msg.sender) {
         asset = _asset;
         maxUtilizationBps = 8000;
         maxPayoutBps = 500;
@@ -126,6 +163,14 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         emit YieldBufferBpsSet(_bps);
     }
 
+    /// @notice Update the projected-APR used to size rehab credits. Emitted on-chain for auditability.
+    function setProjectedAprBps(uint256 _bps) external onlyOwner {
+        require(_bps <= 10_000, "HouseVault: invalid apr bps");
+        uint256 old = projectedAprBps;
+        projectedAprBps = _bps;
+        emit ProjectedAprChanged(old, _bps);
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -140,13 +185,15 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         return 6;
     }
 
-    /// @notice Total USDC managed by the vault (local + deployed to yield adapter).
+    /// @notice Total USDC managed by the vault (local + deployed to yield adapter),
+    ///         excluding unredeemed rehab claim balances. Claimable USDC is in
+    ///         the vault but earmarked — LP share price must not spike from a
+    ///         loss until the claim converts (at which point shares are minted
+    ///         for the user at the then-current price).
     function totalAssets() public view returns (uint256) {
         uint256 local = asset.balanceOf(address(this));
-        if (address(yieldAdapter) != address(0)) {
-            return local + yieldAdapter.balance();
-        }
-        return local;
+        uint256 gross = address(yieldAdapter) != address(0) ? local + yieldAdapter.balance() : local;
+        return gross > totalRehabClaimable ? gross - totalRehabClaimable : 0;
     }
 
     /// @notice USDC held locally (not deployed to adapter).
@@ -197,7 +244,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
 
     // ── LP Functions ─────────────────────────────────────────────────────
 
-    /// @notice Deposit USDC and receive vUSDC shares.
+    /// @notice Deposit USDC and receive VOO shares.
     function deposit(uint256 assets, address receiver) external nonReentrant whenNotPaused returns (uint256 shares) {
         require(assets >= MIN_DEPOSIT, "HouseVault: deposit below minimum");
         require(receiver != address(0), "HouseVault: zero receiver");
@@ -211,7 +258,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         emit Deposited(msg.sender, receiver, assets, shares);
     }
 
-    /// @notice Burn vUSDC shares and withdraw USDC. Can only withdraw from free liquidity.
+    /// @notice Burn VOO shares and withdraw USDC. Can only withdraw from free liquidity.
     function withdraw(uint256 shares, address receiver) external nonReentrant whenNotPaused returns (uint256 assets) {
         require(shares > 0, "HouseVault: zero shares");
         require(receiver != address(0), "HouseVault: zero receiver");
@@ -309,5 +356,139 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     function emergencyRecall() external onlyOwner nonReentrant {
         require(address(yieldAdapter) != address(0), "HouseVault: no adapter");
         yieldAdapter.emergencyWithdraw();
+    }
+
+    // ── Credit Ledger (Phase 1 scaffolding) ──────────────────────────────
+    //
+    // External callers (distributeLoss / flushRehabLosses / spendCredit)
+    // land in Phase 2 + 3. Internals are kept here so the ledger storage,
+    // events, and arithmetic are already in place when those entrypoints
+    // are added.
+
+    function _issueCredit(address user, uint256 amount) internal {
+        if (amount == 0) return;
+        creditBalance[user] += amount;
+        emit CreditIssued(user, amount);
+    }
+
+    function _spendCredit(address user, uint256 amount) internal {
+        require(creditBalance[user] >= amount, "HouseVault: insufficient credit");
+        creditBalance[user] -= amount;
+        emit CreditSpent(user, amount);
+    }
+
+    /// @notice Credit to issue for a given rehab principal at the current projected APR.
+    function creditFor(uint256 principal) public view returns (uint256) {
+        return (principal * projectedAprBps) / 10_000;
+    }
+
+    // ── Rehab (Phase 2) ──────────────────────────────────────────────────
+
+    /// @notice Accrue a losing parlay stake to the loser's redeemable rehab
+    ///         balance. Called by the engine on settlement. No lock is created
+    ///         here — the user picks their own duration and claims later via
+    ///         `claimRehab`. Sub-threshold losses fall through and stay with
+    ///         LPs as implicit profit. If `lockVault` is not configured, the
+    ///         loss stays implicit too — protocol degrades gracefully.
+    function distributeLoss(uint256 stake, address loser) external onlyEngine nonReentrant {
+        if (address(lockVault) == address(0)) return;
+        if (stake < MIN_REHAB_STAKE) return;
+        require(loser != address(0), "HouseVault: zero loser");
+
+        rehabClaimable[loser] += stake;
+        totalRehabClaimable += stake;
+
+        emit RehabLossAccrued(loser, stake, rehabClaimable[loser]);
+    }
+
+    /// @notice Convert the caller's accumulated rehab balance into a LEAST
+    ///         lock for `duration` seconds and issue advance credit sized at
+    ///         the projected 12-month yield on the full balance. The user
+    ///         chooses `duration` — the choice is the teaching moment. Longer
+    ///         durations lock principal longer but don't earn bigger credits.
+    function claimRehab(uint256 duration) external nonReentrant returns (uint256 shares, uint256 credit) {
+        require(address(lockVault) != address(0), "HouseVault: lockVault not configured");
+        require(duration >= MIN_REHAB_DURATION, "HouseVault: duration too short");
+
+        uint256 amount = rehabClaimable[msg.sender];
+        require(amount > 0, "HouseVault: nothing to claim");
+
+        // Compute shares at the pre-claim price (stake is still carved out
+        // of totalAssets). Then un-carve and mint. Both totalAssets and
+        // totalSupply grow by `amount` worth of backing, so LP price stays
+        // neutral across the claim.
+        shares = convertToShares(amount);
+        require(shares > 0, "HouseVault: zero shares");
+
+        rehabClaimable[msg.sender] = 0;
+        totalRehabClaimable -= amount;
+
+        _mint(address(this), shares);
+        _approve(address(this), address(lockVault), shares);
+        lockVault.rehabLock(msg.sender, shares, duration, ILockVault.Tier.LEAST);
+
+        credit = creditFor(amount);
+        _issueCredit(msg.sender, credit);
+
+        emit RehabClaimed(msg.sender, amount, shares, duration, credit);
+    }
+
+    /// @notice Burn VOO shares held by LockVault. Called by LockVaultV2 when a
+    ///         LEAST position expires unused — the principal is retired back
+    ///         to LPs (USDC backing stays, share supply shrinks).
+    function burnFromLockVault(uint256 shares) external nonReentrant {
+        require(msg.sender == address(lockVault), "HouseVault: not lockVault");
+        require(shares > 0, "HouseVault: zero shares");
+        _burn(address(lockVault), shares);
+        emit LeastPrincipalBurned(shares);
+    }
+
+    // ── Rehab (Phase 3) ──────────────────────────────────────────────────
+
+    /// @notice Spend bet-only credit on behalf of a user. Called by the engine
+    ///         when a user buys a lossless parlay. Reverts if the user's
+    ///         credit balance is below `amount`.
+    function spendCredit(address user, uint256 amount) external onlyEngine {
+        _spendCredit(user, amount);
+    }
+
+    /// @notice Refund credit to a user — used by the engine to unwind a
+    ///         voided lossless ticket (stake was credit, not USDC).
+    function refundCredit(address user, uint256 amount) external onlyEngine {
+        _issueCredit(user, amount);
+    }
+
+    /// @notice Issue promo credit to a user who just graduated PARTIAL → FULL.
+    ///         Callable only by the configured lockVault. The credit is sized
+    ///         exactly like loss-time credit (principal * projectedAprBps) —
+    ///         the lockVault computes the amount based on the promoted shares'
+    ///         current USDC value.
+    function issuePromoCredit(address user, uint256 amount) external nonReentrant {
+        require(msg.sender == address(lockVault), "HouseVault: not lockVault");
+        _issueCredit(user, amount);
+        emit PromoCreditIssued(user, amount);
+    }
+
+    /// @notice Convert a lossless-parlay win into a PARTIAL-tier lock for the
+    ///         winner. Mints VOO shares at current share price, releases the
+    ///         reservation, and hands the shares to LockVaultV2 under PARTIAL.
+    ///         The USDC that was reserved for payout stays in the vault —
+    ///         backing the freshly minted shares and the released reservation.
+    function routeLosslessWin(address winner, uint256 payout) external onlyEngine nonReentrant {
+        require(address(lockVault) != address(0), "HouseVault: lockVault not configured");
+        require(winner != address(0), "HouseVault: zero winner");
+        require(payout > 0, "HouseVault: zero payout");
+        require(payout <= totalReserved, "HouseVault: payout exceeds reserved");
+
+        uint256 shares = convertToShares(payout);
+        require(shares > 0, "HouseVault: zero shares");
+
+        totalReserved -= payout;
+
+        _mint(address(this), shares);
+        _approve(address(this), address(lockVault), shares);
+        lockVault.rehabLock(winner, shares, MIN_REHAB_DURATION, ILockVault.Tier.PARTIAL);
+
+        emit LosslessWinRouted(winner, payout, shares);
     }
 }

@@ -4,7 +4,8 @@
  *
  * - `leg.ts`    — `useLegDescriptions`, `useLegStatuses` (LegRegistry + oracle)
  * - `usdc.ts`   — `useUSDCBalance`, `useMintTestUSDC` (MockUSDC)
- * - `vault.ts`  — `useVaultStats`, `useDepositVault`, `useWithdrawVault` (HouseVault)
+ * - `vault.ts`  — `useVaultStats`, `useDepositVault`, `useWithdrawVault`,
+ *                 `useCreditBalance`, `useRehabClaimable`, `useClaimRehab` (HouseVault)
  * - `lock.ts`   — `useLockVault`, `useUnlockVault`, `useEarlyWithdraw`,
  *                 `useLockPositions`, `useLockStats` (LockVault)
  * - `parlay.ts` — `useParlayConfig`, `useBuyTicket` (ParlayEngine config + JIT buy)

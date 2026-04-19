@@ -123,8 +123,16 @@ contract IntegrationTest is FeeRouterSetup, SignedBuy {
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         uint256 feeToLockers = (t.feePaid * 9000) / 10_000;
         uint256 feeToSafety = (t.feePaid * 500) / 10_000;
-        assertEq(vault.totalAssets(), vaultBefore + 10e6 - feeToLockers - feeToSafety);
+        uint256 feeToVault = t.feePaid - feeToLockers - feeToSafety;
+        // Rehab: the effective stake accrues to the bettor's claimable
+        // balance and is subtracted from totalAssets(). LPs retain only the
+        // 5% vault fee cut. Credit is issued only when the user claims.
+        assertEq(vault.totalAssets(), vaultBefore + feeToVault);
         assertEq(vault.totalReserved(), 0);
+        uint256 effectiveStake = t.stake - t.feePaid;
+        assertEq(vault.rehabClaimable(bettor), effectiveStake);
+        assertEq(vault.totalRehabClaimable(), effectiveStake);
+        assertEq(vault.creditBalance(bettor), 0);
     }
 
     // ── Lifecycle 3: Partial void ────────────────────────────────────────

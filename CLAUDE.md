@@ -52,10 +52,10 @@ pnpm clean                    # forge clean + .next
 ## Key Files (read these first)
 
 **Contracts (`packages/foundry/src/`):**
-- `core/HouseVault.sol` -- ERC4626-like LP vault, USDC deposits, vUSDC shares, reserve tracking, fee routing
+- `core/HouseVault.sol` -- ERC4626-like LP vault, USDC deposits, VOO shares, reserve tracking, fee routing
 - `core/ParlayEngine.sol` -- ERC721 ticket minting, settlement, cashout, payout modes
 - `core/LegRegistry.sol` -- admin-managed betting outcomes with probabilities (PPM)
-- `core/LockVault.sol` -- time-locked vUSDC positions, Synthetix-style reward distribution
+- `core/LockVault.sol` -- time-locked VOO positions, Synthetix-style reward distribution
 - `libraries/ParlayMath.sol` -- pure math library (multiplier, edge, payout). Mirrored in TS.
 - `oracle/AdminOracleAdapter.sol` -- bootstrap oracle (owner resolves)
 - `oracle/OptimisticOracleAdapter.sol` -- production oracle (propose/challenge)
@@ -102,7 +102,7 @@ pnpm clean                    # forge clean + .next
 
 ## Architecture
 
-**Contracts:** HouseVault (ERC4626-like, USDC/vUSDC, 80% util cap, 5% max payout, 90/5/5 fee routing). ParlayEngine (ERC721 tickets, baseFee=100bps + perLegFee=50bps). LegRegistry (admin-managed outcomes). LockVault (30/60/90 day locks, Synthetix-style rewards). ParlayMath (pure library). AdminOracleAdapter + OptimisticOracleAdapter. Deploy order in `script/Deploy.s.sol`.
+**Contracts:** HouseVault (ERC4626-like, USDC/VOO, 80% util cap, 5% max payout, 90/5/5 fee routing). ParlayEngine (ERC721 tickets, baseFee=100bps + perLegFee=50bps). LegRegistry (admin-managed outcomes). LockVault (30/60/90 day locks, Synthetix-style rewards). ParlayMath (pure library). AdminOracleAdapter + OptimisticOracleAdapter. Deploy order in `script/Deploy.s.sol`.
 
 **Frontend:** Next.js 14 App Router. wagmi 2 + viem 2 + ConnectKit. AI chat panel (Vercel AI SDK + Claude). All API routes are serverless (no Express). Deployed to Vercel.
 
@@ -110,8 +110,17 @@ pnpm clean                    # forge clean + .next
 
 ## Docs
 
+### Doc style: two-part split (human + AI spec)
+
+Design docs in `docs/` follow a two-part structure:
+
+**Part 1 — Human Spec.** Skimmable. Bullet points over prose. Short flow diagrams only if the lines are tight. Formulas when they clarify. Sections: what the feature is, what it does, key design decisions with brief rationale, and what the user sees. No Solidity signatures, no contract state dumps, no invariant catalogs.
+
+**Part 2 — AI Spec Sheet.** Terse implementation reference for an LLM. Renames, constants, state additions per contract, access-control table, function signatures, call graphs (`X → Y → Z`), events, invariants, required tests, and files touched. Not meant to be read top-to-bottom by a human.
+
+When editing or adding a design doc, keep these two parts visually and semantically separated. Don't mix narrative into the spec sheet or state/signature noise into the human section. `docs/REHAB_MODE.md` is the canonical example.
+
 - `docs/ARCHITECTURE.md` -- system diagrams + contract architecture
-- `docs/ECONOMICS.md` -- fee routing 90/5/5, loss distribution
 - `docs/RISK_MODEL.md` -- utilization pricing, exposure caps
 - `docs/CASHOUT.md` -- crash-parlay cashout pricing
 - `docs/THREAT_MODEL.md` -- threat model + mitigations

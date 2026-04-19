@@ -10,7 +10,7 @@ import {HouseVault} from "./HouseVault.sol";
 import {ILockVault} from "../interfaces/ILockVault.sol";
 
 /// @title LockVault
-/// @notice Accepts vUSDC shares from HouseVault. Users lock for a tier period
+/// @notice Accepts VOO shares from HouseVault. Users lock for a tier period
 ///         to earn boosted fee share. Uses Synthetix-style reward distribution
 ///         weighted by tier multipliers.
 /// @dev    Superseded by LockVaultV2. V1 remains on-chain for existing
@@ -31,7 +31,7 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
 
     struct LockPosition {
         address owner;
-        uint256 shares; // vUSDC shares locked
+        uint256 shares; // VOO shares locked
         LockTier tier;
         uint256 lockedAt;
         uint256 unlockAt;
@@ -43,12 +43,12 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
 
     uint256 private constant PRECISION = 1e18;
     uint256 private constant BPS_BASE = 10_000;
-    uint256 public constant MIN_LOCK = 1e6; // 1 vUSDC
+    uint256 public constant MIN_LOCK = 1e6; // 1 VOO
 
     // ── State ────────────────────────────────────────────────────────────
 
     HouseVault public vault;
-    IERC20 public vUSDC; // same as vault token (ERC20)
+    IERC20 public voo; // same as vault token (ERC20)
 
     mapping(uint256 => LockPosition) public positions;
     uint256 public nextPositionId;
@@ -59,7 +59,7 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
     /// @notice Sum of (position.shares * feeMultiplierBps / BPS_BASE) for all positions.
     uint256 public totalWeightedShares;
 
-    /// @notice Total vUSDC shares locked across all positions.
+    /// @notice Total VOO shares locked across all positions.
     uint256 public totalLockedShares;
 
     /// @notice Base early withdrawal penalty in bps (default 10%).
@@ -92,7 +92,7 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
 
     constructor(HouseVault _vault) Ownable(msg.sender) {
         vault = _vault;
-        vUSDC = IERC20(address(_vault));
+        voo = IERC20(address(_vault));
     }
 
     // ── Admin ────────────────────────────────────────────────────────────
@@ -111,11 +111,11 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
 
     // ── Core ─────────────────────────────────────────────────────────────
 
-    /// @notice Lock vUSDC shares for a given tier period.
+    /// @notice Lock VOO shares for a given tier period.
     function lock(uint256 shares, LockTier tier) external nonReentrant returns (uint256 positionId) {
         require(shares >= MIN_LOCK, "LockVault: lock below minimum");
 
-        vUSDC.safeTransferFrom(msg.sender, address(this), shares);
+        voo.safeTransferFrom(msg.sender, address(this), shares);
 
         uint256 multiplierBps = _tierMultiplier(tier);
         uint256 duration = _tierDuration(tier);
@@ -171,7 +171,7 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
         _settleRewards(positionId);
         _removePosition(positionId);
 
-        vUSDC.safeTransfer(msg.sender, shares);
+        voo.safeTransfer(msg.sender, shares);
         emit Unlocked(positionId, msg.sender, shares);
     }
 
@@ -197,7 +197,7 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
 
         // Return net shares to user; penalty shares stay in contract and
         // accumulate as surplus (balance - totalLockedShares) for sweeping.
-        vUSDC.safeTransfer(msg.sender, returned);
+        voo.safeTransfer(msg.sender, returned);
         emit EarlyWithdraw(positionId, msg.sender, returned, penaltyShares);
     }
 
@@ -245,13 +245,18 @@ contract LockVault is Ownable, ReentrancyGuard, ILockVault {
         emit RewardsClaimed(msg.sender, amount);
     }
 
+    /// @notice Legacy V1 has no rehab support. Always reverts.
+    function rehabLock(address, uint256, uint256, Tier) external pure override {
+        revert("LockVault: V1 does not support rehab");
+    }
+
     /// @notice Sweep accumulated penalty shares to a receiver for redistribution.
     function sweepPenaltyShares(address receiver) external onlyOwner nonReentrant {
         require(receiver != address(0), "LockVault: zero receiver");
-        uint256 balance = vUSDC.balanceOf(address(this));
+        uint256 balance = voo.balanceOf(address(this));
         require(balance > totalLockedShares, "LockVault: no penalty shares");
         uint256 penaltyShares = balance - totalLockedShares;
-        vUSDC.safeTransfer(receiver, penaltyShares);
+        voo.safeTransfer(receiver, penaltyShares);
         emit PenaltySharesSwept(receiver, penaltyShares);
     }
 

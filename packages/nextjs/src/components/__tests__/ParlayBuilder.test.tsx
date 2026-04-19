@@ -52,6 +52,16 @@ const mockUseParlayConfig = vi.fn(() => ({
 
 vi.mock("@/lib/hooks", () => ({
   useBuyTicket: () => mockUseBuyTicket(),
+  useBuyLosslessParlay: () => ({
+    buyLossless: vi.fn(() => Promise.resolve(true)),
+    resetSuccess: vi.fn(),
+    isPending: false,
+    isConfirming: false,
+    isSuccess: false,
+    error: null,
+    lastTicketId: null,
+  }),
+  useCreditBalance: () => ({ credit: 0n, isLoading: false, refetch: vi.fn() }),
   useUSDCBalance: () => mockUseUSDCBalance(),
   useVaultStats: () => mockUseVaultStats(),
   useParlayConfig: () => mockUseParlayConfig(),

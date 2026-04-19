@@ -23,12 +23,12 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 ### 2. Make LP economics credible enough that real capital shows up
 
-- ERC4626-style HouseVault, vUSDC shares, permissionless deposit/withdraw
+- ERC4626-style HouseVault, VOO shares, permissionless deposit/withdraw
 - `totalReserved <= totalAssets()` invariant enforced on every path
 - Utilization cap (80%) and per-payout cap (5% TVL) so a single lucky ticket can't drain the vault
 - LockVault tiers (30/60/90 days at 1.1× / 1.25× / 1.5× weight) routing fee income Synthetix-style
 - Yield on idle capital via pluggable adapter (Aave V3 on mainnet, mock locally)
-- Planned: rehab mode (portion of losing stakes auto-locked as vUSDC) — design in `docs/REHAB_MODE.md`
+- Planned: rehab mode (losing stakes auto-locked as VOO, lossless-parlay credit) — design in `docs/REHAB_MODE.md`
 
 ### 3. Replace admin-managed legs with live market data
 

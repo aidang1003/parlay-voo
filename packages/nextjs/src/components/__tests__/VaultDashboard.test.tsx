@@ -49,6 +49,13 @@ vi.mock("@/lib/hooks", () => ({
     earlyWithdraw: vi.fn(),
     isPending: false,
   })),
+  useGraduate: vi.fn(() => ({
+    graduate: vi.fn(),
+    isPending: false,
+    isConfirming: false,
+    isSuccess: false,
+    error: null,
+  })),
   useLockPositions: vi.fn(() => ({
     positions: [],
     userTotalLocked: 0n,
@@ -65,6 +72,12 @@ vi.mock("@/lib/hooks", () => ({
     isConfirming: false,
     isSuccess: false,
   })),
+  useCreditBalance: vi.fn(() => ({
+    credit: 0n,
+    isLoading: false,
+    refetch: vi.fn(),
+  })),
+  LockTier: { FULL: 0, PARTIAL: 1, LEAST: 2 },
 }));
 
 // Mock contracts
@@ -225,14 +238,14 @@ describe("VaultDashboard", () => {
 
   describe("withdraw minimum guard", () => {
     beforeEach(() => {
-      mockConnectedWithShares(100_000_000n); // 100 vUSDC
+      mockConnectedWithShares(100_000_000n); // 100 VOO
     });
 
     it("shows 'Amount Too Small' on button for dust withdraw", async () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.0000001" } });
         expect(screen.getByText("Amount Too Small")).toBeInTheDocument();
       });
@@ -242,18 +255,18 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.0000001" } });
         const btn = screen.getByText("Amount Too Small").closest("button");
         expect(btn).toBeDisabled();
       });
     });
 
-    it("enables withdraw button for 1 vUSDC", async () => {
+    it("enables withdraw button for 1 VOO", async () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "1" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Withdraw");
         expect(btn).not.toBeDisabled();
@@ -264,7 +277,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "999" } });
         expect(screen.getByText("Insufficient Shares")).toBeInTheDocument();
       });
@@ -274,7 +287,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "+50" } });
         expect(input.value).toBe("50");
       });
@@ -285,26 +298,26 @@ describe("VaultDashboard", () => {
 
   describe("lock minimum guard", () => {
     beforeEach(() => {
-      mockConnectedWithShares(100_000_000n); // 100 vUSDC
+      mockConnectedWithShares(100_000_000n); // 100 VOO
     });
 
-    it("shows 'Minimum lock is 1 vUSDC' warning for 0.5 vUSDC", async () => {
+    it("shows 'Minimum lock is 1 VOO' warning for 0.5 VOO", async () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.5" } });
-        expect(screen.getByText("Minimum lock is 1 vUSDC")).toBeInTheDocument();
+        expect(screen.getByText("Minimum lock is 1 VOO")).toBeInTheDocument();
       });
     });
 
-    it("shows 'Minimum 1 vUSDC' on button for sub-minimum lock", async () => {
+    it("shows 'Minimum 1 VOO' on button for sub-minimum lock", async () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.5" } });
-        expect(screen.getByText("Minimum 1 vUSDC")).toBeInTheDocument();
+        expect(screen.getByText("Minimum 1 VOO")).toBeInTheDocument();
       });
     });
 
@@ -312,18 +325,18 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.1" } });
-        const btn = screen.getByText("Minimum 1 vUSDC").closest("button");
+        const btn = screen.getByText("Minimum 1 VOO").closest("button");
         expect(btn).toBeDisabled();
       });
     });
 
-    it("enables lock button for exactly 1 vUSDC", async () => {
+    it("enables lock button for exactly 1 VOO", async () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "1" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Lock Shares");
         expect(btn).not.toBeDisabled();
@@ -334,7 +347,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "999" } });
         expect(screen.getByText("Exceeds your vault shares")).toBeInTheDocument();
       });
@@ -344,19 +357,19 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0x10" } });
         expect(input.value).toBe("010");
       });
     });
 
-    it("lock button shows 'Minimum 1 vUSDC' for zero input", async () => {
+    it("lock button shows 'Minimum 1 VOO' for zero input", async () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0" } });
-        expect(screen.getByText("Minimum 1 vUSDC")).toBeInTheDocument();
+        expect(screen.getByText("Minimum 1 VOO")).toBeInTheDocument();
       });
     });
   });
@@ -529,7 +542,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "999" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Signing...");
         expect(btn).toBeDefined();
@@ -549,11 +562,11 @@ describe("VaultDashboard", () => {
 
     it("'Amount Too Small' takes priority over 'Insufficient Shares'", async () => {
       // With very small shares, dust amount could also exceed
-      mockConnectedWithShares(100n); // 0.0001 vUSDC
+      mockConnectedWithShares(100n); // 0.0001 VOO
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         // 0.0000001 is dust AND could exceed 0.0001 shares
         fireEvent.change(input, { target: { value: "0.0000001" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Amount Too Small");
@@ -566,7 +579,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("Shares (vUSDC)") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("Shares (VOO)") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "10" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Withdraw");
         expect(btn).toBeDefined();
@@ -629,13 +642,13 @@ describe("VaultDashboard", () => {
       expect(btn).toBeDefined();
     });
 
-    it("'Signing...' takes priority over 'Minimum 1 vUSDC'", async () => {
+    it("'Signing...' takes priority over 'Minimum 1 VOO'", async () => {
       mockConnectedWithShares(100_000_000n);
       mockLockState({ isPending: true });
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.5" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Signing...");
         expect(btn).toBeDefined();
@@ -648,7 +661,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "999" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Confirming...");
         expect(btn).toBeDefined();
@@ -666,25 +679,25 @@ describe("VaultDashboard", () => {
       });
     });
 
-    it("'Minimum 1 vUSDC' takes priority over 'Insufficient Shares'", async () => {
-      // Small shares: 0.5 vUSDC. Typing 0.5 is both below min AND equals shares.
-      mockConnectedWithShares(500_000n); // 0.5 vUSDC
+    it("'Minimum 1 VOO' takes priority over 'Insufficient Shares'", async () => {
+      // Small shares: 0.5 VOO. Typing 0.5 is both below min AND equals shares.
+      mockConnectedWithShares(500_000n); // 0.5 VOO
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "0.5" } });
-        const btn = screen.getAllByRole("button").find((b) => b.textContent === "Minimum 1 vUSDC");
+        const btn = screen.getAllByRole("button").find((b) => b.textContent === "Minimum 1 VOO");
         expect(btn).toBeDefined();
       });
     });
 
     it("shows 'Insufficient Shares' when above min but exceeds shares", async () => {
-      mockConnectedWithShares(5_000_000n); // 5 vUSDC
+      mockConnectedWithShares(5_000_000n); // 5 VOO
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "10" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Insufficient Shares");
         expect(btn).toBeDefined();
@@ -696,7 +709,7 @@ describe("VaultDashboard", () => {
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
       await vi.waitFor(() => {
-        const input = screen.getByPlaceholderText("vUSDC shares to lock") as HTMLInputElement;
+        const input = screen.getByPlaceholderText("VOO shares to lock") as HTMLInputElement;
         fireEvent.change(input, { target: { value: "10" } });
         const btn = screen.getAllByRole("button").find((b) => b.textContent === "Lock Shares");
         expect(btn).toBeDefined();
@@ -730,7 +743,7 @@ describe("VaultDashboard", () => {
       mockConnectedWithShares(100_000_000n);
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
-      const input = await screen.findByPlaceholderText("Shares (vUSDC)");
+      const input = await screen.findByPlaceholderText("Shares (VOO)");
       fireEvent.change(input, { target: { value: "." } });
       const btn = findActionButton("Withdraw");
       expect(btn).toBeDefined();
@@ -741,7 +754,7 @@ describe("VaultDashboard", () => {
       mockConnectedWithShares(100_000_000n);
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
-      const input = await screen.findByPlaceholderText("vUSDC shares to lock");
+      const input = await screen.findByPlaceholderText("VOO shares to lock");
       fireEvent.change(input, { target: { value: "." } });
       const btn = findActionButton("Lock Shares");
       expect(btn).toBeDefined();

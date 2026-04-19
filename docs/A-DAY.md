@@ -1,4 +1,4 @@
-# A-DAY — 48-hour scaling sprint
+# A-DAY — Scaling Sprint
 
 Backlog for the weekend heads-down session. Target: get parlay-voo from "hackathon build that feels slow" to "production-ready for 250 users, with a clear path to 1000."
 
@@ -97,7 +97,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
   - Reserve hook in `HouseVault.reservePayout()` routes fee accrual + loss exposure by tick range crossed.
 - **Open questions to resolve in TRANCHES.md:**
   1. Tick granularity — fixed 4 vs 100-BPS continuous
-  2. Overlay on existing vUSDC or replace with per-tranche share tokens
+  2. Overlay on existing VOO or replace with per-tranche share tokens
   3. Default band for existing LPs (opt-in full-range recommended)
 - **Files:** new `packages/foundry/src/core/TrancheRegistry.sol`; `HouseVault.sol` gains reserve/pay hooks; `ParlayMath.sol` untouched.
 
@@ -119,7 +119,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Blockers:** Huge overhaul of entire stack
 - **Notes:** Instead of registering all possible legs in the smart contract they need to be registered at acceptance time for accurate pricing data
 
-### F-4 Real Parlay Settlement
+### F-4 Real Parlay Settlement ✅ COMPLETE
 - **Time:** 1-day
 - **Value:** High
 - **Blockers:** Admin functionality to view all tickets so we can verify
@@ -211,10 +211,13 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
 - Admin page features: Syncing/initializing the database
 - Database doesn't need "poly:" prepending on the PK column
+- Postgres jsonb data type allows us to store the entire API call in json, which can later be retrieved with indexes. Key sell here is that this greatly reduces read times
 - **Curate the betting data.** The market list is currently whatever Polymarket hands back in sync order — we should rank it. Two signals to start:
   1. **Volume first.** Higher-volume markets float to the top of the list. Deep liquidity = tighter odds = more confidence the multiplier we quote is real.
   2. **Prefer balanced markets.** Legs with YES/NO multipliers closer to 2x on both sides (i.e. probabilities near 50/50) are better parlay material — more interesting to build around, less likely to be a foregone conclusion, and the edge math behaves better away from the 1–99% clamp. Rank down heavily skewed markets (e.g. 95/5) even if they have volume.
   - Implementation sketch: add a `curationScore` on `CuratedMarket` computed at sync time from `volume` + `abs(ppm - 500_000)` (distance from coinflip), sort the `/api/markets` response by it, tie-break on volume. No UI change needed; the frontend already renders in array order.
+- Full debugging banner that launches when you're deployed to test chains. Full token minting UI and leg resolver.
+
 
 ## Bailout rules
 

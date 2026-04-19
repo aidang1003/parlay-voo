@@ -15,17 +15,44 @@ export function useIsTestnet(): boolean {
 export interface OpenLeg {
   legId: bigint;
   sourceRef: string;
+  /** Richest available: DB row's txtquestion, falling back to on-chain. */
   question: string;
   cutoffTime: bigint;
-  probabilityPPM: bigint;
+  /** DB yes-side probability in PPM (matches on-chain when synced). */
+  yesProbabilityPPM: number | null;
+  /** DB no-side probability; null for seed legs or missing markets. */
+  noProbabilityPPM: number | null;
+  /** On-chain value, kept as a last-resort display fallback. */
+  onChainProbabilityPPM: bigint;
   oracleAdapter: `0x${string}`;
+}
+
+interface MarketsApiResponse {
+  legs: Array<{
+    sourceRef: string;
+    question: string;
+    probabilityPPM: number;
+    noProbabilityPPM?: number;
+  }>;
+}
+
+async function fetchMarketMap(): Promise<Map<string, MarketsApiResponse["legs"][number]>> {
+  const res = await fetch("/api/markets", { cache: "no-store" });
+  if (!res.ok) return new Map();
+  const markets = (await res.json()) as Array<MarketsApiResponse>;
+  const map = new Map<string, MarketsApiResponse["legs"][number]>();
+  for (const m of markets) {
+    for (const leg of m.legs) map.set(leg.sourceRef, leg);
+  }
+  return map;
 }
 
 /**
  * Lists every unresolved leg referenced by any ticket in the engine. Powers
  * the F-6 debug page: iterate tickets → union of legIds → filter by
- * `canResolve`. Polls via `useAllTickets` (10s) and refetches leg + oracle
- * state whenever the ticket set changes.
+ * `canResolve`, then enrich with DB metadata (/api/markets) so the table
+ * shows the real question + yes/no probabilities instead of whatever the
+ * engine copied into LegRegistry at quote time.
  */
 export function useOpenLegs() {
   const { tickets, isLoading: ticketsLoading, refetch: refetchTickets } = useAllTickets();
@@ -57,36 +84,48 @@ export function useOpenLegs() {
       return;
     }
 
+    const [marketMap, ...legResults] = await Promise.all([
+      fetchMarketMap(),
+      ...uniqueLegIds.map(async (legId) => {
+        try {
+          const [leg, canResolve] = await Promise.all([
+            publicClient.readContract({
+              address: registry.address,
+              abi: registry.abi,
+              functionName: "getLeg",
+              args: [legId],
+            }) as Promise<LegInfo>,
+            publicClient.readContract({
+              address: oracle.address,
+              abi: oracle.abi,
+              functionName: "canResolve",
+              args: [legId],
+            }) as Promise<boolean>,
+          ]);
+          return { legId, leg, canResolve };
+        } catch {
+          return null;
+        }
+      }),
+    ]);
+
     const rows: OpenLeg[] = [];
-    for (const legId of uniqueLegIds) {
-      try {
-        const [leg, canResolve] = await Promise.all([
-          publicClient.readContract({
-            address: registry.address,
-            abi: registry.abi,
-            functionName: "getLeg",
-            args: [legId],
-          }) as Promise<LegInfo>,
-          publicClient.readContract({
-            address: oracle.address,
-            abi: oracle.abi,
-            functionName: "canResolve",
-            args: [legId],
-          }) as Promise<boolean>,
-        ]);
-        if (canResolve) continue;
-        rows.push({
-          legId,
-          sourceRef: leg.sourceRef,
-          question: leg.question,
-          cutoffTime: leg.cutoffTime,
-          probabilityPPM: leg.probabilityPPM,
-          oracleAdapter: leg.oracleAdapter,
-        });
-      } catch {
-        // skip unreadable legs
-      }
+    for (const result of legResults) {
+      if (!result || result.canResolve) continue;
+      const { legId, leg } = result;
+      const dbRow = marketMap.get(leg.sourceRef);
+      rows.push({
+        legId,
+        sourceRef: leg.sourceRef,
+        question: dbRow?.question || leg.question || "—",
+        cutoffTime: leg.cutoffTime,
+        yesProbabilityPPM: dbRow?.probabilityPPM ?? null,
+        noProbabilityPPM: dbRow?.noProbabilityPPM ?? null,
+        onChainProbabilityPPM: leg.probabilityPPM,
+        oracleAdapter: leg.oracleAdapter,
+      });
     }
+
     if (localId !== fetchIdRef.current) return;
     rows.sort((a, b) => (a.cutoffTime > b.cutoffTime ? -1 : a.cutoffTime < b.cutoffTime ? 1 : 0));
     setLegs(rows);

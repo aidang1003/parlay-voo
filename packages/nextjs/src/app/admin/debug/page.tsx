@@ -181,7 +181,7 @@ function LegResolverSection() {
       const res = await fetch("/api/admin/resolve-leg", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceRef: leg.sourceRef, status }),
+        body: JSON.stringify({ legId: leg.legId.toString(), status }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) {
@@ -217,9 +217,10 @@ function LegResolverSection() {
       }
     >
       <p className="mb-4 text-xs text-gray-500">
-        Every unresolved leg referenced by any ticket. Clicking a button spawns
-        the Foundry <code className="text-gray-300">ResolveLeg.s.sol</code>{" "}
-        script server-side and signs with <code className="text-gray-300">DEPLOYER_PRIVATE_KEY</code>.
+        Every unresolved leg referenced by any ticket. Clicking a button signs{" "}
+        <code className="text-gray-300">AdminOracleAdapter.resolve()</code>{" "}
+        server-side with <code className="text-gray-300">DEPLOYER_PRIVATE_KEY</code>.
+        YES pays YES bettors, NO pays NO bettors, VOID refunds the leg.
       </p>
 
       {isLoading && (
@@ -240,7 +241,8 @@ function LegResolverSection() {
                 <th className="px-4 py-3">Leg #</th>
                 <th className="px-4 py-3">Source ref</th>
                 <th className="px-4 py-3">Question</th>
-                <th className="px-4 py-3 text-right">Prob</th>
+                <th className="px-4 py-3 text-right">YES</th>
+                <th className="px-4 py-3 text-right">NO</th>
                 <th className="px-4 py-3">Cutoff</th>
                 <th className="px-4 py-3 text-right">Resolve</th>
               </tr>
@@ -254,7 +256,7 @@ function LegResolverSection() {
                     <td className="px-4 py-3 font-mono text-gray-500">#{key}</td>
                     <td className="px-4 py-3 max-w-[180px] truncate font-mono text-xs">{leg.sourceRef}</td>
                     <td className="px-4 py-3 max-w-[320px]">
-                      <div className="truncate">{leg.question || "—"}</div>
+                      <div className="whitespace-normal">{leg.question}</div>
                       {state?.error && (
                         <div className="mt-1 text-[11px] text-neon-red line-clamp-2">{state.error}</div>
                       )}
@@ -262,8 +264,12 @@ function LegResolverSection() {
                         <div className="mt-1 text-[11px] text-emerald-400">{state.result}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono">
-                      {(Number(leg.probabilityPPM) / 10_000).toFixed(2)}%
+                    <td className="px-4 py-3 text-right font-mono text-emerald-300">{fmtPct(leg.yesProbabilityPPM)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-red-300">
+                      {fmtPct(
+                        leg.noProbabilityPPM ??
+                          (leg.yesProbabilityPPM != null ? 1_000_000 - leg.yesProbabilityPPM : null),
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">{fmtTime(Number(leg.cutoffTime))}</td>
                     <td className="px-4 py-3">
@@ -350,6 +356,11 @@ function clamp(n: number, min: number, max: number): number {
 function fmtTime(ts: number): string {
   if (!ts) return "—";
   return new Date(ts * 1000).toLocaleString();
+}
+
+function fmtPct(ppm: number | null | undefined): string {
+  if (ppm == null) return "—";
+  return `${(ppm / 10_000).toFixed(1)}%`;
 }
 
 function prettyJson(raw: string): string {

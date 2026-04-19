@@ -381,7 +381,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         return (principal * projectedAprBps) / 10_000;
     }
 
-    // ── Rehab (loss → LEAST lock) ────────────────────────────────────────
+    // ── Rehab: loss accrual + LEAST lock ─────────────────────────────────
 
     /// @notice Accrue a losing parlay stake to the loser's redeemable rehab
     ///         balance. Called by the engine on settlement. No lock is created
@@ -442,7 +442,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         emit LeastPrincipalBurned(shares);
     }
 
-    // ── Rehab (credit spend + promo) ─────────────────────────────────────
+    // ── Rehab: credit spend + PARTIAL lock ───────────────────────────────
 
     /// @notice Spend bet-only credit on behalf of a user. Called by the engine
     ///         when a user buys a lossless parlay. Reverts if the user's

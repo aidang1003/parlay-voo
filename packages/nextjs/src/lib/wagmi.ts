@@ -6,8 +6,8 @@ import { CHAINS, BASE_SEPOLIA_CHAIN_ID, LOCAL_CHAIN_ID } from "@parlaycity/share
 
 const primarySepoliaRpc = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL;
 
-// Wraps a transport to record every JSON-RPC request on window.__rpcCalls.
-// Used by the DebugRpcCounter overlay (?debug=1).
+// Wraps a transport to record every JSON-RPC request on window.__rpcCalls
+// so the DebugRpcCounter overlay (?debug=1) can surface call counts.
 const counted = (inner: Transport): Transport =>
   ((args: Parameters<Transport>[0]) => {
     const t = inner(args);

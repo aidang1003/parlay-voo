@@ -100,8 +100,9 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     }
 
     /// @notice Per-leg data snapshotted onto a ticket at buy time. Parallel
-    ///         to Ticket.legIds[]. Used by settle/cashout so the math is
-    ///         frozen against the quote we priced at purchase.
+    ///         to Ticket.legIds[]. Freezes the math at the quote priced at
+    ///         purchase so settle/cashout cannot be affected by later oracle
+    ///         or registry changes.
     struct LegSnapshot {
         uint256 probabilityPPM; // yes-side PPM (same orientation as LegRegistry)
         address oracleAdapter;
@@ -132,8 +133,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     ///         A zero value disables buys entirely.
     address public trustedQuoteSigner;
 
-    /// @notice Per-ticket leg snapshots, parallel to Ticket.legIds[]. Written
-    ///         during buyTicketSigned and used by settle/cashout.
+    /// @notice Per-ticket leg snapshots, parallel to Ticket.legIds[].
     mapping(uint256 => LegSnapshot[]) private _ticketSnapshots;
 
     /// @notice One-shot nonces consumed from verified quotes.

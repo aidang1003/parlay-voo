@@ -13,7 +13,7 @@ function parseDecimal(val: string): number {
   return Number(val);
 }
 
-// Shared base: legIds + outcomes + stake (used by Quote, Sim, RiskAssess)
+// Shared base: legIds + outcomes + stake.
 const QuoteBaseSchema = z.object({
   legIds: z
     .array(z.number().int().positive())

@@ -14,13 +14,11 @@ export interface LegInfo {
   active: boolean;
 }
 
-/** LegStatus enum values from the contract: 0=Unresolved, 1=Won, 2=Lost, 3=Voided */
 export interface LegOracleResult {
   resolved: boolean;
   status: number; // 0=Unresolved, 1=Won, 2=Lost, 3=Voided
 }
 
-/** Fetches leg details from LegRegistry for an array of leg IDs */
 export function useLegDescriptions(legIds: readonly bigint[]) {
   const publicClient = useContractClient();
   const registry = useDeployedContract("LegRegistry");

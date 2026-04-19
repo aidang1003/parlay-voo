@@ -8,7 +8,7 @@ import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
 ///         tickets through ParlayEngine.buyTicketSigned. Maintains a per-test
 ///         auto-increment nonce so individual tests don't have to manage one.
 abstract contract SignedBuy is Test {
-    /// @dev Auto-incrementing nonce used by `_buySignedYes` and friends.
+    /// @dev Auto-incrementing nonce for EIP-712 quotes in this test.
     uint256 internal _nextQuoteNonce = 1;
 
     /// @dev Default EIP-712 signer PK. Tests that need a wrong-signer case

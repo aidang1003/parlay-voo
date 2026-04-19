@@ -10,10 +10,9 @@ const SHARES_UNIT = 1_000_000n; // 1 VOO share (6 decimals)
 
 /**
  * Shows the connected user's LEAST-tier positions — terminal rehab receipts
- * where the principal has already been burned back to LPs. Unlike the old
- * demo version, these are real on-chain positions. LEAST is a dead end for
- * the user; the section doubles as a pointer to lossless mode, which is the
- * only path back to reward-earning locks.
+ * whose principal has already been burned back to LPs. LEAST is a dead end;
+ * the section doubles as a pointer to lossless mode, which is the only path
+ * back to reward-earning locks.
  */
 export function RehabLocks() {
   const { positions } = useLockPositions();

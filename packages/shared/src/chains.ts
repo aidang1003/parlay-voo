@@ -82,7 +82,7 @@ export function chainByForgeAlias(alias: string): ChainInfo | undefined {
   return Object.values(CHAINS).find((c) => c.forgeRpcAlias === alias);
 }
 
-/** Heuristic: classify a raw RPC URL back to its chainId, useful for legacy tsx scripts. */
+/** Heuristic: classify a raw RPC URL back to its chainId. */
 export function chainIdFromRpcUrl(rpcUrl: string): SupportedChainId {
   if (rpcUrl.includes("127.0.0.1") || rpcUrl.includes("localhost") || rpcUrl.includes("0.0.0.0")) {
     return LOCAL_CHAIN_ID;

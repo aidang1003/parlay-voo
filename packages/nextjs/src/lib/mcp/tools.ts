@@ -22,10 +22,6 @@ import deployedContracts from "../../contracts/deployedContracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
 import { getRegisteredActiveMarkets } from "../db/client";
 
-// ---------------------------------------------------------------------------
-// Chain client
-// ---------------------------------------------------------------------------
-
 const chainId = Number(
   process.env.NEXT_PUBLIC_CHAIN_ID ?? String(BASE_SEPOLIA_CHAIN_ID),
 ) as SupportedChainId;
@@ -34,11 +30,7 @@ const rpcUrl = getRpcUrl(chainId);
 
 const client = createPublicClient({ chain, transport: http(rpcUrl) });
 
-// ---------------------------------------------------------------------------
-// Contract addresses + ABIs (sourced from src/contracts/deployedContracts.ts,
-// pinned by NEXT_PUBLIC_CHAIN_ID; falls back to the first available chain).
-// ---------------------------------------------------------------------------
-
+// Addresses + ABIs pinned by NEXT_PUBLIC_CHAIN_ID, falling back to first available chain.
 const chainContracts =
   (deployedContracts[chainId as keyof typeof deployedContracts] ??
     Object.values(deployedContracts)[0]) as Record<string, { address: `0x${string}`; abi: Abi }>;
@@ -55,7 +47,6 @@ const addr = {
   usdc: chainContracts.MockUSDC?.address ?? ZERO_ADDRESS,
 };
 
-// SEED_MARKETS imported from @parlaycity/shared
 export { SEED_MARKETS } from "@parlaycity/shared";
 
 // Seed legs are static, keyed by catalog ID 1..21. Polymarket legs are merged
@@ -114,19 +105,11 @@ export async function refreshLegMap(): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Risk assessment (Kelly criterion)
-// ---------------------------------------------------------------------------
-
 const RISK_CAPS: Record<RiskProfile, { maxKelly: number; maxLegs: number; minWinProb: number }> = {
   conservative: { maxKelly: 0.05, maxLegs: 3, minWinProb: 0.15 },
   moderate: { maxKelly: 0.15, maxLegs: 4, minWinProb: 0.05 },
   aggressive: { maxKelly: 1.0, maxLegs: 5, minWinProb: 0.0 },
 };
-
-// ---------------------------------------------------------------------------
-// Tool: list_markets
-// ---------------------------------------------------------------------------
 
 export async function listMarkets(input: { category?: string }): Promise<{
   markets: Array<{
@@ -157,10 +140,6 @@ export async function listMarkets(input: { category?: string }): Promise<{
   const totalLegs = mapped.reduce((sum, m) => sum + m.legs.length, 0);
   return { markets: mapped, totalLegs };
 }
-
-// ---------------------------------------------------------------------------
-// Tool: get_quote
-// ---------------------------------------------------------------------------
 
 export async function getQuote(input: {
   legIds: number[];
@@ -224,10 +203,6 @@ export async function getQuote(input: {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tool: get_vault_health
-// ---------------------------------------------------------------------------
-
 export async function getVaultHealth(): Promise<{
   totalAssets: string;
   totalReserved: string;
@@ -290,10 +265,6 @@ export async function getVaultHealth(): Promise<{
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tool: get_leg_status
-// ---------------------------------------------------------------------------
-
 export async function getLegStatus(input: { legId: number }): Promise<{
   legId: number;
   question: string;
@@ -354,10 +325,6 @@ export async function getLegStatus(input: { legId: number }): Promise<{
     };
   }
 }
-
-// ---------------------------------------------------------------------------
-// Tool: assess_risk
-// ---------------------------------------------------------------------------
 
 export async function assessRisk(input: {
   legIds: number[];
@@ -495,10 +462,6 @@ export async function assessRisk(input: {
     edgeBps,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Tool: get_protocol_config
-// ---------------------------------------------------------------------------
 
 export async function getProtocolConfig(): Promise<{
   chain: { id: number; name: string };

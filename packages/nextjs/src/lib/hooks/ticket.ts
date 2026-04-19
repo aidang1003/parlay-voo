@@ -140,10 +140,7 @@ export interface TicketWithOwner {
   owner: `0x${string}`;
 }
 
-/**
- * Fetch every ticket in the engine, regardless of caller. Used by the admin
- * view (`/admin/tickets`) to audit settlement across the whole population.
- */
+/** Fetch every ticket in the engine, regardless of caller. */
 export function useAllTickets() {
   const publicClient = useContractClient();
   const engine = useDeployedContract("ParlayEngine");

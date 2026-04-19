@@ -210,6 +210,7 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
 - Admin page features: Syncing/initializing the database
 - Database doesn't need "poly:" prepending on the PK column
+- Postgres jsonb data type allows us to store the entire API call in json, which can later be retrieved with indexes. Key sell here is that this greatly reduces read times
 
 ## Bailout rules
 

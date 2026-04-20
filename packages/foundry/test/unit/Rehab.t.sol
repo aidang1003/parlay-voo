@@ -208,6 +208,7 @@ contract RehabTest is Test {
 
     function test_rehabLock_partialUnlockAtIsInfinite() public {
         vm.prank(lp);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         IERC20(address(vault)).transfer(address(vault), 1e6);
         vm.startPrank(address(vault));
         IERC20(address(vault)).approve(address(lockVault), 1e6);

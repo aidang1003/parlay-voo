@@ -34,6 +34,7 @@ Next.js 14 (App Router), React 18, TypeScript, Tailwind 3. Wallet: wagmi 2, viem
 - Protocol constants (fees, limits) import from `@parlaycity/shared` constants.ts -- no local config file.
 - Chain config (RPC URLs, chain IDs) imports from `@parlaycity/shared` chains.ts.
 - USDC is 6 decimals: `parseUnits("100", 6)`.
+- Format USDC for display via `formatUSDC(amount, opts?)` from `lib/utils.ts` — not viem's `formatUnits(amount, 6)`. `formatUSDC` handles the decimals, locale, and null/undefined placeholder in one place; raw `formatUnits` calls drift (one caller shows 2 decimals, another shows 6, a third forgets to guard undefined).
 - Polling: 5s for tickets/balances, 10s for vault stats.
 - Each transaction button gets its own loading state.
 

@@ -227,13 +227,12 @@ Grab-bag of smaller ideas. Each fleshed below with the same Time/Value/Blockers/
 - **Change:** add `tbcontractabi (name TEXT, chainid INT, deployedat TIMESTAMPTZ, address TEXT, abi JSONB, PRIMARY KEY (chainid, name, deployedat))`. Extend `generate-deployed-contracts.ts` to `INSERT` each contract alongside the file write (keep the TS file — it's the zero-latency path). Add a DB fallback in `useDeployedContract` for historical lookups (e.g. reading an old ticket's engine ABI).
 - **Non-goal:** do NOT replace `deployedContracts.ts` — it's the fast path for build-time types and SSR. DB is a secondary mirror.
 
-### R-2 — Drop `poly:` prefix from `txtsourceref` PK
-- **Time:** 2–3 hours (mostly the data migration + test updates)
-- **Value:** Low. Pure hygiene — the prefix is a vestige from when we thought we'd mix market sources. We only sync Polymarket, and `stripPolyPrefix()` callers (`packages/nextjs/src/lib/polymarket/markets.ts:35`, `app/api/settlement/run/lib.ts`, tests) are noise.
-- **Blockers:** None. Settlement is idempotent, migration can run live.
-- **Files:** `packages/nextjs/src/app/api/polymarket/sync/route.ts:104`, `packages/nextjs/src/lib/polymarket/markets.ts:35`, `packages/nextjs/src/app/api/settlement/run/lib.ts`, `packages/nextjs/src/app/api/settlement/run/__tests__/lib.test.ts`, `packages/nextjs/src/lib/db/schema.sql`
-- **Change:** stop prepending `poly:` at sync time; delete `stripPolyPrefix()` and the tests asserting its behavior. Ship a one-shot migration: `UPDATE tblegmapping SET txtsourceref = substr(txtsourceref, 6) WHERE txtsourceref LIKE 'poly:%'`. Confirm no on-chain `LegRegistry` entries embed the prefix (they shouldn't — `LegRegistry.register()` takes the stripped form today).
-- **Caveat:** if we ever add a second market source this decision reverses. Acceptable — a second source is a bigger refactor anyway and we'd pick a new scheme then.
+### R-2 — Drop `poly:` prefix from `txtsourceref` PK ✅ COMPLETE
+- **Shipped:** sync writes the raw conditionId as PK; `stripPolyPrefix()` + its 7 tests deleted. `parsePolySourceRef()` redefined as a 0x-hex-64 shape sniffer so `/api/quote`, `/api/quote-sign`, and `lib/mcp/tools.ts` keep working without a `source` field on `Leg`. `ParlayBuilder.tsx`'s "Odds locked" badge now checks `sourceRef.startsWith("0x")`.
+- **Migration:** `packages/nextjs/src/lib/db/migrations/2026-04-20-drop-poly-prefix.sql` — one-shot idempotent `UPDATE ... WHERE txtsourceref LIKE 'poly:%'`. Run against Neon in each env; or, since `schema.sql` is drop-and-recreate, a fresh `/api/db/init` + `/api/polymarket/sync` also lands on the new format (at the cost of wiping `tbpolymarketresolution`).
+- **Files touched:** `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/polymarket/markets.ts`, `packages/nextjs/src/app/api/settlement/runner.ts`, `packages/nextjs/src/app/api/settlement/run/lib.ts`, `packages/nextjs/src/app/api/settlement/run/__tests__/lib.test.ts`, `packages/nextjs/src/components/ParlayBuilder.tsx`, `packages/nextjs/src/components/__tests__/ParlayBuilder.test.tsx`, `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/lib/db/migrations/2026-04-20-drop-poly-prefix.sql`, `packages/foundry/src/core/ParlayEngine.sol` (doc comment only), `packages/foundry/script/ResolveLeg.s.sol` (doc comment only).
+- **Gate:** `pnpm typecheck` + `pnpm test:web` (269 passing) + `pnpm build` green. `forge test` not run in this sandbox — solidity edits were comment-only, no functional change.
+- **Caveat:** if we ever add a second market source this decision reverses. Acceptable — a second source is a bigger refactor anyway and we'd pick a new scheme then. Foundry unit tests that use `"poly:a"` as arbitrary string sourceRef fixtures (`SignedQuote.t.sol`) were left alone — they're valid test data regardless of the off-chain convention.
 
 ### R-3 — Store raw Gamma payloads in JSONB
 - **Time:** 6–10 hours

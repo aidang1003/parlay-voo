@@ -22,7 +22,7 @@ DROP TABLE IF EXISTS tblegmapping;
 DROP TABLE IF EXISTS tbpolymarketresolution;
 
 CREATE TABLE IF NOT EXISTS tblegmapping (
-  txtsourceref       TEXT PRIMARY KEY,                         -- "poly:<conditionId>" or "seed:<id>"
+  txtsourceref       TEXT PRIMARY KEY,                         -- polymarket conditionId (0x…) or "seed:<id>"
   txtsource          TEXT NOT NULL,
   txtquestion        TEXT NOT NULL,
   txtcategory        TEXT NOT NULL,

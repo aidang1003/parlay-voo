@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { formatUnits } from "viem";
 import { useTicket, useUserTickets, useLegDescriptions, useLegStatuses } from "@/lib/hooks";
 import {
   TicketCard,
@@ -12,7 +11,7 @@ import {
 } from "@/components/TicketCard";
 import { MultiplierClimb } from "@/components/MultiplierClimb";
 import { RehabCTA } from "@/components/RehabCTA";
-import { mapStatus, parseOutcomeChoice, isLegWon } from "@/lib/utils";
+import { mapStatus, parseOutcomeChoice, isLegWon, formatUSDC } from "@/lib/utils";
 import { PPM, BASE_CASHOUT_PENALTY_BPS, computeClientCashoutValue } from "@/lib/cashout";
 
 /** Hook to replay the rocket climb animation on settled tickets */
@@ -236,8 +235,8 @@ export default function TicketPage() {
               </p>
               <p className="text-lg font-bold tabular-nums text-brand-gold">
                 {cashoutValue !== undefined && !crashed
-                  ? `$${Number(formatUnits(cashoutValue, 6)).toFixed(2)}`
-                  : `$${Number(formatUnits(ticket.payout, 6)).toFixed(2)}`}
+                  ? `$${formatUSDC(cashoutValue)}`
+                  : `$${formatUSDC(ticket.payout)}`}
               </p>
             </div>
           </div>

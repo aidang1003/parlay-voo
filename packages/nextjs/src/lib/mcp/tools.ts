@@ -1,4 +1,4 @@
-import { createPublicClient, http, formatUnits } from "viem";
+import { createPublicClient, http, formatUnits, type Abi } from "viem";
 import { baseSepolia, foundry } from "viem/chains";
 import {
   computeMultiplier,
@@ -18,13 +18,9 @@ import {
   type SupportedChainId,
 } from "@parlaycity/shared";
 import type { RiskProfile, Market, Leg } from "@parlaycity/shared";
-import { HOUSE_VAULT_ABI, LEG_REGISTRY_ABI, PARLAY_ENGINE_ABI, contractAddresses } from "../contracts";
+import deployedContracts from "../../contracts/deployedContracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
 import { getRegisteredActiveMarkets } from "../db/client";
-
-// ---------------------------------------------------------------------------
-// Chain client
-// ---------------------------------------------------------------------------
 
 const chainId = Number(
   process.env.NEXT_PUBLIC_CHAIN_ID ?? String(BASE_SEPOLIA_CHAIN_ID),
@@ -34,20 +30,22 @@ const rpcUrl = getRpcUrl(chainId);
 
 const client = createPublicClient({ chain, transport: http(rpcUrl) });
 
-// ---------------------------------------------------------------------------
-// Contract addresses (sourced from src/contracts/deployedContracts.ts via
-// the lib/contracts shim, which honors NEXT_PUBLIC_CHAIN_ID).
-// ---------------------------------------------------------------------------
+// Addresses + ABIs pinned by NEXT_PUBLIC_CHAIN_ID, falling back to first available chain.
+const chainContracts =
+  (deployedContracts[chainId as keyof typeof deployedContracts] ??
+    Object.values(deployedContracts)[0]) as Record<string, { address: `0x${string}`; abi: Abi }>;
 
+const HOUSE_VAULT_ABI: Abi = chainContracts.HouseVault?.abi ?? [];
+const LEG_REGISTRY_ABI: Abi = chainContracts.LegRegistry?.abi ?? [];
+const PARLAY_ENGINE_ABI: Abi = chainContracts.ParlayEngine?.abi ?? [];
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as `0x${string}`;
 const addr = {
-  houseVault: contractAddresses.houseVault,
-  parlayEngine: contractAddresses.parlayEngine,
-  legRegistry: contractAddresses.legRegistry,
-  usdc: contractAddresses.usdc,
+  houseVault: chainContracts.HouseVault?.address ?? ZERO_ADDRESS,
+  parlayEngine: chainContracts.ParlayEngine?.address ?? ZERO_ADDRESS,
+  legRegistry: chainContracts.LegRegistry?.address ?? ZERO_ADDRESS,
+  usdc: chainContracts.MockUSDC?.address ?? ZERO_ADDRESS,
 };
-
-// SEED_MARKETS imported from @parlaycity/shared
-export { SEED_MARKETS } from "@parlaycity/shared";
 
 // Seed legs are static, keyed by catalog ID 1..21. Polymarket legs are merged
 // in on demand via refreshLegMap() — they're keyed by their on-chain leg ID,
@@ -105,19 +103,11 @@ export async function refreshLegMap(): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Risk assessment (Kelly criterion)
-// ---------------------------------------------------------------------------
-
 const RISK_CAPS: Record<RiskProfile, { maxKelly: number; maxLegs: number; minWinProb: number }> = {
   conservative: { maxKelly: 0.05, maxLegs: 3, minWinProb: 0.15 },
   moderate: { maxKelly: 0.15, maxLegs: 4, minWinProb: 0.05 },
   aggressive: { maxKelly: 1.0, maxLegs: 5, minWinProb: 0.0 },
 };
-
-// ---------------------------------------------------------------------------
-// Tool: list_markets
-// ---------------------------------------------------------------------------
 
 export async function listMarkets(input: { category?: string }): Promise<{
   markets: Array<{
@@ -148,10 +138,6 @@ export async function listMarkets(input: { category?: string }): Promise<{
   const totalLegs = mapped.reduce((sum, m) => sum + m.legs.length, 0);
   return { markets: mapped, totalLegs };
 }
-
-// ---------------------------------------------------------------------------
-// Tool: get_quote
-// ---------------------------------------------------------------------------
 
 export async function getQuote(input: {
   legIds: number[];
@@ -215,10 +201,6 @@ export async function getQuote(input: {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tool: get_vault_health
-// ---------------------------------------------------------------------------
-
 export async function getVaultHealth(): Promise<{
   totalAssets: string;
   totalReserved: string;
@@ -281,10 +263,6 @@ export async function getVaultHealth(): Promise<{
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tool: get_leg_status
-// ---------------------------------------------------------------------------
-
 export async function getLegStatus(input: { legId: number }): Promise<{
   legId: number;
   question: string;
@@ -345,10 +323,6 @@ export async function getLegStatus(input: { legId: number }): Promise<{
     };
   }
 }
-
-// ---------------------------------------------------------------------------
-// Tool: assess_risk
-// ---------------------------------------------------------------------------
 
 export async function assessRisk(input: {
   legIds: number[];
@@ -486,10 +460,6 @@ export async function assessRisk(input: {
     edgeBps,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Tool: get_protocol_config
-// ---------------------------------------------------------------------------
 
 export async function getProtocolConfig(): Promise<{
   chain: { id: number; name: string };

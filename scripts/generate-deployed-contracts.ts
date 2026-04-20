@@ -39,7 +39,6 @@ const CONTRACT_NAMES: Record<string, string> = {
   HouseVault: "HouseVault",
   ParlayEngine: "ParlayEngine",
   LegRegistry: "LegRegistry",
-  LockVault: "LockVault",
   LockVaultV2: "LockVaultV2",
   AdminOracleAdapter: "AdminOracleAdapter",
   OptimisticOracleAdapter: "OptimisticOracleAdapter",

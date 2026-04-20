@@ -14,8 +14,7 @@ abstract contract LockVaultStep is Script {
         console.log("LockVaultV2:            ", address(lockVault));
 
         vault.setLockVault(lockVault);
-        // SafetyModule doesn't exist yet -- use deployer as placeholder.
-        // TODO: Replace with real SafetyModule address in PR2.
+        // SafetyModule isn't implemented yet; caller passes a placeholder (usually the deployer).
         vault.setSafetyModule(safetyModulePlaceholder);
         lockVault.setFeeDistributor(address(vault));
     }

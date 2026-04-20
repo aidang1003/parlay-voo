@@ -12,8 +12,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
 import {SignedBuy} from "../helpers/SignedBuy.sol";
 
-/// @notice Phase 3 integration: lossless parlay buy + settle (win / loss / voided).
-///         Uses LockVaultV2 (not V1) because rehabLock is routed through there.
+/// @notice Lossless parlay integration: buy + settle (win / loss / voided).
 contract LosslessParlayTest is SignedBuy {
     MockUSDC usdc;
     HouseVault vault;

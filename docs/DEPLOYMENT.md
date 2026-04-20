@@ -17,7 +17,6 @@
 ```bash
 pnpm setup
 pnpm dev              # anvil + deploy + web on :3000
-pnpm demo:seed        # optional: LP + 5 sample legs
 ```
 
 Or step-by-step:
@@ -41,17 +40,13 @@ pnpm fund-wallet:local 10000
 # 1. Fill root .env:
 #   DEPLOYER_PRIVATE_KEY=<funded key>
 #   QUOTE_SIGNER_PRIVATE_KEY=<signer key — set as trusted signer during deploy>
-#   ACCOUNT1_PRIVATE_KEY=<optional, for demo:seed:sepolia>
 #   BASESCAN_API_KEY=<optional, for verification>
 #   USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e  (or leave blank to use the HelperConfig default)
 
 # 2. Deploy
 pnpm deploy:sepolia
 
-# 3. (Optional) seed demo data
-pnpm demo:seed:sepolia
-
-# 4. (Optional) mint MockUSDC to any wallet
+# 3. (Optional) mint MockUSDC to any wallet
 pnpm fund-wallet:sepolia 1000
 ```
 
@@ -59,7 +54,7 @@ pnpm fund-wallet:sepolia 1000
 
 1. Loads `HelperConfig.getBaseSepoliaConfig()` — returns `{usdc, bootstrapDays, optimisticLiveness, optimisticBond, uniswapNFPM, weth, deployerKey}`.
 2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, OptimisticOracleAdapter, ParlayEngine. Wires permissions and fee routing.
-3. Deploys LockVault and the yield adapter.
+3. Deploys LockVaultV2 (continuous-duration lock curve) and the yield adapter.
 4. Calls `SetTrustedSigner` to register `QUOTE_SIGNER_PRIVATE_KEY`'s address as the engine's trusted JIT quote signer.
 5. `tsx scripts/generate-deployed-contracts.ts 84532` reads the forge broadcast JSON + ABIs from `forge out/` and writes `packages/nextjs/src/contracts/deployedContracts.ts`.
 
@@ -109,7 +104,6 @@ Required env vars on Vercel:
 |---|---|---|
 | `DEPLOYER_PRIVATE_KEY` | Yes | Deploy broadcaster |
 | `QUOTE_SIGNER_PRIVATE_KEY` | Yes | Registered as engine's trusted JIT quote signer |
-| `ACCOUNT1_PRIVATE_KEY` | Demo only | Second wallet for `demo:seed:sepolia` |
 | `BASE_SEPOLIA_RPC_URL` | Yes | RPC endpoint (default `https://sepolia.base.org`) |
 | `USDC_ADDRESS` | Optional | Override Circle USDC (HelperConfig default: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`) |
 | `BASESCAN_API_KEY` | Optional | For auto-verification |

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { BUILDER_SUFFIX } from "../builder-code";
-import { useDeployedContract } from "../../hooks/useDeployedContract";
+import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
 export interface OnChainTicket {
@@ -140,10 +140,7 @@ export interface TicketWithOwner {
   owner: `0x${string}`;
 }
 
-/**
- * Fetch every ticket in the engine, regardless of caller. Used by the admin
- * view (`/admin/tickets`) to audit settlement across the whole population.
- */
+/** Fetch every ticket in the engine, regardless of caller. */
 export function useAllTickets() {
   const publicClient = useContractClient();
   const engine = useDeployedContract("ParlayEngine");

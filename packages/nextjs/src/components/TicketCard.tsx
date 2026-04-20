@@ -1,6 +1,6 @@
 "use client";
 
-import { formatUnits } from "viem";
+import { formatUSDC } from "@/lib/utils";
 import { useSettleTicket, useClaimPayout, useCashoutEarly } from "@/lib/hooks";
 
 export type TicketStatus = "Active" | "Won" | "Lost" | "Voided" | "Claimed";
@@ -131,7 +131,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
           <div>
             <p className="text-xs text-gray-500">Stake</p>
             <p className="font-semibold text-white">
-              ${Number(formatUnits(ticket.stake, 6)).toFixed(2)}
+              ${formatUSDC(ticket.stake)}
             </p>
           </div>
           <div>
@@ -143,7 +143,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
           <div>
             <p className="text-xs text-gray-500">Payout</p>
             <p className="font-bold text-brand-green">
-              ${Number(formatUnits(ticket.payout, 6)).toFixed(2)}
+              ${formatUSDC(ticket.payout)}
             </p>
           </div>
         </div>
@@ -178,7 +178,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
               className="flex-1 rounded-xl border border-brand-amber/30 bg-brand-amber/10 py-2.5 text-sm font-semibold text-brand-amber transition-all hover:bg-brand-amber/20 disabled:opacity-50"
             >
               {isCashingOut ? "Cashing out..." : ticket.cashoutValue
-                ? `Cash Out ~$${Number(formatUnits(ticket.cashoutValue, 6)).toFixed(2)}`
+                ? `Cash Out ~$${formatUSDC(ticket.cashoutValue)}`
                 : "Cash Out Early"}
             </button>
           )}

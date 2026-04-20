@@ -6,6 +6,9 @@ import { VaultDashboard } from "../VaultDashboard";
 vi.mock("wagmi", () => ({
   useAccount: vi.fn(() => ({ isConnected: false, address: undefined })),
   useReadContract: vi.fn(() => ({ data: undefined })),
+  useChainId: vi.fn(() => 31337),
+  usePublicClient: vi.fn(() => undefined),
+  useWriteContract: vi.fn(() => ({ writeContractAsync: vi.fn() })),
 }));
 
 // Mock hooks
@@ -80,15 +83,6 @@ vi.mock("@/lib/hooks", () => ({
   LockTier: { FULL: 0, PARTIAL: 1, LEAST: 2 },
 }));
 
-// Mock contracts
-vi.mock("@/lib/contracts", () => ({
-  HOUSE_VAULT_ABI: [],
-  contractAddresses: {
-    houseVault: "0x1234",
-    lockVault: "0x5678",
-  },
-}));
-
 import { useAccount, useReadContract } from "wagmi";
 import {
   useUSDCBalance,
@@ -97,16 +91,24 @@ import {
   useLockVault,
 } from "@/lib/hooks";
 
+type UseAccountReturn = ReturnType<typeof useAccount>;
+type UseReadContractReturn = ReturnType<typeof useReadContract>;
+type UseUSDCBalanceReturn = ReturnType<typeof useUSDCBalance>;
+type UseDepositVaultReturn = ReturnType<typeof useDepositVault>;
+type UseWithdrawVaultReturn = ReturnType<typeof useWithdrawVault>;
+type UseLockVaultReturn = ReturnType<typeof useLockVault>;
+
 function mockConnectedWithShares(shares = 100_000_000n) {
   vi.mocked(useAccount).mockReturnValue({
     isConnected: true,
     address: "0xAlice",
-  } as unknown as ReturnType<typeof useAccount>);
+  } as unknown as UseAccountReturn);
   // balanceOf returns shares, convertToAssets returns same value (1:1)
-  vi.mocked(useReadContract).mockImplementation((args: any) => {
-    if (args?.functionName === "balanceOf") return { data: shares } as any;
-    if (args?.functionName === "convertToAssets") return { data: shares } as any;
-    return { data: undefined } as any;
+  type UseReadContractArgs = Parameters<typeof useReadContract>[0];
+  vi.mocked(useReadContract).mockImplementation((args?: UseReadContractArgs) => {
+    if (args?.functionName === "balanceOf") return { data: shares } as UseReadContractReturn;
+    if (args?.functionName === "convertToAssets") return { data: shares } as UseReadContractReturn;
+    return { data: undefined } as UseReadContractReturn;
   });
 }
 
@@ -115,8 +117,8 @@ describe("VaultDashboard", () => {
     vi.mocked(useAccount).mockReturnValue({
       isConnected: false,
       address: undefined,
-    } as unknown as ReturnType<typeof useAccount>);
-    vi.mocked(useReadContract).mockReturnValue({ data: undefined } as any);
+    } as unknown as UseAccountReturn);
+    vi.mocked(useReadContract).mockReturnValue({ data: undefined } as UseReadContractReturn);
   });
 
   it("renders without crashing", () => {
@@ -185,7 +187,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
     });
 
     it("shows 'Minimum deposit is 1 USDC' for 0.5 USDC", () => {
@@ -219,7 +221,7 @@ describe("VaultDashboard", () => {
     });
 
     it("shows 'Exceeds your USDC balance' for amount > balance", () => {
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 10_000_000n } as any); // 10 USDC
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 10_000_000n } as UseUSDCBalanceReturn); // 10 USDC
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "20" } });
@@ -377,7 +379,7 @@ describe("VaultDashboard", () => {
   // ── Button label priority: deposit ──────────────────────────────────
 
   describe("deposit button priority", () => {
-    function mockDepositState(overrides: Partial<ReturnType<typeof useDepositVault>>) {
+    function mockDepositState(overrides: Partial<UseDepositVaultReturn>) {
       vi.mocked(useDepositVault).mockReturnValue({
         deposit: vi.fn(),
         resetSuccess: vi.fn(),
@@ -386,12 +388,12 @@ describe("VaultDashboard", () => {
         isSuccess: false,
         error: null,
         ...overrides,
-      } as any);
+      } as UseDepositVaultReturn);
     }
 
     beforeEach(() => {
       mockDepositState({});
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 1_000_000_000n } as any);
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 1_000_000_000n } as UseUSDCBalanceReturn);
     });
 
     it("'Connect Wallet' takes priority over everything", () => {
@@ -406,8 +408,8 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 0n } as any);
+      } as unknown as UseAccountReturn);
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 0n } as UseUSDCBalanceReturn);
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "0.5" } });
@@ -421,7 +423,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       mockDepositState({ isPending: true });
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
@@ -434,8 +436,8 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 10_000_000n } as any);
+      } as unknown as UseAccountReturn);
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 10_000_000n } as UseUSDCBalanceReturn);
       mockDepositState({ isConfirming: true });
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
@@ -448,7 +450,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       mockDepositState({ isSuccess: true });
       render(<VaultDashboard />);
       const btn = screen.getAllByRole("button").find((b) => b.textContent === "Deposited!");
@@ -459,9 +461,9 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       // Balance < 1 USDC so both belowMin and exceedsBalance could trigger
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 500_000n } as any); // 0.5 USDC
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 500_000n } as UseUSDCBalanceReturn); // 0.5 USDC
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "0.7" } });
@@ -474,8 +476,8 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 5_000_000n } as any); // 5 USDC
+      } as unknown as UseAccountReturn);
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 5_000_000n } as UseUSDCBalanceReturn); // 5 USDC
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "10" } });
@@ -487,7 +489,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "5" } });
@@ -500,7 +502,7 @@ describe("VaultDashboard", () => {
   // ── Button label priority: withdraw ─────────────────────────────────
 
   describe("withdraw button priority", () => {
-    function mockWithdrawState(overrides: Partial<ReturnType<typeof useWithdrawVault>>) {
+    function mockWithdrawState(overrides: Partial<UseWithdrawVaultReturn>) {
       vi.mocked(useWithdrawVault).mockReturnValue({
         withdraw: vi.fn(),
         resetSuccess: vi.fn(),
@@ -509,7 +511,7 @@ describe("VaultDashboard", () => {
         isSuccess: false,
         error: null,
         ...overrides,
-      } as any);
+      } as UseWithdrawVaultReturn);
     }
 
     beforeEach(() => {
@@ -528,7 +530,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       // No shares mocked (default: useReadContract returns undefined)
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Withdraw"));
@@ -591,7 +593,7 @@ describe("VaultDashboard", () => {
   // ── Button label priority: lock ─────────────────────────────────────
 
   describe("lock button priority", () => {
-    function mockLockState(overrides: Partial<ReturnType<typeof useLockVault>>) {
+    function mockLockState(overrides: Partial<UseLockVaultReturn>) {
       vi.mocked(useLockVault).mockReturnValue({
         lock: vi.fn(),
         isPending: false,
@@ -600,7 +602,7 @@ describe("VaultDashboard", () => {
         error: null,
         ready: true,
         ...overrides,
-      } as any);
+      } as UseLockVaultReturn);
     }
 
     beforeEach(() => {
@@ -619,7 +621,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       mockLockState({ ready: false });
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
@@ -634,7 +636,7 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
+      } as unknown as UseAccountReturn);
       // No shares (default)
       render(<VaultDashboard />);
       fireEvent.click(screen.getByText("Lock"));
@@ -729,8 +731,8 @@ describe("VaultDashboard", () => {
       vi.mocked(useAccount).mockReturnValue({
         isConnected: true,
         address: "0xAlice",
-      } as unknown as ReturnType<typeof useAccount>);
-      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 1_000_000_000n } as any);
+      } as unknown as UseAccountReturn);
+      vi.mocked(useUSDCBalance).mockReturnValue({ balance: 1_000_000_000n } as UseUSDCBalanceReturn);
       render(<VaultDashboard />);
       const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "." } });

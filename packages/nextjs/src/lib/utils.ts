@@ -1,5 +1,33 @@
 import { useState, useEffect } from "react";
+import { formatUnits } from "viem";
 import type { TicketStatus } from "@/components/TicketCard";
+
+/**
+ * Format a raw USDC (6-decimal) amount as a string.
+ *
+ * - `undefined` / `null` → "---" (placeholder)
+ * - default: 2 decimal places, no grouping (e.g. "123.45")
+ * - pass `{ locale: true }` to get `toLocaleString` grouping (e.g. "1,234.56")
+ * - pass `{ decimals: n }` to change the fraction width (used for "0.00", "1.2345", etc.)
+ *
+ * Consolidates the `Number(formatUnits(x, 6)).toFixed(2)` / `.toLocaleString(...)`
+ * pattern that appeared in every card/banner and the admin debug view.
+ */
+export function formatUSDC(
+  amount: bigint | undefined | null,
+  opts: { decimals?: number; locale?: boolean; placeholder?: string } = {},
+): string {
+  const { decimals = 2, locale = false, placeholder = "---" } = opts;
+  if (amount === undefined || amount === null) return placeholder;
+  const n = Number(formatUnits(amount, 6));
+  if (locale) {
+    return n.toLocaleString("en-US", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  }
+  return n.toFixed(decimals);
+}
 
 /**
  * Sanitize numeric input: strips non-digit/dot characters, limits to one

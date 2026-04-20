@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
-import { sanitizeNumericInput, blockNonNumericKeys } from "@/lib/utils";
+import { sanitizeNumericInput, blockNonNumericKeys, formatUSDC as fmtUSDCShared } from "@/lib/utils";
 import {
   useVaultStats,
   useDepositVault,
@@ -20,20 +20,16 @@ import {
   LockTier,
 } from "@/lib/hooks";
 import { useReadContract } from "wagmi";
-import { HOUSE_VAULT_ABI, contractAddresses } from "@/lib/contracts";
+import { useDeployedContract } from "@/lib/hooks/useDeployedContract";
 import {
   feeShareForDuration,
   penaltyBpsForRemaining,
   LOCK_MIN_DURATION_SECS,
 } from "@parlaycity/shared";
 
-function formatUSDC(amount: bigint | undefined): string {
-  if (amount === undefined) return "---";
-  return Number(formatUnits(amount, 6)).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+// Local alias so the dashboard keeps its preferred `toLocaleString`
+// rendering ("1,234.56") without passing `{ locale: true }` at every call site.
+const formatUSDC = (amount: bigint | undefined) => fmtUSDCShared(amount, { locale: true });
 
 const SECS_PER_DAY = 86_400n;
 
@@ -121,18 +117,20 @@ export function VaultDashboard() {
     : 10_000n;
   const lockDay0PenaltyBps = penaltyBpsForRemaining(lockDurationSecs);
 
+  const vaultContract = useDeployedContract("HouseVault");
+
   // User's vault share balance
   const { data: userShares } = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
+    address: vaultContract?.address,
+    abi: vaultContract?.abi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
-    query: { enabled: !!address && !!contractAddresses.houseVault, refetchInterval: 10_000 },
+    query: { enabled: !!address && !!vaultContract?.address, refetchInterval: 10_000 },
   });
 
   const { data: sharesValue } = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
+    address: vaultContract?.address,
+    abi: vaultContract?.abi,
     functionName: "convertToAssets",
     args: userShares ? [userShares as bigint] : undefined,
     query: { enabled: !!userShares && (userShares as bigint) > 0n, refetchInterval: 10_000 },
@@ -152,8 +150,8 @@ export function VaultDashboard() {
 
   // Convert locked shares to asset value (total across all tiers)
   const { data: lockedValue } = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
+    address: vaultContract?.address,
+    abi: vaultContract?.abi,
     functionName: "convertToAssets",
     args: userTotalLocked ? [userTotalLocked] : undefined,
     query: { enabled: !!userTotalLocked && userTotalLocked > 0n, refetchInterval: 10_000 },

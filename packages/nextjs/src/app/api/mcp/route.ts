@@ -126,8 +126,13 @@ export async function POST(req: Request) {
   }
 
   if (method === "tools/call") {
-    const toolName = (params?.name as string) ?? "";
-    const toolArgs = (params?.arguments as Record<string, unknown>) ?? {};
+    const nameRaw = params?.name;
+    const toolName = typeof nameRaw === "string" ? nameRaw : "";
+    const argsRaw = params?.arguments;
+    const toolArgs: Record<string, unknown> =
+      argsRaw && typeof argsRaw === "object" && !Array.isArray(argsRaw)
+        ? (argsRaw as Record<string, unknown>)
+        : {};
     const executor = TOOL_EXECUTORS[toolName];
 
     if (!executor) {

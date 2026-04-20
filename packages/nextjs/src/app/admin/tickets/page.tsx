@@ -2,9 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { formatUnits } from "viem";
 import { useAllTickets } from "@/lib/hooks";
-import { mapStatus } from "@/lib/utils";
+import { mapStatus, formatUSDC } from "@/lib/utils";
 import type { TicketStatus } from "@/components/TicketCard";
 
 type TabFilter = "all" | "active" | "won" | "lost" | "voided" | "claimed";
@@ -32,12 +31,7 @@ function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-function fmtUsdc(amount: bigint): string {
-  return Number(formatUnits(amount, 6)).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const fmtUsdc = (amount: bigint): string => formatUSDC(amount, { locale: true });
 
 function fmtTime(ts: number): string {
   if (!ts) return "—";

@@ -8,9 +8,9 @@ import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
 import {ILockVault} from "../../src/interfaces/ILockVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Phase 4: PARTIAL → FULL graduation.
-///         Re-locking a PARTIAL position for ≥24 months promotes it to FULL
-///         (gains fee-share weight + unlock time + promo credit).
+/// @notice PARTIAL → FULL graduation: re-locking a PARTIAL position for
+///         ≥24 months promotes it to FULL (gains fee-share weight + unlock
+///         time + promo credit).
 contract GraduateTest is Test {
     MockUSDC usdc;
     HouseVault vault;

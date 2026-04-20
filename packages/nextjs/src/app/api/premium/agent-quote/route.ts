@@ -38,10 +38,8 @@ export async function POST(req: Request) {
       riskTolerance: string;
     };
 
-    // Refresh LEG_MAP with NBA legs (shared helper -- avoids duplication)
     await refreshLegMap();
 
-    // Validate inputs
     if (!Array.isArray(legIds) || legIds.length < 2 || legIds.length > 5) {
       return NextResponse.json(
         { error: "legIds must be an array of 2-5 numbers" },
@@ -49,7 +47,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Resolve legs + probabilities from catalog
     const probs: number[] = [];
     const categories: string[] = [];
     for (const id of legIds) {

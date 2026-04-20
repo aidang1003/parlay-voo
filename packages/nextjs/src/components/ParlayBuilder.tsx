@@ -25,26 +25,6 @@ import { MultiplierClimb } from "./MultiplierClimb";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-interface APILeg {
-  id: number;
-  noId?: number;
-  question: string;
-  sourceRef: string;
-  cutoffTime: number;
-  earliestResolve: number;
-  probabilityPPM: number;
-  noProbabilityPPM?: number;
-  active: boolean;
-}
-
-interface APIMarket {
-  id: string;
-  title: string;
-  description: string;
-  legs: APILeg[];
-  category: string;
-}
-
 /** Display-ready leg combining API data with UI state. One DisplayLeg now
  *  represents an entire market (both yes/no sides collapsed). For seed markets
  *  noId is undefined so the UI hides the No button. */
@@ -157,7 +137,7 @@ function effectiveOdds(leg: DisplayLeg, outcome: number): number {
 /** Transform API markets into DisplayLeg array — one leg per market. Both
  *  yes/no sides get collapsed into a single card; the noId/noOdds fields
  *  carry the second side when present. */
-function apiMarketsToLegs(markets: APIMarket[]): DisplayLeg[] {
+function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
   const legs: DisplayLeg[] = [];
   for (const market of markets) {
     for (const leg of market.legs) {
@@ -284,7 +264,7 @@ export function ParlayBuilder() {
       try {
         const res = await fetch("/api/markets");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const markets: APIMarket[] = await res.json();
+        const markets: Market[] = await res.json();
         if (cancelled || !Array.isArray(markets)) return;
 
         const legs = apiMarketsToLegs(markets);

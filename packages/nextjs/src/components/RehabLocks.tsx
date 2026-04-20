@@ -4,16 +4,15 @@ import Link from "next/link";
 import { formatUnits } from "viem";
 import { useReadContract } from "wagmi";
 import { useLockPositions, LockTier } from "@/lib/hooks";
-import { HOUSE_VAULT_ABI, contractAddresses } from "@/lib/contracts";
+import { useDeployedContract } from "@/lib/hooks/useDeployedContract";
 
 const SHARES_UNIT = 1_000_000n; // 1 VOO share (6 decimals)
 
 /**
  * Shows the connected user's LEAST-tier positions — terminal rehab receipts
- * where the principal has already been burned back to LPs. Unlike the old
- * demo version, these are real on-chain positions. LEAST is a dead end for
- * the user; the section doubles as a pointer to lossless mode, which is the
- * only path back to reward-earning locks.
+ * whose principal has already been burned back to LPs. LEAST is a dead end;
+ * the section doubles as a pointer to lossless mode, which is the only path
+ * back to reward-earning locks.
  */
 export function RehabLocks() {
   const { positions } = useLockPositions();
@@ -21,15 +20,17 @@ export function RehabLocks() {
     (p) => p.position.tier === LockTier.LEAST,
   );
 
+  const vault = useDeployedContract("HouseVault");
+
   // Read current share price so we can label what each LEAST share would have
   // been worth at the moment the principal got burned.
   const { data: assetsPerShare } = useReadContract({
-    address: contractAddresses.houseVault as `0x${string}`,
-    abi: HOUSE_VAULT_ABI,
+    address: vault?.address,
+    abi: vault?.abi,
     functionName: "convertToAssets",
     args: [SHARES_UNIT],
     query: {
-      enabled: !!contractAddresses.houseVault,
+      enabled: !!vault?.address,
       refetchInterval: 10_000,
     },
   });

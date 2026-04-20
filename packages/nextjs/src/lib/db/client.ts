@@ -17,10 +17,7 @@ export function sql() {
   return cached;
 }
 
-// ---------------------------------------------------------------------------
-// Types — one row per market, yes/no sides as sibling columns.
-// ---------------------------------------------------------------------------
-
+// One row per market, yes/no sides as sibling columns.
 export type LegSource = "seed" | "polymarket";
 
 export interface MarketRow {
@@ -64,13 +61,6 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * All active markets, one row each. Single round-trip.
- */
 export async function getActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();
   const rows = await db`
@@ -81,10 +71,7 @@ export async function getActiveMarkets(): Promise<MarketRow[]> {
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
 
-/**
- * Markets with at least one on-chain-registered leg id. Used by MCP tools
- * to know which legs have already been materialized on-chain.
- */
+/** Markets with at least one on-chain-registered leg id. */
 export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();
   const rows = await db`
@@ -139,10 +126,6 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       blnactive          = EXCLUDED.blnactive
   `;
 }
-
-// ---------------------------------------------------------------------------
-// Settlement helpers (F-4)
-// ---------------------------------------------------------------------------
 
 /**
  * Polymarket-sourced markets not yet relayed to AdminOracleAdapter. The

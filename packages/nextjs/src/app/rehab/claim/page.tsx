@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { formatUnits } from "viem";
 import { useAccount } from "wagmi";
 import { useRehabClaimable, useClaimRehab } from "@/lib/hooks";
+import { formatUSDC } from "@/lib/utils";
 
 const SECS_PER_DAY = 86_400n;
 const SECS_PER_YEAR = 365n * SECS_PER_DAY;
@@ -20,10 +20,7 @@ const PRESETS: Preset[] = [
   { label: "10 years", years: 10 },
 ];
 
-function fmtUsdc(n: bigint | undefined): string {
-  if (!n) return "0.00";
-  return Number(formatUnits(n, 6)).toFixed(2);
-}
+const fmtUsdc = (n: bigint | undefined): string => formatUSDC(n, { placeholder: "0.00" });
 
 export default function RehabClaimPage() {
   const { isConnected } = useAccount();

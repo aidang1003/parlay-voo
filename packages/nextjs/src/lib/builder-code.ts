@@ -5,7 +5,7 @@
  * Format: [length: 1 byte][codes: ASCII][schema: 0x00][marker: 0x8021... (16 bytes)]
  */
 
-export function encodeBuilderCodeSuffix(code: string): `0x${string}` {
+function encodeBuilderCodeSuffix(code: string): `0x${string}` {
   const codeBytes = new TextEncoder().encode(code);
   const len = codeBytes.length;
   const marker = [
@@ -19,6 +19,6 @@ export function encodeBuilderCodeSuffix(code: string): `0x${string}` {
   return `0x${hex}` as `0x${string}`;
 }
 
-export const BUILDER_CODE =
+const BUILDER_CODE =
   process.env.NEXT_PUBLIC_BUILDER_CODE ?? "parlayvoo";
 export const BUILDER_SUFFIX = encodeBuilderCodeSuffix(BUILDER_CODE);

@@ -26,9 +26,9 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 - ERC4626-style HouseVault, VOO shares, permissionless deposit/withdraw
 - `totalReserved <= totalAssets()` invariant enforced on every path
 - Utilization cap (80%) and per-payout cap (5% TVL) so a single lucky ticket can't drain the vault
-- LockVault tiers (30/60/90 days at 1.1× / 1.25× / 1.5× weight) routing fee income Synthetix-style
+- LockVaultV2: continuous-duration VOO locks (7-day min, no upper cap) with a fee-share curve (2.0× at 1yr, 4.0× asymptote), routing fee income Synthetix-style
 - Yield on idle capital via pluggable adapter (Aave V3 on mainnet, mock locally)
-- Planned: rehab mode (losing stakes auto-locked as VOO, lossless-parlay credit) — design in `docs/REHAB_MODE.md`
+- Rehab mode: losing stakes auto-lock as LEAST VOO, PARTIAL credit-wins route principal back to LPs — design in `docs/REHAB_MODE.md`
 
 ### 3. Replace admin-managed legs with live market data
 
@@ -38,7 +38,6 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 ### 4. Make autonomous agents a first-class user
 
-- `scripts/risk-agent.ts` — Kelly-criterion sized betting agent, uses the same signed-quote flow as the frontend
 - `/api/mcp` — six MCP tools so external LLM agents can list markets, quote parlays, assess risk, read vault health
 - Signed-quote architecture (trusted signer set at deploy time) so an agent's on-chain tx carries the same guarantees as a UI click
 
@@ -61,7 +60,29 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 ## Getting started
 
-One-time setup: `pnpm bootstrap` (installs JS deps + forge libs), then copy `.env.example` to `.env` and fill in the keys you need (`DATABASE_URL`, `ANTHROPIC_API_KEY`, and on Sepolia `DEPLOYER_PRIVATE_KEY` + `QUOTE_SIGNER_PRIVATE_KEY`).
+### Fresh machine? Install host tools first
+
+Before running anything in this repo you need Node.js 18+, pnpm, and Foundry on your machine. pnpm is the package manager this repo targets — npm and yarn will not resolve the workspace layout correctly.
+
+If you're missing any of those, run the host bootstrapper once:
+
+```bash
+./scripts/bootstrap.sh     # installs Node (via nvm if missing), pnpm, Foundry
+```
+
+It is safe to re-run; each check is idempotent. This script only touches host-level tooling — it does not install repo dependencies.
+
+### One-time repo setup
+
+With host tools in place:
+
+```bash
+pnpm dev-setup       # pnpm install + forge install (forge-std, openzeppelin-contracts)
+```
+
+Then copy `.env.example` to `.env` and fill in the keys you need (`DATABASE_URL`, `ANTHROPIC_API_KEY`, and on Sepolia `DEPLOYER_PRIVATE_KEY` + `QUOTE_SIGNER_PRIVATE_KEY`).
+
+> **Note:** `scripts/bootstrap.sh` (host tools) and `pnpm dev-setup` (repo deps) solve different problems and are both needed on a fresh machine. They were deliberately given distinct names so neither shadows the other.
 
 ### Path A — one command
 
@@ -115,11 +136,13 @@ pnpm re-deploy:local # wipe .next + forge artifacts, redeploy
 packages/foundry/    Solidity 0.8.24, HelperConfig-driven deploy
 packages/nextjs/     Next.js 14 app, wagmi 2, ConnectKit
 packages/shared/     ParlayMath TS mirror, Zod schemas, types
-scripts/             generate-deployed-contracts, risk-agent, demo-autopilot
-docs/                Architecture diagrams + per-subsystem specs
+scripts/             generate-deployed-contracts
+docs/                Human-readable reference + subsystem specs (see docs/README.md)
+docs/changes/        Chronological change log — one file per architectural change
+docs/llm-spec/       LLM-only mirror of subsystem specs; humans can ignore
 ```
 
-For architecture diagrams (fund flow, crash lifecycle, oracle state machine, lock-vault distribution) see `docs/ARCHITECTURE.md`. For economics, risk model, cashout math, and threat model see the corresponding files in `docs/`.
+Start at `docs/README.md` for the folder index. For architecture diagrams (fund flow, crash lifecycle, oracle state machine, lock-vault distribution) see `docs/ARCHITECTURE.md`. For economics, risk model, cashout math, and threat model see the corresponding files in `docs/`. Recent architectural decisions live in `docs/changes/`.
 
 ---
 

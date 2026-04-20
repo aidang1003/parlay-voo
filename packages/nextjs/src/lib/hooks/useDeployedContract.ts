@@ -5,7 +5,7 @@ import deployedContracts, {
   type SupportedDeployedChainId,
   type ContractName,
 } from "../../contracts/deployedContracts";
-import {LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID} from "@parlaycity/shared";
+import {LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID} from "@parlayvoo/shared";
 import {usePinnedChainId} from "./_internal";
 
 const availableChainIds = Object.keys(deployedContracts).map(Number) as SupportedDeployedChainId[];

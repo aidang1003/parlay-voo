@@ -16,8 +16,8 @@ import {
   BASE_SEPOLIA_CHAIN_ID,
   getRpcUrl,
   type SupportedChainId,
-} from "@parlaycity/shared";
-import type { RiskProfile, Market, Leg } from "@parlaycity/shared";
+} from "@parlayvoo/shared";
+import type { RiskProfile, Market, Leg } from "@parlayvoo/shared";
 import deployedContracts from "../../contracts/deployedContracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
 import { getRegisteredActiveMarkets } from "../db/client";

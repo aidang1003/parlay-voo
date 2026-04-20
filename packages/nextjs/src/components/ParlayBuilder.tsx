@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useAccount } from "wagmi";
 import { formatUnits } from "viem";
 import { useModal } from "connectkit";
-import type { Leg, Market } from "@parlaycity/shared";
-import { MAX_LEGS, MIN_LEGS, MIN_STAKE_USDC, BASE_FEE_BPS, PER_LEG_FEE_BPS } from "@parlaycity/shared";
+import type { Leg, Market } from "@parlayvoo/shared";
+import { MAX_LEGS, MIN_LEGS, MIN_STAKE_USDC, BASE_FEE_BPS, PER_LEG_FEE_BPS } from "@parlayvoo/shared";
 import {
   sanitizeNumericInput,
   blockNonNumericKeys,

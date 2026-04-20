@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { SEED_MARKETS } from "@parlaycity/shared";
+import { SEED_MARKETS } from "@parlayvoo/shared";
 import { sql, upsertMarket } from "@/lib/db/client";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 

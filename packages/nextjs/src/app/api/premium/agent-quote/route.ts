@@ -8,8 +8,8 @@ import {
   PPM,
   USDC_DECIMALS,
   RiskAction,
-} from "@parlaycity/shared";
-import type { RiskProfile } from "@parlaycity/shared";
+} from "@parlayvoo/shared";
+import type { RiskProfile } from "@parlayvoo/shared";
 import { LEG_MAP, refreshLegMap } from "@/lib/mcp/tools";
 
 const RISK_CAPS: Record<

@@ -4,7 +4,7 @@ import {
   fetchFeaturedMarkets,
   type CuratedMarket,
   type PolymarketOrderBook,
-} from "@parlaycity/shared";
+} from "@parlayvoo/shared";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { midToPpm } from "@/lib/polymarket/markets";
 import { upsertMarket } from "@/lib/db/client";

@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@parlaycity/shared"],
+  transpilePackages: ["@parlayvoo/shared"],
   experimental: {
     serverComponentsExternalPackages: ["@ai-sdk/anthropic"],
   },

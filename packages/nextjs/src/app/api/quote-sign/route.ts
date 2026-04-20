@@ -10,7 +10,7 @@ import {
   BASE_SEPOLIA_CHAIN_ID,
   LOCAL_CHAIN_ID,
   type SupportedChainId,
-} from "@parlaycity/shared";
+} from "@parlayvoo/shared";
 
 /**
  * POST /api/quote-sign

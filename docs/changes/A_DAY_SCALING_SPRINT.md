@@ -212,7 +212,7 @@ Shipped as a single `/admin/debug` page plus a testnet-only banner; replaces the
 - ✅ COMPLETE **Solidify difference between DEPLOYER / SIGNER / MY WALLET.** CLAUDE.md now documents that `DEPLOYER_PRIVATE_KEY` is the single required key (deploys, admin calls, settlement cron, agent scripts) and `QUOTE_SIGNER_PRIVATE_KEY` falls back to it when unset.
 - Make dev.sh/dev-stop.sh use call the same scripts I call manually (pnpm chain, pnpm deploy:local, pnpm web-dev)
 - ✅ COMPLETE **Auto-fund personal wallet on Anvil deploy.** `Deploy.s.sol` tops up the deployer from Anvil account #0 when `block.chainid == 31337` and balance < 0.01 ETH. `FundWallet.s.sol` does the same for deployer + target wallet.
-- Some typescript module named parlaycity is in there. Look into what this is later.
+- ✅ COMPLETE **Finish the `parlaycity` → `parlayvoo` rename.** `ARCH_REVIEW_2.md` (P6) claimed this was done, but the rename had never actually been applied. Root `package.json` name was still `parlaycity`, `packages/shared/package.json` was still `@parlaycity/shared`, and all ~20 import sites in `packages/nextjs/src/` still imported from `@parlaycity/shared`. Executed the rename: updated both package names, `packages/nextjs/package.json` workspace dep, `next.config.mjs` `transpilePackages`, every `import ... from "@parlaycity/shared"` in source + CLAUDE.md, regenerated `pnpm-lock.yaml`. `pnpm typecheck` + 276 vitest tests green.
 - Messages returned to console on a contract deploy are not 100% accurate
 - Writing both deployment files on `pnpm deploy:sepolia`. Either the comment is wrong os this is overkill since we only want to deploy on sepolia
 

@@ -2,7 +2,7 @@ import { createConfig, http } from "wagmi";
 import { baseSepolia, foundry, mainnet } from "wagmi/chains";
 import { fallback, type Transport } from "viem";
 import { getDefaultConfig } from "connectkit";
-import { CHAINS, BASE_SEPOLIA_CHAIN_ID, LOCAL_CHAIN_ID } from "@parlaycity/shared";
+import { CHAINS, BASE_SEPOLIA_CHAIN_ID, LOCAL_CHAIN_ID } from "@parlayvoo/shared";
 
 const primarySepoliaRpc = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL;
 

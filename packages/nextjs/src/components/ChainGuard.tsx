@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
-import { CHAINS, type SupportedChainId } from "@parlaycity/shared";
+import { CHAINS, type SupportedChainId } from "@parlayvoo/shared";
 import { usePinnedChainId } from "@/lib/hooks/_internal";
 
 /**

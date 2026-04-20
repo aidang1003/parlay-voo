@@ -184,6 +184,7 @@ function main() {
 
   const merged = loadExisting();
   const targetChains = onlyChain ? [onlyChain] : discovered;
+  const updatedChains: number[] = [];
 
   for (const chainId of targetChains) {
     const broadcast = readBroadcast(chainId);
@@ -197,6 +198,7 @@ function main() {
       continue;
     }
     merged[chainId] = entry;
+    updatedChains.push(chainId);
     console.log(`  ✓ chain ${chainId}: ${Object.keys(entry).length} contracts`);
   }
 
@@ -210,7 +212,7 @@ function main() {
   console.log(`Wrote ${TS_OUT}`);
 
   mkdirSync(JSON_OUT_DIR, {recursive: true});
-  for (const chainId of Object.keys(merged).map(Number)) {
+  for (const chainId of updatedChains) {
     const path = resolve(JSON_OUT_DIR, `${chainId}.json`);
     writeFileSync(path, emitJson(merged[chainId]));
     console.log(`Wrote ${path}`);

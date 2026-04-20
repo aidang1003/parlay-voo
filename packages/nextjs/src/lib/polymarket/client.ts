@@ -2,7 +2,7 @@ import type {
   PolymarketMetadata,
   PolymarketOrderBook,
   PolymarketResolution,
-} from "@parlaycity/shared";
+} from "@parlayvoo/shared";
 
 export interface PolymarketClientConfig {
   gammaUrl: string;

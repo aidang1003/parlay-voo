@@ -121,6 +121,8 @@ contract CreatePool is Script {
 
         // tickSpacing: fee=500->10, fee=3000->60, fee=10000->200
         int24 tickSpacing = fee == 500 ? int24(10) : fee == 3000 ? int24(60) : int24(200);
+        // Uniswap V3 idiom: align MAX_TICK (887272) down to the nearest multiple of tickSpacing.
+        // forge-lint: disable-next-line(divide-before-multiply)
         int24 maxTick = (int24(887272) / tickSpacing) * tickSpacing;
 
         INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({

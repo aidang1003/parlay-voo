@@ -16,7 +16,7 @@
     "@ai-sdk/anthropic": "^1.2.12",
     "@ai-sdk/react": "^1.2.12",
     "@neondatabase/serverless": "^1.0.2",
-    "@parlaycity/shared": "workspace:*",
+    "@parlayvoo/shared": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "ai": "^4.3.19",
     "connectkit": "1.8.2",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "@parlaycity/shared";
+import { LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "@parlayvoo/shared";
 import { useDeployedContract } from "./useDeployedContract";
 import { useAllTickets } from "./ticket";
 import { useContractClient, usePinnedChainId } from "./_internal";

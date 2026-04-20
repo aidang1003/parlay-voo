@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { useChainId, usePublicClient, useWriteContract } from "wagmi";
 import type { Abi } from "viem";
-import { CHAINS, type SupportedChainId } from "@parlaycity/shared";
+import { CHAINS, type SupportedChainId } from "@parlayvoo/shared";
 import type { SupportedDeployedChainId } from "../../contracts/deployedContracts";
 
 /**

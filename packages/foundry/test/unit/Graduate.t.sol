@@ -49,6 +49,7 @@ contract GraduateTest is Test {
         // lockVault and call rehabLock as itself. Mirrors routeLosslessWin
         // without going through the engine.
         vm.prank(lp);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         IERC20(address(vault)).transfer(address(vault), voo);
         vm.startPrank(address(vault));
         IERC20(address(vault)).approve(address(lockVault), voo);
@@ -70,6 +71,7 @@ contract GraduateTest is Test {
         // Alice locks FULL voluntarily.
         address alice = makeAddr("alice");
         vm.prank(lp);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         IERC20(address(vault)).transfer(alice, 100e6);
         vm.startPrank(alice);
         IERC20(address(vault)).approve(address(lockVault), 100e6);
@@ -180,6 +182,7 @@ contract GraduateTest is Test {
         // Another FULL locker first — claims every past fee.
         address alice = makeAddr("alice");
         vm.prank(lp);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         IERC20(address(vault)).transfer(alice, 100e6);
         vm.startPrank(alice);
         IERC20(address(vault)).approve(address(lockVault), 100e6);

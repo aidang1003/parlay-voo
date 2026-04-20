@@ -126,6 +126,7 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
     function test_buyTicket_revertsOnTooManyLegs() public {
         ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](6);
         for (uint256 i = 0; i < 6; i++) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             legs[i] = _yesLeg(string(abi.encodePacked("leg:x", bytes1(uint8(48 + i)))), 500_000);
         }
         uint256 nonce = _nextQuoteNonce++;

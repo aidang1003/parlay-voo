@@ -25,7 +25,7 @@ import {
   feeShareForDuration,
   penaltyBpsForRemaining,
   LOCK_MIN_DURATION_SECS,
-} from "@parlaycity/shared";
+} from "@parlayvoo/shared";
 
 // Local alias so the dashboard keeps its preferred `toLocaleString`
 // rendering ("1,234.56") without passing `{ locale: true }` at every call site.

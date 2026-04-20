@@ -37,7 +37,7 @@ importers:
       '@neondatabase/serverless':
         specifier: ^1.0.2
         version: 1.0.2
-      '@parlaycity/shared':
+      '@parlayvoo/shared':
         specifier: workspace:*
         version: link:../shared
       '@tanstack/react-query':

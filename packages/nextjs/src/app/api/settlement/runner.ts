@@ -32,7 +32,7 @@ import {
   LOCAL_CHAIN_ID,
   getRpcUrl,
   type SupportedChainId,
-} from "@parlaycity/shared";
+} from "@parlayvoo/shared";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import {
   getUnresolvedPolymarketLegs,

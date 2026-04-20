@@ -11,7 +11,7 @@
  * so a production deploy can't accidentally expose a cron endpoint.
  */
 import { NextResponse } from "next/server";
-import { LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "@parlaycity/shared";
+import { LOCAL_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "@parlayvoo/shared";
 
 export function assertTestnetOnly(): NextResponse | null {
   const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID);

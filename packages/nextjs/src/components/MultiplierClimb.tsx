@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react";
-import { MAX_LEGS } from "@parlaycity/shared";
+import { MAX_LEGS } from "@parlayvoo/shared";
 import { useParlayConfig } from "@/lib/hooks";
 
 interface MultiplierClimbProps {

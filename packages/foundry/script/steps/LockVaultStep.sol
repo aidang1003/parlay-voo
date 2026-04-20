@@ -17,5 +17,6 @@ abstract contract LockVaultStep is Script {
         // SafetyModule isn't implemented yet; caller passes a placeholder (usually the deployer).
         vault.setSafetyModule(safetyModulePlaceholder);
         lockVault.setFeeDistributor(address(vault));
+        console.log("LockVault + SafetyModule wired on vault; FeeDistributor set on LockVault");
     }
 }

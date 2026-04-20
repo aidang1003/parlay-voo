@@ -12,7 +12,7 @@ import {
   BASE_SEPOLIA_CHAIN_ID,
   getRpcUrl,
   type SupportedChainId,
-} from "@parlaycity/shared";
+} from "@parlayvoo/shared";
 import deployedContracts from "@/contracts/deployedContracts";
 
 const AGENT_WALLET = (process.env.NEXT_PUBLIC_AGENT_WALLET ??

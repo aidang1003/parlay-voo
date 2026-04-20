@@ -1,5 +1,5 @@
-import type { Market, Leg } from "@parlaycity/shared";
-import { PPM } from "@parlaycity/shared";
+import type { Market, Leg } from "@parlayvoo/shared";
+import { PPM } from "@parlayvoo/shared";
 import { getActiveMarkets, type MarketRow } from "@/lib/db/client";
 
 /**

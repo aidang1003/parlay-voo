@@ -11,6 +11,10 @@ if [ -f "$ROOT/.env" ]; then
   set -a; . "$ROOT/.env"; set +a
 fi
 
+# Local dev always reads from Anvil; override any .env that points the web app
+# at Base Sepolia so the page isn't blank before the wallet connects.
+export NEXT_PUBLIC_CHAIN_ID=31337
+
 echo "Starting ParlayVoo dev stack..."
 for port in 3000 8545; do lsof -ti :"$port" | xargs -r kill -9 2>/dev/null || true; done
 sleep 1

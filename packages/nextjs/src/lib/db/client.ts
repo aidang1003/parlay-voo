@@ -17,6 +17,7 @@ export function sql() {
   return cached;
 }
 
+// One row per market, yes/no sides as sibling columns.
 export type LegSource = "seed" | "polymarket";
 
 export interface MarketRow {

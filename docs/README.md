@@ -25,6 +25,7 @@ Human-readable documentation for ParlayVoo. LLM-oriented implementation detail l
 |---|---|
 | `RUNBOOK.md` | Day-to-day commands, common operations, troubleshooting |
 | `DEPLOYMENT.md` | Local + Base Sepolia deploy flows, env vars, post-deploy checklist |
+| `TESTING.md` | Verification gate (`pnpm gate`), what each command covers, ad-hoc tools like `knip` |
 
 ### Subsystem specs — "how feature X works"
 

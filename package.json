@@ -34,6 +34,7 @@
   "devDependencies": {
     "@types/node": "^20.19.33",
     "dotenv-cli": "^7.4.2",
+    "knip": "^6.4.1",
     "tsx": "^4.7.0"
   },
   "pnpm": {

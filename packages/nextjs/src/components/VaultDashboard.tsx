@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
-import { sanitizeNumericInput, blockNonNumericKeys } from "@/lib/utils";
+import { sanitizeNumericInput, blockNonNumericKeys, formatUSDC as fmtUSDCShared } from "@/lib/utils";
 import {
   useVaultStats,
   useDepositVault,
@@ -27,13 +27,9 @@ import {
   LOCK_MIN_DURATION_SECS,
 } from "@parlaycity/shared";
 
-function formatUSDC(amount: bigint | undefined): string {
-  if (amount === undefined) return "---";
-  return Number(formatUnits(amount, 6)).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+// Local alias so the dashboard keeps its preferred `toLocaleString`
+// rendering ("1,234.56") without passing `{ locale: true }` at every call site.
+const formatUSDC = (amount: bigint | undefined) => fmtUSDCShared(amount, { locale: true });
 
 const SECS_PER_DAY = 86_400n;
 

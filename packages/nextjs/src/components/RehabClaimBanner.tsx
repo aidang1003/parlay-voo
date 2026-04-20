@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { formatUnits } from "viem";
 import { useAccount } from "wagmi";
 import { useRehabClaimable } from "@/lib/hooks";
+import { formatUSDC } from "@/lib/utils";
 
 const BPS = 10_000n;
 
@@ -20,9 +20,9 @@ export function RehabClaimBanner() {
   if (!isConnected) return null;
   if (!claimable || claimable === 0n) return null;
 
-  const claimableFmt = Number(formatUnits(claimable, 6)).toFixed(2);
+  const claimableFmt = formatUSDC(claimable);
   const credit = projectedAprBps ? (claimable * projectedAprBps) / BPS : 0n;
-  const creditFmt = Number(formatUnits(credit, 6)).toFixed(2);
+  const creditFmt = formatUSDC(credit);
 
   return (
     <div className="animate-fade-in-up rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-950/50 to-yellow-950/30 p-5">

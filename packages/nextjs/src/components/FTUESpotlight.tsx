@@ -112,7 +112,6 @@ function useFTUEInternal(): FTUEState {
   const next = useCallback(() => {
     setStepIndex((prev) => {
       if (prev >= steps.length - 1) {
-        // Complete current phase
         try {
           if (phase === 1) {
             sessionStorage.setItem(STORAGE_KEY, "true");

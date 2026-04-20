@@ -47,8 +47,6 @@ const addr = {
   usdc: chainContracts.MockUSDC?.address ?? ZERO_ADDRESS,
 };
 
-export { SEED_MARKETS } from "@parlaycity/shared";
-
 // Seed legs are static, keyed by catalog ID 1..21. Polymarket legs are merged
 // in on demand via refreshLegMap() — they're keyed by their on-chain leg ID,
 // which is disjoint from the seed catalog range.

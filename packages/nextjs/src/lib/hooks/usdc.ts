@@ -75,7 +75,6 @@ export function useMintTestUSDC() {
     }
   };
 
-  // Cleanup timeout on unmount
   useEffect(() => () => clearTimeout(successTimerRef.current), []);
 
   return { mint, canMint, isPending, isConfirming, isSuccess, error };

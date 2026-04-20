@@ -104,7 +104,6 @@ export function useBuyTicket() {
         signature: `0x${string}`;
       };
 
-      // Approve exact amount
       const approveHash = await writeContractAsync({
         address: usdc.address,
         abi: usdc.abi,
@@ -151,28 +150,12 @@ export function useBuyTicket() {
       // Parse TicketPurchased event from receipt to get the actual ticket ID.
       // Cast the decoded args because the generated ABI is not `as const`, so
       // viem cannot infer per-event arg types from a widened `Abi`.
-      let newTicketId: bigint | undefined;
-      try {
-        const purchaseEvents = parseEventLogs({
-          abi: engine.abi,
-          logs: receipt.logs,
-          eventName: "TicketPurchased",
-        });
-        newTicketId = (purchaseEvents[0]?.args as { ticketId?: bigint } | undefined)?.ticketId;
-      } catch {
-        // ABI mismatch or unexpected log format -- fall through to fallback
-      }
-
-      // Fallback: read ticketCount post-confirmation (less reliable but works
-      // if event ABI drifts from contract)
-      if (newTicketId === undefined && publicClient) {
-        const count = await publicClient.readContract({
-          address: engine.address,
-          abi: engine.abi,
-          functionName: "ticketCount",
-        });
-        newTicketId = (count as bigint) - 1n;
-      }
+      const purchaseEvents = parseEventLogs({
+        abi: engine.abi,
+        logs: receipt.logs,
+        eventName: "TicketPurchased",
+      });
+      const newTicketId = (purchaseEvents[0]?.args as { ticketId?: bigint } | undefined)?.ticketId;
 
       setIsConfirming(false);
       setIsSuccess(true);
@@ -298,25 +281,12 @@ export function useBuyLosslessParlay() {
         throw new Error("Transaction reverted on-chain");
       }
 
-      let newTicketId: bigint | undefined;
-      try {
-        const purchaseEvents = parseEventLogs({
-          abi: engine.abi,
-          logs: receipt.logs,
-          eventName: "TicketPurchased",
-        });
-        newTicketId = (purchaseEvents[0]?.args as { ticketId?: bigint } | undefined)?.ticketId;
-      } catch {
-        // ABI mismatch — fall through
-      }
-      if (newTicketId === undefined && publicClient) {
-        const count = await publicClient.readContract({
-          address: engine.address,
-          abi: engine.abi,
-          functionName: "ticketCount",
-        });
-        newTicketId = (count as bigint) - 1n;
-      }
+      const purchaseEvents = parseEventLogs({
+        abi: engine.abi,
+        logs: receipt.logs,
+        eventName: "TicketPurchased",
+      });
+      const newTicketId = (purchaseEvents[0]?.args as { ticketId?: bigint } | undefined)?.ticketId;
 
       setIsConfirming(false);
       setIsSuccess(true);

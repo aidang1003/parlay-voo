@@ -18,14 +18,12 @@ export function ChatPanel() {
   const { messages, input, handleInputChange, handleSubmit, isLoading, setInput, append } =
     useChat({ api: "/api/chat" });
 
-  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
 
-  // Focus input when opened
   useEffect(() => {
     if (open && inputRef.current) {
       inputRef.current.focus();

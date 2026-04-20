@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { formatUnits } from "viem";
+import { formatUSDC } from "@/lib/utils";
 import { useCreditBalance, useRehabClaimable } from "@/lib/hooks";
 
 const BPS = 10_000n;
@@ -19,17 +19,13 @@ export function RehabCTA({ stake }: RehabCTAProps) {
   const { credit } = useCreditBalance();
   const { claimable, projectedAprBps } = useRehabClaimable();
 
-  const creditFmt =
-    credit && credit > 0n
-      ? Number(formatUnits(credit, 6)).toFixed(2)
-      : "0.00";
-  const stakeFmt =
-    stake > 0n ? Number(formatUnits(stake, 6)).toFixed(2) : "0.00";
+  const creditFmt = formatUSDC(credit && credit > 0n ? credit : 0n);
+  const stakeFmt = formatUSDC(stake > 0n ? stake : 0n);
 
   const preview =
     claimable && projectedAprBps ? (claimable * projectedAprBps) / BPS : 0n;
-  const previewFmt = Number(formatUnits(preview, 6)).toFixed(2);
-  const claimableFmt = Number(formatUnits(claimable ?? 0n, 6)).toFixed(2);
+  const previewFmt = formatUSDC(preview);
+  const claimableFmt = formatUSDC(claimable ?? 0n);
   const hasClaimable = !!claimable && claimable > 0n;
 
   return (

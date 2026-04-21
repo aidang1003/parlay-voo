@@ -112,6 +112,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     cutoffTime: cutoffSec,
     earliestResolve,
     active: true,
+    apiPayload: entry.apiPayload ?? null,
   });
 }
 

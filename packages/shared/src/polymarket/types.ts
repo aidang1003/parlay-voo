@@ -8,6 +8,11 @@ export interface CuratedMarket {
   /** When sourced from Gamma, carry prices so sync can skip per-token orderbook. */
   yesPrice?: number;
   noPrice?: number;
+  /** Raw Gamma event payload for this market. Persisted as JSONB so downstream
+   *  consumers (curation score, categorization, grouping) can reach tags /
+   *  volume24hr / sibling-market info without re-fetching. Undefined for
+   *  hand-curated seed entries. */
+  apiPayload?: unknown;
 }
 
 export interface PolymarketMetadata {

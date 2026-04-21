@@ -121,11 +121,24 @@ export async function fetchFeaturedMarkets(
           : mkt.question,
         yesPrice,
         noPrice,
+        apiPayload: buildApiPayload(event, mkt),
       });
     }
   }
 
   return results;
+}
+
+/** Snapshot of the Gamma event + market shapes we persist. We strip the
+ *  sibling `markets` array off the event copy so a negRisk group with N
+ *  markets doesn't balloon each row to N× the payload. */
+function buildApiPayload(event: GammaEvent, market: GammaMarket): Record<string, unknown> {
+  const { markets: _siblings, ...eventMeta } = event;
+  return {
+    event: eventMeta,
+    market,
+    capturedAt: new Date().toISOString(),
+  };
 }
 
 /** Derive a category slug from Gamma event metadata. Falls back to the

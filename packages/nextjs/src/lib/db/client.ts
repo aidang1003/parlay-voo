@@ -32,6 +32,7 @@ export interface MarketRow {
   bigcutofftime: number;
   bigearliestresolve: number;
   blnactive: boolean;
+  jsonbapipayload: unknown | null;
   tscreatedat: string;
 }
 
@@ -57,6 +58,7 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     bigcutofftime: Number(r.bigcutofftime),
     bigearliestresolve: Number(r.bigearliestresolve),
     blnactive: r.blnactive as boolean,
+    jsonbapipayload: r.jsonbapipayload ?? null,
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -95,6 +97,11 @@ export interface UpsertMarketInput {
   cutoffTime: number;
   earliestResolve: number;
   active?: boolean;
+  /** Raw Gamma event payload to stash alongside the scalars. Null is fine —
+   *  seed rows have nothing to carry. On conflict, non-null updates win so a
+   *  refresh keeps the payload fresh, but a NULL refresh won't wipe an
+   *  existing payload. */
+  apiPayload?: unknown | null;
 }
 
 /**
@@ -104,15 +111,18 @@ export interface UpsertMarketInput {
  */
 export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
+  const payloadJson =
+    input.apiPayload == null ? null : JSON.stringify(input.apiPayload);
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
-      bigcutofftime, bigearliestresolve, blnactive
+      bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
-      ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true}
+      ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
+      ${payloadJson}::jsonb
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyeslegid        = COALESCE(tblegmapping.intyeslegid, EXCLUDED.intyeslegid),
@@ -123,7 +133,8 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
       bigearliestresolve = EXCLUDED.bigearliestresolve,
-      blnactive          = EXCLUDED.blnactive
+      blnactive          = EXCLUDED.blnactive,
+      jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload)
   `;
 }
 

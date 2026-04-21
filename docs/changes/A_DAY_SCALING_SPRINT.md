@@ -86,24 +86,8 @@ Add your own below. For each, jot down: time estimate, value, blockers (which sc
 - **Migration:** `LockVaultV2` deployed alongside old `LockVault`; `HouseVault.setLockVault()` points at V2. Old V1 positions mature naturally.
 - **Tests:** `test/unit/LockVaultV2.t.sol`, `test/invariant/LockVaultInvariant.t.sol`.
 
-#### F-1B — Utilization tranches (concentrated-risk LP positions)
-- **Time:** 3-5 days. Separate PR.
-- **Gate:** Draft `docs/TRANCHES.md` with math + open questions nailed down, user sign-off, *then* code.
-- **Design sketch:**
-  - 4 fixed tranches by utilization BPS: Senior 0-5000, Mezz 5000-7500, Junior 7500-8000, plus "full-range" (0-10000) for legacy/default LPs.
-  - LP position = `(shares, tickLower, tickUpper, feeGrowthInside, lossGrowthInside)`. Junior earns fattest fees, takes first loss.
-  - Uniswap V3 `feeGrowthGlobal` / `feeGrowthInside` pattern for accounting.
-  - Reserve hook in `HouseVault.reservePayout()` routes fee accrual + loss exposure by tick range crossed.
-- **Open questions to resolve in TRANCHES.md:**
-  1. Tick granularity — fixed 4 vs 100-BPS continuous
-  2. Overlay on existing VOO or replace with per-tranche share tokens
-  3. Default band for existing LPs (opt-in full-range recommended)
-- **Files:** new `packages/foundry/src/core/TrancheRegistry.sol`; `HouseVault.sol` gains reserve/pay hooks; `ParlayMath.sol` untouched.
-
 #### Ordering
 1. Ship F-1A to `main`. Low risk, clean rollback.
-2. Draft TRANCHES.md, sign-off.
-3. Ship F-1B.
 
 ### F-2 — Add live polymarket data ✅ COMPLETE
 - **Time:** 2 days

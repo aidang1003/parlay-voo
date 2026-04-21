@@ -109,10 +109,6 @@ ParlayEngine:
 
 ---
 
-## 7. Utilization-based pricing (tranches)
-
-See `docs/RISK_MODEL.md` for the base pricing model. The V2 design — utilization tranches with per-range fee + loss accounting (Uniswap V3 `feeGrowthInside` pattern) — is drafted in the scaling-sprint archive (`docs/changes/A_DAY_SCALING_SPRINT.md`, item F-1B) and blocked on a `docs/TRANCHES.md` design sign-off.
-
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
@@ -120,5 +116,4 @@ See `docs/RISK_MODEL.md` for the base pricing model. The V2 design — utilizati
 3. Fee config in constructor — trivial, improves deploy flexibility.
 4. Dynamic fee scaling — medium effort, strong DeFi mechanic.
 5. Dynamic max payout — medium effort, unlocks larger tickets.
-6. Utilization tranches — blocked on design sign-off.
-7. Jackpot pool — high effort, major feature expansion.
+6. Jackpot pool — high effort, major feature expansion.

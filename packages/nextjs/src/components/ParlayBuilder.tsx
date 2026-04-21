@@ -726,7 +726,11 @@ export function ParlayBuilder() {
 
       {/* Ticket builder / summary panel */}
       <div className="lg:col-span-2" id="parlay-panel">
-        <div className="glass-card-glow sticky top-20 space-y-6 p-6">
+        {/* @bug R-7: on short viewports the sticky bet panel was taller than the
+            visible area, so reaching its bottom required scrolling the whole
+            markets list. Bounding the height + overflow-y-auto gives the panel
+            its own scroll context, independent of the markets column. */}
+        <div className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
           {/* Multiplier climb */}
           <div id="parlay-multiplier">
             <MultiplierClimb

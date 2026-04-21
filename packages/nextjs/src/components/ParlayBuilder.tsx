@@ -778,6 +778,11 @@ export function ParlayBuilder() {
                     instead of USDC. Wins lock VOO; losses just burn credit.
                   </p>
                 </div>
+                {/* @bug R-8: toggle knob travels translate-x-5 (20px) when ON,
+                    which leaves a 4px gap on the right vs. 2px on the left —
+                    reads as off-center. translate-x-[22px] makes the on-state
+                    gap match the off-state gap so the knob sits symmetrically
+                    in the track. */}
                 <button
                   type="button"
                   role="switch"
@@ -786,13 +791,13 @@ export function ParlayBuilder() {
                     resetSuccess();
                     setUseLossless((v) => !v);
                   }}
-                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                  className={`relative h-6 w-11 flex-shrink-0 self-center rounded-full transition-colors ${
                     useLossless ? "bg-amber-500" : "bg-white/10"
                   }`}
                 >
                   <span
                     className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                      useLossless ? "translate-x-5" : "translate-x-0.5"
+                      useLossless ? "translate-x-[22px]" : "translate-x-0.5"
                     }`}
                   />
                 </button>

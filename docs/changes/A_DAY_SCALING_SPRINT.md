@@ -199,7 +199,7 @@ Shipped as a single `/admin/debug` page plus a testnet-only banner; replaces the
 - ✅ COMPLETE **Deploy console messages cover every wiring call.** Audited `Deploy.s.sol` + steps against the emitted log: addresses, amounts, and ordering were already accurate, but four state-changing setter calls ran silently between the address prints — `vault.setLockVault`, `vault.setSafetyModule`, `lockVault.setFeeDistributor` (all in `LockVaultStep`), and `vault.setYieldAdapter` (in `YieldStep`). Added two confirmation log lines so the deploy output reflects every operation; no behavior change. Re-deploy output: `LockVault + SafetyModule wired on vault; FeeDistributor set on LockVault` / `YieldAdapter wired on vault`.
 - ✅ COMPLETE **`pnpm deploy:sepolia` no longer rewrites `deployments/31337.json`.** `scripts/generate-deployed-contracts.ts:213` iterated `Object.keys(merged)` when writing per-chain JSON, so a targeted run (e.g. chainId=84532) would re-emit every chain loaded from the existing TS file — polluting git diffs. Now tracks `updatedChains[]` inside the loop and only writes JSON for chains we actually regenerated. The TS file still gets merged output across all chains (correct — frontend needs both mappings). Verified end-to-end with a synthetic broadcast fixture: `... 84532` only writes `84532.json`, `... 31337` only writes `31337.json`, no-arg run still writes both.
 
-## Random Things I think of
+## UI/UX Improvements
 
 Grab-bag of smaller ideas. Each fleshed below with the same Time/Value/Blockers/Files/Change shape the rest of the doc uses, so they can be slotted into the alternation sequence or promoted to S-#/F-# when picked up.
 
@@ -228,7 +228,7 @@ Grab-bag of smaller ideas. Each fleshed below with the same Time/Value/Blockers/
 
 ### R-4 — Curation score (rank markets by volume + balance)
 - **Time:** 4–6 hours
-- **Value:** Medium-high. The frontend currently shows whatever Polymarket returned in sync order, which is effectively random. Surfacing deep-liquidity, near-coinflip markets makes the builder feel curated and the edge math happier (away from the 1–99% clamp).
+- **Value:** high. The frontend currently shows whatever Polymarket returned in sync order, which is effectively random. Surfacing deep-liquidity, near-coinflip markets makes the builder feel curated and the edge math happier (away from the 1–99% clamp).
 - **Blockers:** R-3 is a natural predecessor (volume comes from the Gamma payload). Can ship standalone by parsing `volume24hr` inline in sync, but R-3 first is cleaner.
 - **Files:** `packages/shared/src/polymarket/types.ts` (`CuratedMarket`), `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/polymarket/markets.ts`, `packages/shared/src/polymarket/featured.ts`
 - **Change:**
@@ -238,9 +238,23 @@ Grab-bag of smaller ideas. Each fleshed below with the same Time/Value/Blockers/
   4. Change `getActiveMarkets()` ORDER BY from `txtsourceref` to `bigcurationscore DESC, volume24hr DESC`.
   5. Add `curationScore?: number` to `CuratedMarket` so future UI can surface it.
 - **No UI work needed** — the parlay builder already renders in array order.
+  6. The category for all curated bets is just "featured"
+
+### R-4b - Pull back categories
+- populate a category for each major league sport - NBA, NFL, MLB, and NHL
+- UI change to organize the pulled back results by a specific game
+
 
 ### R-5 — Debug banner + mint + leg resolver ✅ COMPLETE
 Shipped as F-6 (see line 141). `/admin/debug` page with testnet-gated mint UI and leg resolver. Leaving this bullet here as a pointer; remove on the next doc pass.
+
+
+### R-6
+- After purchasing a ticket then navigating to the ticket screen my wallet will disconnect from the app, but Rabby will still be connected so rabby won't let me re-connect, but the app no longer has my wallet info
+### R-7
+- On shorter screens you have to scroll all the way to the bottom of the possible bets before the bet placing component will allow yo uto scroll down. Realistically if your screen is too small you should be able to scroll on the section of the screen where the bet placing component is by hovering over it and scrolling down
+### R-8
+- The toggle switch for lossless parlays is not centered within itself
 
 
 ## Bailout rules

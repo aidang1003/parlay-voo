@@ -13,6 +13,12 @@ export interface CuratedMarket {
    *  volume24hr / sibling-market info without re-fetching. Undefined for
    *  hand-curated seed entries. */
   apiPayload?: unknown;
+  /** 24h volume in USD, sourced from the Gamma event. Fuel for the curation
+   *  score; undefined for hand-curated entries that never saw a Gamma fetch. */
+  volume24hr?: number;
+  /** Precomputed curation score. Set by the sync route so the DB write is the
+   *  single source of truth, but CuratedMarket carries it for completeness. */
+  curationScore?: number;
 }
 
 export interface PolymarketMetadata {

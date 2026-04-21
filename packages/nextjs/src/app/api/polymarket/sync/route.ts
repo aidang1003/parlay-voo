@@ -99,6 +99,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
   const yesPpm = midToPpm(yesMid);
   const noPpm = midToPpm(noMid);
   const question = entry.displayTitle ?? metadata.question;
+  const curationScore = computeCurationScore(entry.volume24hr, yesPpm);
 
   await upsertMarket({
     sourceRef: entry.conditionId,
@@ -113,7 +114,25 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     earliestResolve,
     active: true,
     apiPayload: entry.apiPayload ?? null,
+    curationScore,
   });
+}
+
+/**
+ * volume24hr * 1000 - abs(ppm - 500_000). Volume (scaled) dominates past
+ * ~$500 of 24h volume; the balance penalty (0..500_000) breaks ties among
+ * low-volume markets, favoring near-coinflip odds so multipliers stay away
+ * from the 1–99% probability clamp. Null when we have no volume to anchor on
+ * — the read path sorts NULLs last.
+ */
+function computeCurationScore(
+  volume24hr: number | undefined,
+  ppm: number,
+): number | null {
+  if (volume24hr == null || !Number.isFinite(volume24hr)) return null;
+  const volumeTerm = Math.floor(volume24hr * 1_000);
+  const edgePenalty = Math.abs(ppm - 500_000);
+  return volumeTerm - edgePenalty;
 }
 
 function bookMid(book: PolymarketOrderBook): number {

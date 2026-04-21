@@ -33,6 +33,7 @@ export interface MarketRow {
   bigearliestresolve: number;
   blnactive: boolean;
   jsonbapipayload: unknown | null;
+  bigcurationscore: number | null;
   tscreatedat: string;
 }
 
@@ -59,16 +60,20 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     bigearliestresolve: Number(r.bigearliestresolve),
     blnactive: r.blnactive as boolean,
     jsonbapipayload: r.jsonbapipayload ?? null,
+    bigcurationscore: r.bigcurationscore == null ? null : Number(r.bigcurationscore),
     tscreatedat: r.tscreatedat as string,
   };
 }
 
 export async function getActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();
+  // Rank by curation score (volume24hr * 1000 - edge distance) first so
+  // high-traction, near-coinflip markets surface at the top. NULLs fall to
+  // the end — seed rows, which never get a score, cluster last.
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
-    ORDER BY txtsourceref
+    ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
@@ -80,7 +85,7 @@ export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
     SELECT * FROM tblegmapping
     WHERE blnactive = true
       AND (intyeslegid IS NOT NULL OR intnolegid IS NOT NULL)
-    ORDER BY txtsourceref
+    ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
@@ -102,6 +107,9 @@ export interface UpsertMarketInput {
    *  refresh keeps the payload fresh, but a NULL refresh won't wipe an
    *  existing payload. */
   apiPayload?: unknown | null;
+  /** Precomputed curation score (see schema.sql). Null for seed rows; they
+   *  sort last via NULLS LAST. */
+  curationScore?: number | null;
 }
 
 /**
@@ -113,16 +121,19 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
   const payloadJson =
     input.apiPayload == null ? null : JSON.stringify(input.apiPayload);
+  const curationScore = input.curationScore ?? null;
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
-      bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload
+      bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload,
+      bigcurationscore
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
       ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
-      ${payloadJson}::jsonb
+      ${payloadJson}::jsonb,
+      ${curationScore}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyeslegid        = COALESCE(tblegmapping.intyeslegid, EXCLUDED.intyeslegid),
@@ -134,7 +145,8 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       bigcutofftime      = EXCLUDED.bigcutofftime,
       bigearliestresolve = EXCLUDED.bigearliestresolve,
       blnactive          = EXCLUDED.blnactive,
-      jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload)
+      jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload),
+      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore)
   `;
 }
 

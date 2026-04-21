@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   -- volume24hr, grouping hints, etc. without re-fetching. Nullable so seed
   -- rows (and pre-migration Polymarket rows) stay legal.
   jsonbapipayload    JSONB,
+  -- Curation score for ranking in the builder: volume24hr * 1000 minus the
+  -- edge distance from a coinflip (abs(ppm - 500000)). Volume dominates past
+  -- ~$500 of 24h volume; balance breaks ties among low-volume markets. Null
+  -- for seed rows, which fall through to the end of the sort.
+  bigcurationscore   BIGINT,
   tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -109,6 +109,7 @@ export async function fetchFeaturedMarkets(
   for (const event of events) {
     const markets = event.markets ?? [];
     const eventCategory = resolveCategory(event, cfg.category);
+    const eventVolume24hr = parseNumOrUndef(event.volume24hr);
     for (const mkt of markets) {
       if (!isUsable(mkt, cfg)) continue;
       const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
@@ -122,11 +123,18 @@ export async function fetchFeaturedMarkets(
         yesPrice,
         noPrice,
         apiPayload: buildApiPayload(event, mkt),
+        volume24hr: eventVolume24hr,
       });
     }
   }
 
   return results;
+}
+
+function parseNumOrUndef(raw: string | number | undefined): number | undefined {
+  if (raw == null) return undefined;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /** Snapshot of the Gamma event + market shapes we persist. We strip the

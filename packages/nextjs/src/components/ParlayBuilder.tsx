@@ -44,7 +44,7 @@ interface DisplayLeg {
   marketTitle: string;
   /** Whether this leg has an on-chain counterpart (can be bought). */
   onChain: boolean;
-  /** Raw source reference, e.g. "poly:0xabc" or "seed:3". */
+  /** Raw source reference: polymarket conditionId (0x…) or "seed:<id>". */
   sourceRef: string;
 }
 
@@ -651,7 +651,7 @@ export function ParlayBuilder() {
                     {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
                   </span>
                 )}
-                {legs[0]?.sourceRef.startsWith("poly:") && (
+                {legs[0]?.sourceRef.startsWith("0x") && (
                   <span
                     title="Odds captured when this market was registered on-chain. They don't update mid-flight."
                     className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"

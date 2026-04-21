@@ -101,7 +101,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
   const question = entry.displayTitle ?? metadata.question;
 
   await upsertMarket({
-    sourceRef: `poly:${entry.conditionId}`,
+    sourceRef: entry.conditionId,
     source: "polymarket",
     question,
     category: entry.category,

@@ -15,8 +15,8 @@ import {CodeConstants} from "./HelperConfig.s.sol";
 ///         /admin/tickets — Phase B will pick it up and settle.
 ///
 /// Usage:
-///   pnpm resolve-leg:local   "poly:0xabc…:yes" 1
-///   pnpm resolve-leg:sepolia "poly:0xabc…:yes" 1
+///   pnpm resolve-leg:local   "0xabc…:yes" 1
+///   pnpm resolve-leg:sepolia "0xabc…:yes" 1
 ///
 /// Status enum (IOracleAdapter.LegStatus):
 ///   1 = Won, 2 = Lost, 3 = Voided.  (0 = Unresolved is rejected by the contract.)

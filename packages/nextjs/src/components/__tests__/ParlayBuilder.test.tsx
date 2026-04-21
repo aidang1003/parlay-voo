@@ -125,9 +125,9 @@ const TEST_MARKETS = [
     description: "Crypto price markets",
     category: "crypto",
     legs: [
-      { id: 0, noId: 10, question: "Will ETH hit $5000 by end of March?", sourceRef: "poly:0xeth", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 400000, noProbabilityPPM: 600000, active: true },
-      { id: 1, noId: 11, question: "Will BTC hit $150k by end of March?", sourceRef: "poly:0xbtc", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, noProbabilityPPM: 650000, active: true },
-      { id: 2, noId: 12, question: "Will SOL hit $300 by end of March?", sourceRef: "poly:0xsol", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, noProbabilityPPM: 650000, active: true },
+      { id: 0, noId: 10, question: "Will ETH hit $5000 by end of March?", sourceRef: "0xeth", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 400000, noProbabilityPPM: 600000, active: true },
+      { id: 1, noId: 11, question: "Will BTC hit $150k by end of March?", sourceRef: "0xbtc", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, noProbabilityPPM: 650000, active: true },
+      { id: 2, noId: 12, question: "Will SOL hit $300 by end of March?", sourceRef: "0xsol", cutoffTime: Math.floor(Date.now() / 1000) + 86400, earliestResolve: Math.floor(Date.now() / 1000) + 86400, probabilityPPM: 350000, noProbabilityPPM: 650000, active: true },
     ],
   },
 ];

@@ -216,14 +216,47 @@ Shipped as a single `/admin/debug` page plus a testnet-only banner; replaces the
 - ✅ COMPLETE **`pnpm deploy:sepolia` no longer rewrites `deployments/31337.json`.** `scripts/generate-deployed-contracts.ts:213` iterated `Object.keys(merged)` when writing per-chain JSON, so a targeted run (e.g. chainId=84532) would re-emit every chain loaded from the existing TS file — polluting git diffs. Now tracks `updatedChains[]` inside the loop and only writes JSON for chains we actually regenerated. The TS file still gets merged output across all chains (correct — frontend needs both mappings). Verified end-to-end with a synthetic broadcast fixture: `... 84532` only writes `84532.json`, `... 31337` only writes `31337.json`, no-arg run still writes both.
 
 ## Random Things I think of
-- Could put ABIs into the database so all developers have access to past deployments. Most useful when our work transitions to making front end changes on the same smart contracts.
-- Database doesn't need "poly:" prepending on the PK column
-- Postgres jsonb data type allows us to store the entire API call in json, which can later be retrieved with indexes. Key sell here is that this greatly reduces read times
-- **Curate the betting data.** The market list is currently whatever Polymarket hands back in sync order — we should rank it. Two signals to start:
-  1. **Volume first.** Higher-volume markets float to the top of the list. Deep liquidity = tighter odds = more confidence the multiplier we quote is real.
-  2. **Prefer balanced markets.** Legs with YES/NO multipliers closer to 2x on both sides (i.e. probabilities near 50/50) are better parlay material — more interesting to build around, less likely to be a foregone conclusion, and the edge math behaves better away from the 1–99% clamp. Rank down heavily skewed markets (e.g. 95/5) even if they have volume.
-  - Implementation sketch: add a `curationScore` on `CuratedMarket` computed at sync time from `volume` + `abs(ppm - 500_000)` (distance from coinflip), sort the `/api/markets` response by it, tie-break on volume. No UI change needed; the frontend already renders in array order.
-- Full debugging banner that launches when you're deployed to test chains. Full token minting UI and leg resolver.
+
+Grab-bag of smaller ideas. Each fleshed below with the same Time/Value/Blockers/Files/Change shape the rest of the doc uses, so they can be slotted into the alternation sequence or promoted to S-#/F-# when picked up.
+
+### R-1 — ABIs in Postgres (shared deployment registry)
+- **Time:** 5–8 hours
+- **Value:** Low now, medium later. Bites once we have multiple devs making frontend-only changes against a shared deploy — today everyone regenerates `deployedContracts.ts` locally and re-commits, which creates spurious diffs. A DB-backed registry also gives us history across deploys (useful for verifying old tickets against the ABI they were minted under).
+- **Blockers:** None. Neon Postgres + `lib/db/client.ts` already wired.
+- **Files:** `scripts/generate-deployed-contracts.ts`, `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/lib/db/client.ts`, `packages/nextjs/src/lib/hooks/useDeployedContract.ts`
+- **Change:** add `tbcontractabi (name TEXT, chainid INT, deployedat TIMESTAMPTZ, address TEXT, abi JSONB, PRIMARY KEY (chainid, name, deployedat))`. Extend `generate-deployed-contracts.ts` to `INSERT` each contract alongside the file write (keep the TS file — it's the zero-latency path). Add a DB fallback in `useDeployedContract` for historical lookups (e.g. reading an old ticket's engine ABI).
+- **Non-goal:** do NOT replace `deployedContracts.ts` — it's the fast path for build-time types and SSR. DB is a secondary mirror.
+
+### R-2 — Drop `poly:` prefix from `txtsourceref` PK ✅ COMPLETE
+- **Shipped:** sync writes the raw conditionId as PK; `stripPolyPrefix()` + its 7 tests deleted. `parsePolySourceRef()` redefined as a 0x-hex-64 shape sniffer so `/api/quote`, `/api/quote-sign`, and `lib/mcp/tools.ts` keep working without a `source` field on `Leg`. `ParlayBuilder.tsx`'s "Odds locked" badge now checks `sourceRef.startsWith("0x")`.
+- **Migration:** `packages/nextjs/src/lib/db/migrations/2026-04-20-drop-poly-prefix.sql` — one-shot idempotent `UPDATE ... WHERE txtsourceref LIKE 'poly:%'`. Run against Neon in each env; or, since `schema.sql` is drop-and-recreate, a fresh `/api/db/init` + `/api/polymarket/sync` also lands on the new format (at the cost of wiping `tbpolymarketresolution`).
+- **Files touched:** `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/polymarket/markets.ts`, `packages/nextjs/src/app/api/settlement/runner.ts`, `packages/nextjs/src/app/api/settlement/run/lib.ts`, `packages/nextjs/src/app/api/settlement/run/__tests__/lib.test.ts`, `packages/nextjs/src/components/ParlayBuilder.tsx`, `packages/nextjs/src/components/__tests__/ParlayBuilder.test.tsx`, `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/lib/db/migrations/2026-04-20-drop-poly-prefix.sql`, `packages/foundry/src/core/ParlayEngine.sol` (doc comment only), `packages/foundry/script/ResolveLeg.s.sol` (doc comment only).
+- **Gate:** `pnpm typecheck` + `pnpm test:web` (269 passing) + `pnpm build` green. `forge test` not run in this sandbox — solidity edits were comment-only, no functional change.
+- **Caveat:** if we ever add a second market source this decision reverses. Acceptable — a second source is a bigger refactor anyway and we'd pick a new scheme then. Foundry unit tests that use `"poly:a"` as arbitrary string sourceRef fixtures (`SignedQuote.t.sol`) were left alone — they're valid test data regardless of the off-chain convention.
+
+### R-3 — Store raw Gamma payloads in JSONB
+- **Time:** 6–10 hours
+- **Value:** Medium. Unlocks two things: (a) cheap backfills when we want a new field (volume, liquidity, tags) without re-syncing, (b) a single source of truth for the LLM risk agent and MCP surface, which currently has to re-call Polymarket for anything past `ppm`. GIN indexes on specific JSON paths keep reads fast.
+- **Blockers:** None, but pairs naturally with R-4 (curation needs `volume`, which this exposes for free).
+- **Files:** `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/db/client.ts`, `packages/shared/src/polymarket/featured.ts`
+- **Change:** add `jsonbapipayload JSONB` to `tblegmapping`. Capture the full Gamma event object in the sync route; write it alongside the scalar columns we already extract (`yesProbabilityPpm`, `noProbabilityPpm`, `cutoffTime`). Keep scalars — they're the hot-path read. Create a GIN index on `jsonbapipayload jsonb_path_ops` so future field lookups (e.g. `volume24hr`, `tags`) stay O(log n).
+- **Watch:** JSONB adds ~1–3 KB per row. At current ~50 markets that's trivial; worth re-checking if we scale the synced universe to 10k+.
+
+### R-4 — Curation score (rank markets by volume + balance)
+- **Time:** 4–6 hours
+- **Value:** Medium-high. The frontend currently shows whatever Polymarket returned in sync order, which is effectively random. Surfacing deep-liquidity, near-coinflip markets makes the builder feel curated and the edge math happier (away from the 1–99% clamp).
+- **Blockers:** R-3 is a natural predecessor (volume comes from the Gamma payload). Can ship standalone by parsing `volume24hr` inline in sync, but R-3 first is cleaner.
+- **Files:** `packages/shared/src/polymarket/types.ts` (`CuratedMarket`), `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/polymarket/markets.ts`, `packages/shared/src/polymarket/featured.ts`
+- **Change:**
+  1. Parse `volume24hr` (string → number) during featured fetch.
+  2. Add `bigcurationscore BIGINT` to `tblegmapping`.
+  3. Compute at sync time: `score = floor(volume * 1e3) - abs(ppm - 500_000)`. Volume dominates; balance penalty caps at 500k which is ~500 USD of volume. Tune once we see real data.
+  4. Change `getActiveMarkets()` ORDER BY from `txtsourceref` to `bigcurationscore DESC, volume24hr DESC`.
+  5. Add `curationScore?: number` to `CuratedMarket` so future UI can surface it.
+- **No UI work needed** — the parlay builder already renders in array order.
+
+### R-5 — Debug banner + mint + leg resolver ✅ COMPLETE
+Shipped as F-6 (see line 141). `/admin/debug` page with testnet-gated mint UI and leg resolver. Leaving this bullet here as a pointer; remove on the next doc pass.
 
 
 ## Bailout rules

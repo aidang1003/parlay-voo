@@ -32,11 +32,10 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
     } else {
       // polymarket: needs no-side prob to render the No button
       if (row.intnoprobppm == null) continue;
-      const conditionId = row.txtsourceref.replace(/^poly:/, "");
       markets.push({
         id: row.txtsourceref,
         title: row.txtquestion,
-        description: `Polymarket market ${conditionId.slice(0, 10)}...`,
+        description: `Polymarket market ${row.txtsourceref.slice(0, 10)}...`,
         category: row.txtcategory,
         legs: [rowToLeg(row, nextSynthetic)],
       });
@@ -64,10 +63,12 @@ function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
   return leg;
 }
 
+/** Polymarket sourceRefs are the raw conditionId: a 0x-prefixed 32-byte hex.
+ *  Seed refs look like `seed:<id>`. Shape-sniff so callers can branch without
+ *  threading the `txtsource` column through every surface. */
 export function parsePolySourceRef(sourceRef: string): { conditionId: string } | null {
-  const m = sourceRef.match(/^poly:([^:]+)$/);
-  if (!m) return null;
-  return { conditionId: m[1] };
+  if (!/^0x[0-9a-fA-F]{64}$/.test(sourceRef)) return null;
+  return { conditionId: sourceRef };
 }
 
 /** Convert a Polymarket mid-price (0..1) to clamped PPM. */

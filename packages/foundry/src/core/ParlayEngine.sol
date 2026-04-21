@@ -65,7 +65,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
 
     /// @notice One leg of a signed quote.
     /// @param sourceRef Stable identifier of the underlying market
-    ///        (e.g. "poly:0xabc..." for Polymarket or "seed:3").
+    ///        (e.g. "0xabc..." conditionId for Polymarket or "seed:3").
     /// @param outcome Bettor's side. 0x01 = yes, 0x02 = no.
     /// @param probabilityPPM Yes-side implied probability (PPM). The engine
     ///        applies the No-side complement internally when outcome == 0x02.

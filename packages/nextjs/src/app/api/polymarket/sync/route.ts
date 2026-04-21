@@ -115,6 +115,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     active: true,
     apiPayload: entry.apiPayload ?? null,
     curationScore,
+    gameGroup: entry.gameGroup ?? null,
   });
 }
 

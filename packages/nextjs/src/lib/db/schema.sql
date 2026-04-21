@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   -- ~$500 of 24h volume; balance breaks ties among low-volume markets. Null
   -- for seed rows, which fall through to the end of the sort.
   bigcurationscore   BIGINT,
+  -- Cluster key for sport events ("Lakers vs. Warriors — Apr 22"). Shared
+  -- across every market in one game so the builder can render them together.
+  -- Null for non-sport markets — those render ungrouped.
+  txtgamegroup       TEXT,
   tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

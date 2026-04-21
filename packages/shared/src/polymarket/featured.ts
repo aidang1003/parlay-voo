@@ -108,15 +108,18 @@ export async function fetchFeaturedMarkets(
 
   for (const event of events) {
     const markets = event.markets ?? [];
-    const eventCategory = resolveCategory(event, cfg.category);
+    const fallbackCategory = resolveCategory(event, cfg.category);
     const eventVolume24hr = parseNumOrUndef(event.volume24hr);
+    const sport = classifySport(event);
+    const resolvedCategory = sport.category ?? fallbackCategory;
+    const gameGroup = sport.gameGroup ?? undefined;
     for (const mkt of markets) {
       if (!isUsable(mkt, cfg)) continue;
       const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
 
       results.push({
         conditionId: mkt.conditionId,
-        category: eventCategory,
+        category: resolvedCategory,
         displayTitle: mkt.groupItemTitle
           ? `${event.title}: ${mkt.groupItemTitle}`
           : mkt.question,
@@ -124,11 +127,51 @@ export async function fetchFeaturedMarkets(
         noPrice,
         apiPayload: buildApiPayload(event, mkt),
         volume24hr: eventVolume24hr,
+        gameGroup,
       });
     }
   }
 
   return results;
+}
+
+/**
+ * Derive a sport category + game cluster key from Gamma event metadata.
+ *
+ * Category matches on NBA/NFL/MLB/NHL tokens in the title, slug, or tags so a
+ * negRisk event and its N sibling markets land in the same bucket. The game
+ * group is the human-readable event title — shared across sibling markets,
+ * and already how users think of a game ("Lakers vs. Warriors — Apr 22").
+ *
+ * Returns `null` for both fields when the event isn't a major-sport match,
+ * so the caller can fall through to its general category resolution.
+ */
+export function classifySport(event: GammaEvent): {
+  category: "nba" | "nfl" | "mlb" | "nhl" | null;
+  gameGroup: string | null;
+} {
+  const haystack = [
+    event.title,
+    event.slug,
+    event.category,
+    ...(event.tags ?? []).flatMap((t) => [t.label, t.slug]),
+  ]
+    .filter((s): s is string => typeof s === "string" && s.length > 0)
+    .join(" ")
+    .toLowerCase();
+
+  let category: "nba" | "nfl" | "mlb" | "nhl" | null = null;
+  if (/\bnba\b/.test(haystack) || /national basketball/.test(haystack)) category = "nba";
+  else if (/\bnfl\b/.test(haystack) || /national football/.test(haystack)) category = "nfl";
+  else if (/\bmlb\b/.test(haystack) || /major league baseball/.test(haystack)) category = "mlb";
+  else if (/\bnhl\b/.test(haystack) || /national hockey/.test(haystack)) category = "nhl";
+
+  const gameGroup =
+    category && typeof event.title === "string" && event.title.trim().length > 0
+      ? event.title.trim()
+      : null;
+
+  return { category, gameGroup };
 }
 
 function parseNumOrUndef(raw: string | number | undefined): number | undefined {

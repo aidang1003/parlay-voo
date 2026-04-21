@@ -19,6 +19,9 @@ export interface CuratedMarket {
   /** Precomputed curation score. Set by the sync route so the DB write is the
    *  single source of truth, but CuratedMarket carries it for completeness. */
   curationScore?: number;
+  /** Event-level cluster key for sport events ("Lakers vs. Warriors — Apr 22").
+   *  Shared across all markets in one game so the builder can group them. */
+  gameGroup?: string;
 }
 
 export interface PolymarketMetadata {

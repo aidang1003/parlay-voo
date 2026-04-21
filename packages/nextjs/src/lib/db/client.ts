@@ -34,6 +34,7 @@ export interface MarketRow {
   blnactive: boolean;
   jsonbapipayload: unknown | null;
   bigcurationscore: number | null;
+  txtgamegroup: string | null;
   tscreatedat: string;
 }
 
@@ -61,6 +62,7 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     blnactive: r.blnactive as boolean,
     jsonbapipayload: r.jsonbapipayload ?? null,
     bigcurationscore: r.bigcurationscore == null ? null : Number(r.bigcurationscore),
+    txtgamegroup: (r.txtgamegroup as string | null | undefined) ?? null,
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -110,6 +112,8 @@ export interface UpsertMarketInput {
   /** Precomputed curation score (see schema.sql). Null for seed rows; they
    *  sort last via NULLS LAST. */
   curationScore?: number | null;
+  /** Cluster key for sport events. Null for non-sport markets. */
+  gameGroup?: string | null;
 }
 
 /**
@@ -122,18 +126,19 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const payloadJson =
     input.apiPayload == null ? null : JSON.stringify(input.apiPayload);
   const curationScore = input.curationScore ?? null;
+  const gameGroup = input.gameGroup ?? null;
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
       bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload,
-      bigcurationscore
+      bigcurationscore, txtgamegroup
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
       ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
       ${payloadJson}::jsonb,
-      ${curationScore}
+      ${curationScore}, ${gameGroup}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyeslegid        = COALESCE(tblegmapping.intyeslegid, EXCLUDED.intyeslegid),
@@ -146,7 +151,8 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       bigearliestresolve = EXCLUDED.bigearliestresolve,
       blnactive          = EXCLUDED.blnactive,
       jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload),
-      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore)
+      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore),
+      txtgamegroup       = COALESCE(EXCLUDED.txtgamegroup, tblegmapping.txtgamegroup)
   `;
 }
 

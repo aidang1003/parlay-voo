@@ -173,6 +173,10 @@ interface RowState {
 function LegResolverSection() {
   const { legs, isLoading, refetch } = useOpenLegs();
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
+  // Lock every resolve button while any row is in flight. Concurrent POSTs
+  // land in separate Vercel lambdas, all reading the same pending nonce from
+  // Alchemy, which races into "replacement transaction underpriced".
+  const anyPending = Object.values(rowState).some((s) => s.pending);
 
   async function resolve(leg: OpenLeg, status: ResolveStatus) {
     const key = leg.legId.toString();
@@ -274,13 +278,13 @@ function LegResolverSection() {
                     <td className="px-4 py-3 text-xs text-gray-500">{fmtTime(Number(leg.cutoffTime))}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <ResolveButton onClick={() => resolve(leg, 1)} disabled={state?.pending} tone="yes">
+                        <ResolveButton onClick={() => resolve(leg, 1)} disabled={anyPending} tone="yes">
                           YES
                         </ResolveButton>
-                        <ResolveButton onClick={() => resolve(leg, 2)} disabled={state?.pending} tone="no">
+                        <ResolveButton onClick={() => resolve(leg, 2)} disabled={anyPending} tone="no">
                           NO
                         </ResolveButton>
-                        <ResolveButton onClick={() => resolve(leg, 3)} disabled={state?.pending} tone="void">
+                        <ResolveButton onClick={() => resolve(leg, 3)} disabled={anyPending} tone="void">
                           VOID
                         </ResolveButton>
                       </div>

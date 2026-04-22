@@ -92,6 +92,53 @@ Naming per the project's `tb` table / all-lowercase column convention (see `docs
 | `/api/db/init` | POST | `Bearer $CRON_SECRET` | `{ applied: boolean, seeded: number }` |
 | `/api/markets` | GET | none | `Market[]` — merged seed + curated Polymarket |
 
+## Discovery sources
+
+`/api/polymarket/sync` fans out in parallel via `Promise.allSettled`:
+
+```
+fetchFeaturedMarkets(opts)          → /events?order=volume24hr&ascending=false&limit=10&active=true&closed=false
+fetchSportEvents(tag, opts)         → same URL + &tag_slug=<tag>
+                                      called for tag in ["nba","nfl","mlb","nhl"]
+CURATED                             → static list in packages/shared/src/polymarket/curated.ts
+```
+
+Dedup key: `conditionId`. Iteration order `[...CURATED, ...remoteBatches.flat()]` so CURATED wins ties. One failed source returns `[]` and does not abort the run.
+
+## Curation score (tblegmapping.bigcurationscore)
+
+Computed in `packages/nextjs/src/app/api/polymarket/sync/route.ts :: computeCurationScore`. `BIGINT`, NULL for seed rows.
+
+```
+score = volumeScore + balanceScore + urgencyScore          // max ≈ 3000
+
+volumeScore    = min(1000, max(0, floor(log10(max(volume24hr, 1)) * 150)))
+balanceScore   = max(0,   floor(1000 * (1 - abs(ppm - 500_000) / 500_000)))
+hoursToResolve = max(0,   (cutoffSec - nowSec) / 3600)
+urgencyScore   = max(0,   floor(1000 * (1 - hoursToResolve / URGENCY_WINDOW_HOURS)))
+
+URGENCY_WINDOW_HOURS = 168
+```
+
+Null iff `volume24hr` is missing or non-finite. Read path: `ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref`.
+
+## Sport classification & game grouping
+
+`classifySport(event)` in `packages/shared/src/polymarket/featured.ts`:
+
+```
+haystack = lowercase(title + " " + slug + " " + category + " " + tag.label + " " + tag.slug for tag in tags)
+category = match first of:
+  /\bnba\b/ | /national basketball/ → "nba"
+  /\bnfl\b/ | /national football/   → "nfl"
+  /\bmlb\b/ | /major league baseball/ → "mlb"
+  /\bnhl\b/ | /national hockey/     → "nhl"
+  else                              → null
+gameGroup = category ? event.title.trim() : null
+```
+
+Written to `tblegmapping.txtgamegroup` (TEXT, nullable). Sibling markets with the same `gameGroup` render under one header in `ParlayBuilder.tsx :: groupedByGame`.
+
 ## Invariants
 
 1. One `leg_mapping` row per `(conditionId, side)` ever — enforced by primary key.

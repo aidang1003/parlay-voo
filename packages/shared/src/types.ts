@@ -49,9 +49,6 @@ export interface Market {
   legs: Leg[];
   category: string;
   imageUrl?: string;
-  /** Cluster key when this market is part of a multi-market game event
-   *  (NBA/NFL/MLB/NHL). Shared across sibling markets so the builder can
-   *  render them together under a game header. */
   gameGroup?: string;
 }
 

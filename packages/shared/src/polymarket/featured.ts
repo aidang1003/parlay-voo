@@ -1,14 +1,5 @@
 import type { CuratedMarket, PolymarketCategory } from "./types.js";
 
-/**
- * Discover trending Polymarket events via the Gamma API and return them
- * as CuratedMarket entries ready for the sync pipeline → Neon DB.
- *
- * The Gamma `/events` endpoint supports ordering by volume24hr, liquidity,
- * etc. We fetch the top active events and extract individual binary markets
- * from each one.
- */
-
 const GAMMA_BASE = "https://gamma-api.polymarket.com";
 
 // ── Gamma response shapes ────────────────────────────────────────────────
@@ -83,18 +74,31 @@ const DEFAULTS: Required<FeaturedOptions> = {
 
 // ── Public API ───────────────────────────────────────────────────────────
 
-/**
- * Fetch the top trending Polymarket events by 24h volume and return
- * the individual binary markets as CuratedMarket entries.
- *
- * Each market inside a multi-outcome event (negRisk group) is returned
- * as its own entry — the sync pipeline registers yes/no sides independently.
- */
 export async function fetchFeaturedMarkets(
   opts?: FeaturedOptions,
 ): Promise<CuratedMarket[]> {
   const cfg = { ...DEFAULTS, ...opts };
-  const url = buildEventsUrl(cfg);
+  return fetchEvents(cfg, undefined);
+}
+
+/**
+ * Fetch markets for a specific Gamma tag (e.g. "nba", "nfl"). Lets the sync
+ * route pull sport-specific inventory beyond whatever happens to crack the
+ * global 24h-volume leaderboard.
+ */
+export async function fetchSportEvents(
+  tagSlug: string,
+  opts?: FeaturedOptions,
+): Promise<CuratedMarket[]> {
+  const cfg = { ...DEFAULTS, ...opts };
+  return fetchEvents(cfg, tagSlug);
+}
+
+async function fetchEvents(
+  cfg: Required<FeaturedOptions>,
+  tagSlug: string | undefined,
+): Promise<CuratedMarket[]> {
+  const url = buildEventsUrl(cfg, tagSlug);
 
   const res = await fetch(url, {
     headers: { accept: "application/json" },
@@ -135,17 +139,6 @@ export async function fetchFeaturedMarkets(
   return results;
 }
 
-/**
- * Derive a sport category + game cluster key from Gamma event metadata.
- *
- * Category matches on NBA/NFL/MLB/NHL tokens in the title, slug, or tags so a
- * negRisk event and its N sibling markets land in the same bucket. The game
- * group is the human-readable event title — shared across sibling markets,
- * and already how users think of a game ("Lakers vs. Warriors — Apr 22").
- *
- * Returns `null` for both fields when the event isn't a major-sport match,
- * so the caller can fall through to its general category resolution.
- */
 export function classifySport(event: GammaEvent): {
   category: "nba" | "nfl" | "mlb" | "nhl" | null;
   gameGroup: string | null;
@@ -180,10 +173,8 @@ function parseNumOrUndef(raw: string | number | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Snapshot of the Gamma event + market shapes we persist. We strip the
- *  sibling `markets` array off the event copy so a negRisk group with N
- *  markets doesn't balloon each row to N× the payload. */
 function buildApiPayload(event: GammaEvent, market: GammaMarket): Record<string, unknown> {
+  // Strip siblings off the event copy so N-market groups don't balloon each row.
   const { markets: _siblings, ...eventMeta } = event;
   return {
     event: eventMeta,
@@ -192,8 +183,6 @@ function buildApiPayload(event: GammaEvent, market: GammaMarket): Record<string,
   };
 }
 
-/** Derive a category slug from Gamma event metadata. Falls back to the
- *  provided default if the event carries no usable tag/category. */
 function resolveCategory(event: GammaEvent, fallback: string): string {
   if (event.category && event.category.trim()) return event.category.toLowerCase();
   const firstTag = event.tags?.find((t) => t?.slug || t?.label);
@@ -204,7 +193,6 @@ function resolveCategory(event: GammaEvent, fallback: string): string {
   return fallback;
 }
 
-/** Extract [yes, no] prices (0..1 floats) from Gamma outcomePrices. */
 function parsePrices(raw: string[] | string): [number | undefined, number | undefined] {
   const arr = parseJsonField<string[]>(raw);
   if (!Array.isArray(arr) || arr.length < 2) return [undefined, undefined];
@@ -213,15 +201,11 @@ function parsePrices(raw: string[] | string): [number | undefined, number | unde
   return [Number.isFinite(yes) ? yes : undefined, Number.isFinite(no) ? no : undefined];
 }
 
-/**
- * Convenience: fetch a single top event (by 24h volume) and return its
- * markets as CuratedMarket entries — useful for a quick smoke test.
- */
 export async function fetchTopEvent(
   opts?: Omit<FeaturedOptions, "limit">,
 ): Promise<{ event: Pick<GammaEvent, "id" | "title" | "slug" | "volume24hr">; markets: CuratedMarket[] }> {
   const cfg = { ...DEFAULTS, ...opts, limit: 1 };
-  const url = buildEventsUrl(cfg);
+  const url = buildEventsUrl(cfg, undefined);
 
   const res = await fetch(url, {
     headers: { accept: "application/json" },
@@ -265,7 +249,10 @@ export async function fetchTopEvent(
 
 // ── Internals ────────────────────────────────────────────────────────────
 
-function buildEventsUrl(cfg: Required<FeaturedOptions>): string {
+function buildEventsUrl(
+  cfg: Required<FeaturedOptions>,
+  tagSlug: string | undefined,
+): string {
   const base = cfg.gammaUrl.replace(/\/$/, "");
   const params = new URLSearchParams({
     limit: String(cfg.limit),
@@ -274,6 +261,7 @@ function buildEventsUrl(cfg: Required<FeaturedOptions>): string {
     order: "volume24hr",
     ascending: "false",
   });
+  if (tagSlug) params.set("tag_slug", tagSlug);
   return `${base}/events?${params}`;
 }
 

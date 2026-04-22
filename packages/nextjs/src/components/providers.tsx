@@ -19,12 +19,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// @bug R-6: after a ticket purchase + client-side navigation to /tickets, wagmi
-// was dropping the connector reference even though Rabby still reported the
-// site as connected — which left the user stuck (Rabby treats the site as
-// already connected, so ConnectKit's "Connect" flow is a no-op). Calling
-// reconnect() once on mount rehydrates the stored connection and keeps the
-// account state stable across navigations.
 function WagmiReconnect() {
   useEffect(() => {
     void reconnect(config);

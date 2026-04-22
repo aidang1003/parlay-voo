@@ -42,8 +42,6 @@ interface DisplayLeg {
   expiresAt: number;
   category: string;
   marketTitle: string;
-  /** Sibling-market cluster key for sport events. Empty string when the
-   *  market isn't part of a game (non-sport, seed, uncategorized). */
   gameGroup: string;
   /** Whether this leg has an on-chain counterpart (can be bought). */
   onChain: boolean;
@@ -87,7 +85,7 @@ interface RiskAdviceData {
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const CATEGORY_LABELS: Record<string, string> = {
-  all: "All",
+  all: "Featured",
   crypto: "Crypto",
   defi: "DeFi",
   nft: "NFT",
@@ -379,10 +377,6 @@ export function ParlayBuilder() {
     }
   }, [activeCategory, allLegs.length, filteredLegs.length, setActiveCategory]);
 
-  // Two-level grouping: game cluster → market. Filtered legs preserve the
-  // curation-score order from the API (see R-4), so the first time we see a
-  // game or a market title pins its insertion spot. Legs without a gameGroup
-  // land under a single "" cluster and render without a game header.
   const groupedByGame = useMemo(() => {
     const games: {
       gameGroup: string;
@@ -614,7 +608,7 @@ export function ParlayBuilder() {
                 : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
             }`}
           >
-            All
+            Featured
           </button>
           {availableCategories.map((cat) => (
             <button
@@ -768,10 +762,6 @@ export function ParlayBuilder() {
 
       {/* Ticket builder / summary panel */}
       <div className="lg:col-span-2" id="parlay-panel">
-        {/* @bug R-7: on short viewports the sticky bet panel was taller than the
-            visible area, so reaching its bottom required scrolling the whole
-            markets list. Bounding the height + overflow-y-auto gives the panel
-            its own scroll context, independent of the markets column. */}
         <div className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
           {/* Multiplier climb */}
           <div id="parlay-multiplier">
@@ -820,11 +810,6 @@ export function ParlayBuilder() {
                     instead of USDC. Wins lock VOO; losses just burn credit.
                   </p>
                 </div>
-                {/* @bug R-8: toggle knob travels translate-x-5 (20px) when ON,
-                    which leaves a 4px gap on the right vs. 2px on the left —
-                    reads as off-center. translate-x-[22px] makes the on-state
-                    gap match the off-state gap so the knob sits symmetrically
-                    in the track. */}
                 <button
                   type="button"
                   role="switch"
@@ -838,8 +823,8 @@ export function ParlayBuilder() {
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                      useLossless ? "translate-x-[22px]" : "translate-x-0.5"
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                      useLossless ? "right-0.5" : "left-0.5"
                     }`}
                   />
                 </button>

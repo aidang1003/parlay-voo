@@ -69,9 +69,6 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
 
 export async function getActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();
-  // Rank by curation score (volume24hr * 1000 - edge distance) first so
-  // high-traction, near-coinflip markets surface at the top. NULLs fall to
-  // the end — seed rows, which never get a score, cluster last.
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
@@ -104,15 +101,8 @@ export interface UpsertMarketInput {
   cutoffTime: number;
   earliestResolve: number;
   active?: boolean;
-  /** Raw Gamma event payload to stash alongside the scalars. Null is fine —
-   *  seed rows have nothing to carry. On conflict, non-null updates win so a
-   *  refresh keeps the payload fresh, but a NULL refresh won't wipe an
-   *  existing payload. */
   apiPayload?: unknown | null;
-  /** Precomputed curation score (see schema.sql). Null for seed rows; they
-   *  sort last via NULLS LAST. */
   curationScore?: number | null;
-  /** Cluster key for sport events. Null for non-sport markets. */
   gameGroup?: string | null;
 }
 

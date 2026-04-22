@@ -48,6 +48,30 @@ Settlement is handled by the unified `/api/settlement/run` cron, which picks up 
    ```
 4. Open a PR. Once merged, the next sync run registers it on-chain.
 
+## Market discovery
+
+Three sources feed each sync run, deduped by `conditionId`:
+
+- **CURATED** — hand-picked entries in `curated.ts`. PR-gated. Listed first so they win any dedup collision.
+- **Featured** — top Gamma events by 24h volume (`/events?order=volume24hr`). Global leaderboard; captures whatever is trending.
+- **Per-sport** — one Gamma call per major-league tag (`nba`, `nfl`, `mlb`, `nhl`). Sport inventory isn't gated on cracking the global top-10, so in-progress games surface even when crypto/politics dominates volume.
+
+Fans out in parallel via `Promise.allSettled` — one source failing returns an empty batch, the rest still land.
+
+## Curation score
+
+Ranks markets in the builder's **Featured** pill and per-category pages. Three normalized components summed, each clamped to `[0, 1000]`, so none can dominate on its own. Stored in `tblegmapping.bigcurationscore`, recomputed every sync run (so the time term stays fresh modulo cron cadence). NULL for seed rows — they sort last via `ORDER BY ... DESC NULLS LAST`.
+
+- **Volume** — `log10(volume24hr) × 150`, capped at 1000. $1k ≈ 450, $10k ≈ 600, $1M ≈ 900, ≥$10M saturates. Log scale so a $100M market doesn't crowd out a $50k market 2000× its score.
+- **Balance** — `1000 × (1 − |ppm − 500k| / 500k)`. 1000 at a coinflip, 0 at pure 0/100. Keeps parlay multipliers off the 1%/99% probability clamp where they'd degenerate.
+- **Urgency** — `1000 × (1 − hoursToResolve / 168)`, floor 0. Resolving now → 1000, ≥ 7 days away → 0. Prevents the Featured page from being all week-plus-out settlements.
+
+## Game grouping
+
+Sport events (NBA / NFL / MLB / NHL) share a `gameGroup` key across their sibling markets — it's the Gamma event title (e.g. "Lakers vs. Warriors — Apr 22"). The builder renders all markets under one game under a single header so the UI matches how users think about games rather than individual prop markets.
+
+Classification runs off the event's title + slug + tag labels (regex on `\bnba\b`, `national basketball`, etc.). No sport match → `gameGroup` is NULL and the market renders ungrouped.
+
 ## Running sync locally
 
 Requires `DATABASE_URL`, `CRON_SECRET`, `DEPLOYER_PRIVATE_KEY` in `.env.local`, and the dev server running (`pnpm dev`).

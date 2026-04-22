@@ -49,6 +49,7 @@ export interface Market {
   legs: Leg[];
   category: string;
   imageUrl?: string;
+  gameGroup?: string;
 }
 
 export interface Ticket {

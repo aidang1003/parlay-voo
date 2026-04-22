@@ -6,5 +6,5 @@ export * from "./seed.js";
 export * from "./chains.js";
 export * from "./polymarket/types.js";
 export { CURATED } from "./polymarket/curated.js";
-export { fetchFeaturedMarkets, fetchTopEvent } from "./polymarket/featured.js";
+export { fetchFeaturedMarkets, fetchSportEvents, fetchTopEvent } from "./polymarket/featured.js";
 export type { FeaturedOptions } from "./polymarket/featured.js";

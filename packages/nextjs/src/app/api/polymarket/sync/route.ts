@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   CURATED,
   fetchFeaturedMarkets,
+  fetchSportEvents,
   type CuratedMarket,
   type PolymarketOrderBook,
 } from "@parlayvoo/shared";
@@ -13,41 +14,45 @@ import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SPORT_TAGS = ["nba", "nfl", "mlb", "nhl"] as const;
+
 /**
  * GET /api/polymarket/sync
  *
- * Syncs Polymarket markets into leg_mapping from two sources:
- *   1. CURATED -- hand-picked markets (curated.ts)
- *   2. Featured -- top trending markets by 24h volume (featured.ts / Gamma API)
+ * Upserts markets from three sources, deduped by conditionId:
+ *   1. CURATED — hand-picked markets
+ *   2. Featured — top global events by 24h volume
+ *   3. Per-sport — NBA/NFL/MLB/NHL tag queries, so sport inventory isn't
+ *      gated on cracking the global volume leaderboard
  *
- * Deduplicates by conditionId so a market in both lists is only synced once.
- *
- * Re-runs are idempotent: existing rows get their probability/cutoff refreshed
- * but their on-chain leg ids are preserved (see upsertMarket COALESCE).
+ * Re-runs are idempotent: existing rows get probability/cutoff/score
+ * refreshed but their on-chain leg ids are preserved (upsertMarket COALESCE).
  */
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const gammaUrl = process.env.POLYMARKET_GAMMA_URL ?? "https://gamma-api.polymarket.com";
   const poly = new PolymarketClient({
-    gammaUrl: process.env.POLYMARKET_GAMMA_URL ?? "https://gamma-api.polymarket.com",
+    gammaUrl,
     clobUrl: process.env.POLYMARKET_CLOB_URL ?? "https://clob.polymarket.com",
   });
 
-  // Merge curated + featured, dedup by conditionId
-  let featured: CuratedMarket[] = [];
-  try {
-    featured = await fetchFeaturedMarkets({
-      gammaUrl: process.env.POLYMARKET_GAMMA_URL ?? "https://gamma-api.polymarket.com",
-    });
-  } catch (e) {
-    console.warn("[polymarket/sync] Featured fetch failed, continuing with curated only:", e);
-  }
+  const fetchResults = await Promise.allSettled([
+    fetchFeaturedMarkets({ gammaUrl }),
+    ...SPORT_TAGS.map((tag) => fetchSportEvents(tag, { gammaUrl })),
+  ]);
+  const remoteBatches = fetchResults.map((r, i) => {
+    if (r.status === "fulfilled") return r.value;
+    const label = i === 0 ? "featured" : SPORT_TAGS[i - 1];
+    console.warn(`[polymarket/sync] ${label} fetch failed:`, r.reason);
+    return [] as CuratedMarket[];
+  });
 
   const seen = new Set<string>();
   const allMarkets: CuratedMarket[] = [];
-  for (const entry of [...CURATED, ...featured]) {
+  for (const entry of [...CURATED, ...remoteBatches.flat()]) {
     if (seen.has(entry.conditionId)) continue;
     seen.add(entry.conditionId);
     allMarkets.push(entry);
@@ -99,6 +104,12 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
   const yesPpm = midToPpm(yesMid);
   const noPpm = midToPpm(noMid);
   const question = entry.displayTitle ?? metadata.question;
+  const curationScore = computeCurationScore({
+    volume24hr: entry.volume24hr,
+    ppm: yesPpm,
+    cutoffSec,
+    nowSec,
+  });
 
   await upsertMarket({
     sourceRef: entry.conditionId,
@@ -112,7 +123,39 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     cutoffTime: cutoffSec,
     earliestResolve,
     active: true,
+    apiPayload: entry.apiPayload ?? null,
+    curationScore,
+    gameGroup: entry.gameGroup ?? null,
   });
+}
+
+// Curation score formula + rationale: docs/POLYMARKET.md § Curation score
+const URGENCY_WINDOW_HOURS = 168;
+
+function computeCurationScore(args: {
+  volume24hr: number | undefined;
+  ppm: number;
+  cutoffSec: number;
+  nowSec: number;
+}): number | null {
+  const { volume24hr, ppm, cutoffSec, nowSec } = args;
+  if (volume24hr == null || !Number.isFinite(volume24hr)) return null;
+
+  const volumeScore = Math.min(
+    1000,
+    Math.max(0, Math.floor(Math.log10(Math.max(volume24hr, 1)) * 150)),
+  );
+  const balanceScore = Math.max(
+    0,
+    Math.floor(1000 * (1 - Math.abs(ppm - 500_000) / 500_000)),
+  );
+  const hoursToResolve = Math.max(0, (cutoffSec - nowSec) / 3600);
+  const urgencyScore = Math.max(
+    0,
+    Math.floor(1000 * (1 - hoursToResolve / URGENCY_WINDOW_HOURS)),
+  );
+
+  return volumeScore + balanceScore + urgencyScore;
 }
 
 function bookMid(book: PolymarketOrderBook): number {

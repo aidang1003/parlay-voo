@@ -28,6 +28,7 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
         description: row.txtquestion,
         category: row.txtcategory,
         legs: [rowToLeg(row, nextSynthetic)],
+        gameGroup: row.txtgamegroup ?? undefined,
       });
     } else {
       // polymarket: needs no-side prob to render the No button
@@ -38,6 +39,7 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
         description: `Polymarket market ${row.txtsourceref.slice(0, 10)}...`,
         category: row.txtcategory,
         legs: [rowToLeg(row, nextSynthetic)],
+        gameGroup: row.txtgamegroup ?? undefined,
       });
     }
   }

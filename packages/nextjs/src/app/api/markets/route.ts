@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     title: m.title,
     description: m.description,
     category: m.category,
+    gameGroup: m.gameGroup,
     legs: m.legs.map((l) => ({
       id: l.id,
       noId: l.noId,

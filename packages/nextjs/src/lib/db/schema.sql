@@ -33,12 +33,16 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   bigcutofftime      BIGINT NOT NULL,
   bigearliestresolve BIGINT NOT NULL,
   blnactive          BOOLEAN NOT NULL DEFAULT true,
+  jsonbapipayload    JSONB,
+  bigcurationscore   BIGINT,
+  txtgamegroup       TEXT,
   tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);
 CREATE INDEX IF NOT EXISTS ixlegmapping_noid         ON tblegmapping (intnolegid);
+CREATE INDEX IF NOT EXISTS ixlegmapping_payload      ON tblegmapping USING GIN (jsonbapipayload jsonb_path_ops);
 
 -- tbpolymarketresolution: audit log of resolutions relayed to AdminOracleAdapter.
 CREATE TABLE IF NOT EXISTS tbpolymarketresolution (

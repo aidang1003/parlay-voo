@@ -32,6 +32,9 @@ export interface MarketRow {
   bigcutofftime: number;
   bigearliestresolve: number;
   blnactive: boolean;
+  jsonbapipayload: unknown | null;
+  bigcurationscore: number | null;
+  txtgamegroup: string | null;
   tscreatedat: string;
 }
 
@@ -57,6 +60,9 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     bigcutofftime: Number(r.bigcutofftime),
     bigearliestresolve: Number(r.bigearliestresolve),
     blnactive: r.blnactive as boolean,
+    jsonbapipayload: r.jsonbapipayload ?? null,
+    bigcurationscore: r.bigcurationscore == null ? null : Number(r.bigcurationscore),
+    txtgamegroup: (r.txtgamegroup as string | null | undefined) ?? null,
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -66,7 +72,7 @@ export async function getActiveMarkets(): Promise<MarketRow[]> {
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
-    ORDER BY txtsourceref
+    ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
@@ -78,7 +84,7 @@ export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
     SELECT * FROM tblegmapping
     WHERE blnactive = true
       AND (intyeslegid IS NOT NULL OR intnolegid IS NOT NULL)
-    ORDER BY txtsourceref
+    ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
@@ -95,6 +101,9 @@ export interface UpsertMarketInput {
   cutoffTime: number;
   earliestResolve: number;
   active?: boolean;
+  apiPayload?: unknown | null;
+  curationScore?: number | null;
+  gameGroup?: string | null;
 }
 
 /**
@@ -104,15 +113,22 @@ export interface UpsertMarketInput {
  */
 export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
+  const payloadJson =
+    input.apiPayload == null ? null : JSON.stringify(input.apiPayload);
+  const curationScore = input.curationScore ?? null;
+  const gameGroup = input.gameGroup ?? null;
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
-      bigcutofftime, bigearliestresolve, blnactive
+      bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload,
+      bigcurationscore, txtgamegroup
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
-      ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true}
+      ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
+      ${payloadJson}::jsonb,
+      ${curationScore}, ${gameGroup}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyeslegid        = COALESCE(tblegmapping.intyeslegid, EXCLUDED.intyeslegid),
@@ -123,7 +139,10 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
       bigearliestresolve = EXCLUDED.bigearliestresolve,
-      blnactive          = EXCLUDED.blnactive
+      blnactive          = EXCLUDED.blnactive,
+      jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload),
+      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore),
+      txtgamegroup       = COALESCE(EXCLUDED.txtgamegroup, tblegmapping.txtgamegroup)
   `;
 }
 

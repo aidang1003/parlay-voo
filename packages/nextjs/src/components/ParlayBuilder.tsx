@@ -42,6 +42,7 @@ interface DisplayLeg {
   expiresAt: number;
   category: string;
   marketTitle: string;
+  gameGroup: string;
   /** Whether this leg has an on-chain counterpart (can be bought). */
   onChain: boolean;
   /** Raw source reference: polymarket conditionId (0x…) or "seed:<id>". */
@@ -84,7 +85,7 @@ interface RiskAdviceData {
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const CATEGORY_LABELS: Record<string, string> = {
-  all: "All",
+  all: "Featured",
   crypto: "Crypto",
   defi: "DeFi",
   nft: "NFT",
@@ -93,6 +94,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   trivia: "Trivia",
   ethdenver: "ETHDenver",
   nba: "NBA",
+  nfl: "NFL",
+  mlb: "MLB",
+  nhl: "NHL",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -104,6 +108,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   trivia: "bg-brand-amber/15 text-brand-amber border-brand-amber/30",
   ethdenver: "bg-brand-pink/15 text-brand-pink border-brand-pink/30",
   nba: "bg-brand-amber/15 text-brand-amber border-brand-amber/30",
+  nfl: "bg-brand-amber/15 text-brand-amber border-brand-amber/30",
+  mlb: "bg-brand-amber/15 text-brand-amber border-brand-amber/30",
+  nhl: "bg-brand-amber/15 text-brand-amber border-brand-amber/30",
 };
 
 // ── Session storage keys ─────────────────────────────────────────────────
@@ -152,6 +159,7 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         expiresAt: leg.cutoffTime,
         category: market.category,
         marketTitle: market.title,
+        gameGroup: market.gameGroup ?? "",
         onChain: false,
         sourceRef: leg.sourceRef,
       });
@@ -369,14 +377,33 @@ export function ParlayBuilder() {
     }
   }, [activeCategory, allLegs.length, filteredLegs.length, setActiveCategory]);
 
-  const groupedByMarket = useMemo(() => {
-    const groups = new Map<string, DisplayLeg[]>();
+  const groupedByGame = useMemo(() => {
+    const games: {
+      gameGroup: string;
+      markets: { title: string; legs: DisplayLeg[] }[];
+    }[] = [];
+    const gameIx = new Map<string, number>();
+    const marketIx = new Map<string, Map<string, number>>();
+
     for (const leg of filteredLegs) {
-      const existing = groups.get(leg.marketTitle) ?? [];
-      existing.push(leg);
-      groups.set(leg.marketTitle, existing);
+      const key = leg.gameGroup;
+      let gi = gameIx.get(key);
+      if (gi === undefined) {
+        gi = games.length;
+        gameIx.set(key, gi);
+        games.push({ gameGroup: key, markets: [] });
+        marketIx.set(key, new Map());
+      }
+      const perMarket = marketIx.get(key)!;
+      let mi = perMarket.get(leg.marketTitle);
+      if (mi === undefined) {
+        mi = games[gi].markets.length;
+        perMarket.set(leg.marketTitle, mi);
+        games[gi].markets.push({ title: leg.marketTitle, legs: [] });
+      }
+      games[gi].markets[mi].legs.push(leg);
     }
-    return groups;
+    return games;
   }, [filteredLegs]);
 
   const multiplier = useMemo(() => {
@@ -389,11 +416,21 @@ export function ParlayBuilder() {
 
   const freeLiquidityNum = freeLiquidity !== undefined ? parseFloat(formatUnits(freeLiquidity, 6)) : 0;
   const maxPayoutNum = maxPayout !== undefined ? parseFloat(formatUnits(maxPayout, 6)) : 0;
-  // Disabled: vault liquidity is no longer gated in the UI so users can explore the
-  // builder before depositing. The contract still reverts if the vault can't reserve
-  // the payout, so the real check remains on-chain.
-  const insufficientLiquidity = false;
+  const statsLoaded = maxPayout !== undefined && freeLiquidity !== undefined;
   const exceedsMaxPayout = potentialPayout > 0 && maxPayout !== undefined && potentialPayout > maxPayoutNum;
+  const insufficientLiquidity =
+    potentialPayout > 0 && freeLiquidity !== undefined && potentialPayout > freeLiquidityNum;
+
+  // Largest stake that keeps potentialPayout under both vault caps for the
+  // current leg selection. The on-chain buy reverts when payout exceeds
+  // maxPayout() (5% TVL) or freeLiquidity(); capping the UI stake here
+  // prevents 4-5 leg parlays from silently reverting after approve.
+  const vaultCapUsdc = statsLoaded ? Math.min(maxPayoutNum, freeLiquidityNum) : 0;
+  const impliedMaxStake =
+    multiplier > 1 && feeBps < 10_000 && vaultCapUsdc > 0
+      ? vaultCapUsdc / (multiplier * (1 - feeBps / 10_000))
+      : 0;
+
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
   const creditNum = credit !== undefined ? parseFloat(formatUnits(credit, 6)) : 0;
   const insufficientBalance =
@@ -406,6 +443,7 @@ export function ParlayBuilder() {
   const canBuy =
     mounted &&
     isConnected &&
+    statsLoaded &&
     selectedLegs.length >= MIN_LEGS &&
     selectedLegs.length <= effectiveMaxLegs &&
     stakeNum >= effectiveMinStake &&
@@ -555,7 +593,7 @@ export function ParlayBuilder() {
       return useLossless ? "Insufficient Credit" : "Insufficient USDC Balance";
     }
     if (exceedsMaxPayout) return `Max Payout $${maxPayoutNum.toFixed(0)}`;
-    if (insufficientLiquidity) return "Insufficient Vault Liquidity";
+    if (insufficientLiquidity) return `Insufficient Vault Liquidity ($${freeLiquidityNum.toFixed(0)})`;
     return useLossless ? "Place Lossless Parlay" : "Buy Ticket";
   }
 
@@ -581,7 +619,7 @@ export function ParlayBuilder() {
                 : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
             }`}
           >
-            All
+            Featured
           </button>
           {availableCategories.map((cat) => (
             <button
@@ -638,30 +676,37 @@ export function ParlayBuilder() {
               <p className="mt-1 text-xs text-gray-600">Check back soon — markets are synced from Polymarket.</p>
             </div>
           )}
-          {[...groupedByMarket.entries()].map(([title, legs]) => (
-            <div key={title} className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                  {title}
-                </h3>
-                {legs[0] && (
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                    CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
-                  }`}>
-                    {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
-                  </span>
-                )}
-                {legs[0]?.sourceRef.startsWith("0x") && (
-                  <span
-                    title="Odds captured when this market was registered on-chain. They don't update mid-flight."
-                    className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
-                  >
-                    Odds locked
-                  </span>
-                )}
-              </div>
-              <div className="space-y-2">
-                {legs.map((leg, legIdx) => {
+          {groupedByGame.map((game) => (
+            <div key={`game:${game.gameGroup || "__flat__"}`} className="space-y-3">
+              {game.gameGroup && (
+                <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">
+                  {game.gameGroup}
+                </h2>
+              )}
+              {game.markets.map(({ title, legs }) => (
+                <div key={`${game.gameGroup}::${title}`} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                      {title}
+                    </h3>
+                    {legs[0] && (
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                        CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
+                      }`}>
+                        {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
+                      </span>
+                    )}
+                    {legs[0]?.sourceRef.startsWith("0x") && (
+                      <span
+                        title="Odds captured when this market was registered on-chain. They don't update mid-flight."
+                        className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
+                      >
+                        Odds locked
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {legs.map((leg, legIdx) => {
                   const selected = selectedLegs.find((s) => s.leg.id === leg.id);
                   const hasNo = leg.noId !== undefined;
                   return (
@@ -718,7 +763,9 @@ export function ParlayBuilder() {
                     </div>
                   );
                 })}
-              </div>
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -726,7 +773,7 @@ export function ParlayBuilder() {
 
       {/* Ticket builder / summary panel */}
       <div className="lg:col-span-2" id="parlay-panel">
-        <div className="glass-card-glow sticky top-20 space-y-6 p-6">
+        <div className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
           {/* Multiplier climb */}
           <div id="parlay-multiplier">
             <MultiplierClimb
@@ -782,13 +829,13 @@ export function ParlayBuilder() {
                     resetSuccess();
                     setUseLossless((v) => !v);
                   }}
-                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                  className={`relative h-6 w-11 flex-shrink-0 self-center rounded-full transition-colors ${
                     useLossless ? "bg-amber-500" : "bg-white/10"
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                      useLossless ? "translate-x-5" : "translate-x-0.5"
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                      useLossless ? "right-0.5" : "left-0.5"
                     }`}
                   />
                 </button>
@@ -860,6 +907,24 @@ export function ParlayBuilder() {
                 </span>
               </div>
             </div>
+            {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
+              <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                <span>
+                  Vault caps this parlay at{" "}
+                  <span className="font-semibold text-gray-300">
+                    ${impliedMaxStake.toFixed(2)}
+                  </span>{" "}
+                  stake
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { resetSuccess(); setStake(impliedMaxStake.toFixed(2)); }}
+                  className="rounded-md bg-white/5 px-2 py-0.5 font-semibold text-gray-300 transition-colors hover:bg-white/10"
+                >
+                  Use cap
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Payout breakdown */}

@@ -19,9 +19,23 @@ const queryClient = new QueryClient({
   },
 });
 
+// Rabby's MV3 service worker gets killed by Chrome after ~30s of tab
+// inactivity and re-injects a fresh window.ethereum on wake. Wagmi's cached
+// provider reference is stale by then, so the React store shows disconnected
+// even though the wallet still trusts the site. Re-running reconnect() on
+// tab-visible / window-focus rebinds to the live provider silently.
 function WagmiReconnect() {
   useEffect(() => {
+    const kick = () => {
+      if (document.visibilityState === "visible") void reconnect(config);
+    };
     void reconnect(config);
+    document.addEventListener("visibilitychange", kick);
+    window.addEventListener("focus", kick);
+    return () => {
+      document.removeEventListener("visibilitychange", kick);
+      window.removeEventListener("focus", kick);
+    };
   }, []);
   return null;
 }

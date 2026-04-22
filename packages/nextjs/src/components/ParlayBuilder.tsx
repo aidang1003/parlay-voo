@@ -416,11 +416,21 @@ export function ParlayBuilder() {
 
   const freeLiquidityNum = freeLiquidity !== undefined ? parseFloat(formatUnits(freeLiquidity, 6)) : 0;
   const maxPayoutNum = maxPayout !== undefined ? parseFloat(formatUnits(maxPayout, 6)) : 0;
-  // Disabled: vault liquidity is no longer gated in the UI so users can explore the
-  // builder before depositing. The contract still reverts if the vault can't reserve
-  // the payout, so the real check remains on-chain.
-  const insufficientLiquidity = false;
+  const statsLoaded = maxPayout !== undefined && freeLiquidity !== undefined;
   const exceedsMaxPayout = potentialPayout > 0 && maxPayout !== undefined && potentialPayout > maxPayoutNum;
+  const insufficientLiquidity =
+    potentialPayout > 0 && freeLiquidity !== undefined && potentialPayout > freeLiquidityNum;
+
+  // Largest stake that keeps potentialPayout under both vault caps for the
+  // current leg selection. The on-chain buy reverts when payout exceeds
+  // maxPayout() (5% TVL) or freeLiquidity(); capping the UI stake here
+  // prevents 4-5 leg parlays from silently reverting after approve.
+  const vaultCapUsdc = statsLoaded ? Math.min(maxPayoutNum, freeLiquidityNum) : 0;
+  const impliedMaxStake =
+    multiplier > 1 && feeBps < 10_000 && vaultCapUsdc > 0
+      ? vaultCapUsdc / (multiplier * (1 - feeBps / 10_000))
+      : 0;
+
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
   const creditNum = credit !== undefined ? parseFloat(formatUnits(credit, 6)) : 0;
   const insufficientBalance =
@@ -433,6 +443,7 @@ export function ParlayBuilder() {
   const canBuy =
     mounted &&
     isConnected &&
+    statsLoaded &&
     selectedLegs.length >= MIN_LEGS &&
     selectedLegs.length <= effectiveMaxLegs &&
     stakeNum >= effectiveMinStake &&
@@ -582,7 +593,7 @@ export function ParlayBuilder() {
       return useLossless ? "Insufficient Credit" : "Insufficient USDC Balance";
     }
     if (exceedsMaxPayout) return `Max Payout $${maxPayoutNum.toFixed(0)}`;
-    if (insufficientLiquidity) return "Insufficient Vault Liquidity";
+    if (insufficientLiquidity) return `Insufficient Vault Liquidity ($${freeLiquidityNum.toFixed(0)})`;
     return useLossless ? "Place Lossless Parlay" : "Buy Ticket";
   }
 
@@ -896,6 +907,24 @@ export function ParlayBuilder() {
                 </span>
               </div>
             </div>
+            {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
+              <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                <span>
+                  Vault caps this parlay at{" "}
+                  <span className="font-semibold text-gray-300">
+                    ${impliedMaxStake.toFixed(2)}
+                  </span>{" "}
+                  stake
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { resetSuccess(); setStake(impliedMaxStake.toFixed(2)); }}
+                  className="rounded-md bg-white/5 px-2 py-0.5 font-semibold text-gray-300 transition-colors hover:bg-white/10"
+                >
+                  Use cap
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Payout breakdown */}

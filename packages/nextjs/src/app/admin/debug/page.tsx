@@ -8,7 +8,7 @@ import { useIsTestnet, useOpenLegs, type OpenLeg } from "@/lib/hooks/debug";
 type ResolveStatus = 1 | 2 | 3;
 
 const MIN_MINT = 1;
-const MAX_MINT = 100_000;
+const MAX_MINT = 1_000_000;
 const DEFAULT_MINT = 1_000;
 
 export default function AdminDebugPage() {

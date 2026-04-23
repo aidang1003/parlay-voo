@@ -20,8 +20,8 @@ contract Deploy is CoreStep, LockVaultStep, YieldStep, FaucetStep, CodeConstants
         HelperConfig.NetworkConfig memory cfg = helperConfig.getConfig();
 
         address deployer = vm.addr(cfg.deployerKey);
-        console.log("Deployer:               ", deployer);
         console.log("Chain ID:               ", block.chainid);
+        console.log("Deployer:               ", deployer);
 
         if (block.chainid == LOCAL_CHAIN_ID && deployer.balance < 0.01 ether) {
             vm.startBroadcast(ANVIL_ACCOUNT_0_KEY);

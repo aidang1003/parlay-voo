@@ -7,6 +7,7 @@ import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
 import deployedContracts from "@/contracts/deployedContracts";
 import {
   ANVIL_ACCOUNT_0_KEY,
+  BASE_MAINNET_CHAIN_ID,
   BASE_SEPOLIA_CHAIN_ID,
   LOCAL_CHAIN_ID,
   type SupportedChainId,
@@ -66,7 +67,13 @@ export async function POST(req: Request) {
     (deployedContracts[chainId as keyof typeof deployedContracts] ??
       Object.values(deployedContracts)[0]) as Record<string, {address: string}>;
   const engineAddr = chainContracts.ParlayEngine?.address;
-  const oracleAddr = chainContracts.AdminOracleAdapter?.address;
+
+  const oracleMode = process.env.NEXT_PUBLIC_ORACLE_MODE ?? "admin";
+  const useUma =
+    chainId === BASE_MAINNET_CHAIN_ID || (chainId === BASE_SEPOLIA_CHAIN_ID && oracleMode === "uma");
+  const oracleAddr = useUma
+    ? chainContracts.UmaOracleAdapter?.address
+    : chainContracts.AdminOracleAdapter?.address;
 
   if (!signerKey) {
     return NextResponse.json(
@@ -75,7 +82,10 @@ export async function POST(req: Request) {
     );
   }
   if (!engineAddr || !oracleAddr) {
-    return NextResponse.json({ error: "engine/oracle address not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: `engine/oracle address not configured (mode=${useUma ? "uma" : "admin"})` },
+      { status: 500 },
+    );
   }
 
   const markets = await getActiveMarkets();

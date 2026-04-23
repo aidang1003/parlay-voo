@@ -71,7 +71,7 @@ Mark tasks `✅ COMPLETE` when done. Don't delete — keeps a log of what shippe
 
 Add your own below. For each, jot down: time estimate, value, blockers (which scaling task it depends on, if any). Then slot them into the alternation sequence.
 
-### F-1 — Market-driven LP pool mechanics
+### F-1 — Market-driven LP pool mechanics ✅ COMPLETE
 - **Value:** High. LPs act as the house; product needs real lock + risk-exposure dynamics, not hard-coded admin knobs.
 - **Blockers:** None. LockVault tiers (30/60/90d fixed) + uniform HouseVault exposure are the two weak pieces.
 - **Shape:** Split into two sub-items, shipped separately. C (full on-chain leg pricing AMM) is parked until we have liquidity — not documented here.
@@ -197,6 +197,7 @@ Shipped as a single `/admin/debug` page plus a testnet-only banner; replaces the
 - ✅ COMPLETE **Auto-fund personal wallet on Anvil deploy.** `Deploy.s.sol` tops up the deployer from Anvil account #0 when `block.chainid == 31337` and balance < 0.01 ETH. `FundWallet.s.sol` does the same for deployer + target wallet.
 - ✅ COMPLETE **Finish the `parlaycity` → `parlayvoo` rename.** `ARCH_REVIEW_2.md` (P6) claimed this was done, but the rename had never actually been applied. Root `package.json` name was still `parlaycity`, `packages/shared/package.json` was still `@parlaycity/shared`, and all ~20 import sites in `packages/nextjs/src/` still imported from `@parlaycity/shared`. Executed the rename: updated both package names, `packages/nextjs/package.json` workspace dep, `next.config.mjs` `transpilePackages`, every `import ... from "@parlaycity/shared"` in source + CLAUDE.md, regenerated `pnpm-lock.yaml`. `pnpm typecheck` + 276 vitest tests green.
 - ✅ COMPLETE **Deploy console messages cover every wiring call.** Audited `Deploy.s.sol` + steps against the emitted log: addresses, amounts, and ordering were already accurate, but four state-changing setter calls ran silently between the address prints — `vault.setLockVault`, `vault.setSafetyModule`, `lockVault.setFeeDistributor` (all in `LockVaultStep`), and `vault.setYieldAdapter` (in `YieldStep`). Added two confirmation log lines so the deploy output reflects every operation; no behavior change. Re-deploy output: `LockVault + SafetyModule wired on vault; FeeDistributor set on LockVault` / `YieldAdapter wired on vault`.
+- ⚠️ OPEN **MockUSDC mint reverts at the 100,000 slider max.** Found while exercising `/admin/debug`. Minting ~100,000 MockUSDC in a single call reverts on-chain (smaller values go through). Suspected cause: a per-call cap or uint overflow guard inside `MockUSDC.mint` — the slider UI lets the user pick a value the contract won't accept. Next step is to read the `MockUSDC` source for the active cap, then either (a) clamp the slider to the real max or (b) loosen the contract cap on testnet. Until fixed, don't mint at the slider max.
 - ✅ COMPLETE **`pnpm deploy:sepolia` no longer rewrites `deployments/31337.json`.** `scripts/generate-deployed-contracts.ts:213` iterated `Object.keys(merged)` when writing per-chain JSON, so a targeted run (e.g. chainId=84532) would re-emit every chain loaded from the existing TS file — polluting git diffs. Now tracks `updatedChains[]` inside the loop and only writes JSON for chains we actually regenerated. The TS file still gets merged output across all chains (correct — frontend needs both mappings). Verified end-to-end with a synthetic broadcast fixture: `... 84532` only writes `84532.json`, `... 31337` only writes `31337.json`, no-arg run still writes both.
 
 ## UI/UX Improvements
@@ -218,43 +219,45 @@ Grab-bag of smaller ideas. Each fleshed below with the same Time/Value/Blockers/
 - **Gate:** `pnpm typecheck` + `pnpm test:web` (269 passing) + `pnpm build` green. `forge test` not run in this sandbox — solidity edits were comment-only, no functional change.
 - **Caveat:** if we ever add a second market source this decision reverses. Acceptable — a second source is a bigger refactor anyway and we'd pick a new scheme then. Foundry unit tests that use `"poly:a"` as arbitrary string sourceRef fixtures (`SignedQuote.t.sol`) were left alone — they're valid test data regardless of the off-chain convention.
 
-### R-3 — Store raw Gamma payloads in JSONB
-- **Time:** 6–10 hours
-- **Value:** Medium. Unlocks two things: (a) cheap backfills when we want a new field (volume, liquidity, tags) without re-syncing, (b) a single source of truth for the LLM risk agent and MCP surface, which currently has to re-call Polymarket for anything past `ppm`. GIN indexes on specific JSON paths keep reads fast.
-- **Blockers:** None, but pairs naturally with R-4 (curation needs `volume`, which this exposes for free).
-- **Files:** `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/db/client.ts`, `packages/shared/src/polymarket/featured.ts`
-- **Change:** add `jsonbapipayload JSONB` to `tblegmapping`. Capture the full Gamma event object in the sync route; write it alongside the scalar columns we already extract (`yesProbabilityPpm`, `noProbabilityPpm`, `cutoffTime`). Keep scalars — they're the hot-path read. Create a GIN index on `jsonbapipayload jsonb_path_ops` so future field lookups (e.g. `volume24hr`, `tags`) stay O(log n).
-- **Watch:** JSONB adds ~1–3 KB per row. At current ~50 markets that's trivial; worth re-checking if we scale the synced universe to 10k+.
+### R-3 — Store raw Gamma payloads in JSONB ✅ COMPLETE
+- **Shipped:** `tblegmapping.jsonbapipayload JSONB` + GIN `jsonb_path_ops` index landed via `schema.sql` (re-init-safe — no separate migration; we regenerate the DB when convenient). Sync route captures the full Gamma event object alongside the scalar `yesProbabilityPpm` / `noProbabilityPpm` / `cutoffTime` columns we already extract.
+- **Outcome:** unblocked R-4 (volume-based curation reads `volume24hr` out of the stored payload) and gives the risk agent / MCP a single source of truth without re-calling Polymarket.
 
-### R-4 — Curation score (rank markets by volume + balance)
-- **Time:** 4–6 hours
-- **Value:** high. The frontend currently shows whatever Polymarket returned in sync order, which is effectively random. Surfacing deep-liquidity, near-coinflip markets makes the builder feel curated and the edge math happier (away from the 1–99% clamp).
-- **Blockers:** R-3 is a natural predecessor (volume comes from the Gamma payload). Can ship standalone by parsing `volume24hr` inline in sync, but R-3 first is cleaner.
-- **Files:** `packages/shared/src/polymarket/types.ts` (`CuratedMarket`), `packages/nextjs/src/lib/db/schema.sql`, `packages/nextjs/src/app/api/polymarket/sync/route.ts`, `packages/nextjs/src/lib/polymarket/markets.ts`, `packages/shared/src/polymarket/featured.ts`
-- **Change:**
-  1. Parse `volume24hr` (string → number) during featured fetch.
-  2. Add `bigcurationscore BIGINT` to `tblegmapping`.
-  3. Compute at sync time: `score = floor(volume * 1e3) - abs(ppm - 500_000)`. Volume dominates; balance penalty caps at 500k which is ~500 USD of volume. Tune once we see real data.
-  4. Change `getActiveMarkets()` ORDER BY from `txtsourceref` to `bigcurationscore DESC, volume24hr DESC`.
-  5. Add `curationScore?: number` to `CuratedMarket` so future UI can surface it.
+### R-4 — Curation score (rank markets by volume + balance) ✅ COMPLETE
+- **Shipped:** `score = floor(volume24hr * 1_000) - abs(yesPpm - 500_000)` computed at sync time and stored in `tblegmapping.bigcurationscore BIGINT`. `getActiveMarkets()` / `getRegisteredActiveMarkets()` sort `bigcurationscore DESC NULLS LAST` so seed rows without a score fall to the end.
+- **Knobs:** volume dominates past ~$500 of 24h volume; the edge penalty (0..500_000) breaks ties among low-volume markets and pushes ticket math away from the 1–99% probability clamp. `fetchFeaturedMarkets` now carries `volume24hr` on each `CuratedMarket`; `upsertMarket`'s `ON CONFLICT` preserves an existing score on a NULL refresh.
 - **No UI work needed** — the parlay builder already renders in array order.
-  6. The category for all curated bets is just "featured"
 
-### R-4b - Pull back categories
-- populate a category for each major league sport - NBA, NFL, MLB, and NHL
-- UI change to organize the pulled back results by a specific game
+### R-4b — Pull back categories (classify majors + group by game) ✅ COMPLETE
+- **Shipped:** sync-time `classifySport()` inspects each Gamma event's title / slug / tags / category for NBA/NFL/MLB/NHL tokens. On a hit, overrides `CuratedMarket.category` with the sport code and stamps the event title as `gameGroup` so sibling markets (moneyline, spread, total, player props) share one cluster key.
+- **Schema:** `tblegmapping.txtgamegroup TEXT` (nullable). `ON CONFLICT COALESCE` keeps existing values on NULL refreshes.
+- **UI:** `ParlayBuilder` splits `groupedByMarket` into `groupedByGame → markets → legs`. When `gameGroup` is set a game header row renders above market subheaders; non-sport markets keep the old flat layout via the `""` cluster key. `CATEGORY_LABELS` / `CATEGORY_COLORS` gained NFL/MLB/NHL entries so the sport-category pills light up as soon as the sync lands classified rows.
 
 
 ### R-5 — Debug banner + mint + leg resolver ✅ COMPLETE
 Shipped as F-6 (see line 141). `/admin/debug` page with testnet-gated mint UI and leg resolver. Leaving this bullet here as a pointer; remove on the next doc pass.
 
 
-### R-6
-- After purchasing a ticket then navigating to the ticket screen my wallet will disconnect from the app, but Rabby will still be connected so rabby won't let me re-connect, but the app no longer has my wallet info
-### R-7
-- On shorter screens you have to scroll all the way to the bottom of the possible bets before the bet placing component will allow yo uto scroll down. Realistically if your screen is too small you should be able to scroll on the section of the screen where the bet placing component is by hovering over it and scrolling down
-### R-8
-- The toggle switch for lossless parlays is not centered within itself
+### R-6 — Wallet stays connected across navigation + tab sleep ✅ COMPLETE
+- **Shipped (initial):** `WagmiReconnect` in `components/providers.tsx` calls `reconnect(config)` on mount so client-side navigation (e.g. buy → `/tickets`) no longer drops the cached connector while Rabby still reports the site as connected.
+- **Shipped (extension):** the same provider now re-runs `reconnect(config)` on `visibilitychange` (tab-visible) and `window.focus`. Rabby's MV3 service worker gets killed by Chrome after ~30s of tab inactivity and re-injects a fresh `window.ethereum` on wake — wagmi's cached provider reference is stale by then, so the React store showed disconnected even though the wallet still trusted the site. The focus/visibility rebind silently rebinds to the live provider with no user action.
+- **Files:** `packages/nextjs/src/components/providers.tsx`.
+
+### R-7 — Sticky bet panel scrolls independently on short viewports ✅ COMPLETE
+- **Shipped:** bet-placement panel now has `max-height: calc(100vh - 6rem)` + `overflow-y-auto` so hovering over the panel scrolls just the panel instead of trapping the user into scrolling the entire markets list to reach the panel's bottom. `packages/nextjs/src/components/ParlayBuilder.tsx`.
+
+### R-8 — Lossless-parlay toggle knob centered in its track ✅ COMPLETE
+- **Shipped:** track 44 px, knob 20 px. Switched the on-state translate from `translate-x-5` (20 px, leaves a 4 px gap on the right) to 22 px so the gap on either side matches; `self-center` pins the track to the flex row's vertical midpoint defensively. `packages/nextjs/src/components/ParlayBuilder.tsx`.
+
+### R-9 — Re-enable vault liquidity gate in the builder ✅ COMPLETE
+- **Problem:** the builder had the `insufficientLiquidity` gate hard-coded to `false` ("explore before deposit") so 4–5 leg parlays would silently revert on the `buyTicket` call after the user had already approved USDC — the only signal was a failed tx in their wallet.
+- **Shipped:** `insufficientLiquidity = potentialPayout > 0 && potentialPayout > freeLiquidityNum`. The buy button now also requires `statsLoaded` (both `maxPayout` and `freeLiquidity` read back) before enabling. Error state reads `Insufficient Vault Liquidity ($X)` so the cap is visible.
+- **Implied-cap hint:** the panel surfaces `vaultCap / (multiplier × (1 - feeBps/10_000))` as the largest stake that keeps potential payout under both the 5 %-TVL max-payout cap and current `freeLiquidity`. A one-click "Use cap" button fills the stake input with that number. Prevents the "approve, then revert" footgun on large multipliers.
+- **Files:** `packages/nextjs/src/components/ParlayBuilder.tsx`.
+
+### R-10 — Lock admin leg-resolve buttons while any row is in flight ✅ COMPLETE
+- **Problem:** `/admin/debug` resolve buttons were gated per-row. Firing YES on two legs in quick succession spawned concurrent Vercel lambdas that both read the same pending nonce from Alchemy and raced into `replacement transaction underpriced`.
+- **Shipped:** single `anyPending = Object.values(rowState).some((s) => s.pending)` flag disables YES/NO/VOID on every row whenever any row's POST is in flight. Cheapest correct fix — no queue, no nonce-manager, just serialize admin clicks. `packages/nextjs/src/app/admin/debug/page.tsx`.
 
 
 ## Bailout rules

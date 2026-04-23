@@ -15,14 +15,18 @@ abstract contract CodeConstants {
     address internal constant USDC_BASE_SEPOLIA = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
     address internal constant USDC_BASE_MAINNET = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
+    /* UMA Optimistic Oracle V3 (from UMAprotocol/protocol/packages/core/networks/<chainId>.json) */
+    address internal constant UMA_OOV3_BASE_SEPOLIA = 0x0F7fC5E6482f096380db6158f978167b57388deE;
+    address internal constant UMA_OOV3_BASE_MAINNET = 0x2aBf1Bd76655de80eDB3086114315Eec75AF500c;
+
     /* Uniswap V3 (same address across Base mainnet + Sepolia) */
     address internal constant UNISWAP_NFPM = 0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2;
     address internal constant UNISWAP_SWAP_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
     address internal constant WETH_BASE = 0x4200000000000000000000000000000000000006;
 
     /* Protocol defaults */
-    uint256 internal constant OPTIMISTIC_LIVENESS = 1800; // 30 minutes
-    uint256 internal constant OPTIMISTIC_BOND = 10e6; // 10 USDC
+    uint64 internal constant UMA_DEFAULT_LIVENESS = 7200; // 2 hours (F-5; tune later)
+    uint256 internal constant UMA_BOND_SENTINEL = 0; // sentinel: "use oo.getMinimumBond(USDC) at deploy"
 
     /* Anvil default keys (forge-std test accounts 0-2). Published foundry defaults — safe to embed. */
     uint256 internal constant ANVIL_ACCOUNT_0_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
@@ -41,10 +45,13 @@ contract HelperConfig is CodeConstants, Script {
         address usdc;
         /// How long the bootstrap (admin-oracle) window lasts, in days.
         uint256 bootstrapDays;
-        /// Optimistic oracle liveness window (seconds).
-        uint256 optimisticLiveness;
-        /// Optimistic oracle bond (USDC, 6-decimal).
-        uint256 optimisticBond;
+        /// UMA Optimistic Oracle V3 address. 0x0 means "skip UmaOracleAdapter deploy"
+        /// (used on Anvil; admin path covers local dev).
+        address umaOracleV3;
+        /// UMA dispute liveness window (seconds). Ignored when umaOracleV3 == 0x0.
+        uint64 umaLiveness;
+        /// UMA bond (USDC, 6-decimal). 0 means "use oo.getMinimumBond(USDC) at deploy".
+        uint256 umaBondAmount;
         /// Uniswap V3 NonfungiblePositionManager (for CreatePool). 0x0 when N/A.
         address uniswapNFPM;
         /// WETH address for the chain. 0x0 when N/A.
@@ -75,8 +82,9 @@ contract HelperConfig is CodeConstants, Script {
         return NetworkConfig({
             usdc: address(0), // deploy MockUSDC
             bootstrapDays: 7,
-            optimisticLiveness: OPTIMISTIC_LIVENESS,
-            optimisticBond: OPTIMISTIC_BOND,
+            umaOracleV3: address(0), // skip UmaOracleAdapter on Anvil
+            umaLiveness: 0,
+            umaBondAmount: 0,
             uniswapNFPM: address(0),
             weth: address(0),
             deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY)
@@ -90,8 +98,9 @@ contract HelperConfig is CodeConstants, Script {
         return NetworkConfig({
             usdc: usdc,
             bootstrapDays: vm.envOr("BOOTSTRAP_DAYS", uint256(30)),
-            optimisticLiveness: OPTIMISTIC_LIVENESS,
-            optimisticBond: OPTIMISTIC_BOND,
+            umaOracleV3: UMA_OOV3_BASE_SEPOLIA,
+            umaLiveness: UMA_DEFAULT_LIVENESS,
+            umaBondAmount: UMA_BOND_SENTINEL,
             uniswapNFPM: UNISWAP_NFPM,
             weth: WETH_BASE,
             deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0))
@@ -102,8 +111,9 @@ contract HelperConfig is CodeConstants, Script {
         return NetworkConfig({
             usdc: USDC_BASE_MAINNET,
             bootstrapDays: vm.envOr("BOOTSTRAP_DAYS", uint256(30)),
-            optimisticLiveness: OPTIMISTIC_LIVENESS,
-            optimisticBond: OPTIMISTIC_BOND,
+            umaOracleV3: UMA_OOV3_BASE_MAINNET,
+            umaLiveness: UMA_DEFAULT_LIVENESS,
+            umaBondAmount: UMA_BOND_SENTINEL,
             uniswapNFPM: UNISWAP_NFPM,
             weth: WETH_BASE,
             deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0))

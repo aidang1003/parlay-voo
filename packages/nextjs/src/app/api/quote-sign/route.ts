@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { privateKeyToAccount } from "viem/accounts";
 import { getAddress, isAddress, type Hex } from "viem";
-import { getActiveMarkets } from "@/lib/db/client";
-import { PolymarketClient } from "@/lib/polymarket/client";
-import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
 import deployedContracts from "@/contracts/deployedContracts";
+import { buildLegs, LegBuildError, type LegInput } from "@/lib/quote/build-legs";
 import {
   ANVIL_ACCOUNT_0_KEY,
   BASE_MAINNET_CHAIN_ID,
@@ -28,14 +26,6 @@ import {
  *     legs: [{ sourceRef: string, side: "yes" | "no" }]
  *   }
  */
-
-const YES_OUTCOME = ("0x" + "01".padStart(64, "0")) as Hex;
-const NO_OUTCOME  = ("0x" + "02".padStart(64, "0")) as Hex;
-
-interface LegInput {
-  sourceRef: string;
-  side: "yes" | "no";
-}
 
 interface QuoteBody {
   buyer: string;
@@ -88,63 +78,24 @@ export async function POST(req: Request) {
     );
   }
 
-  const markets = await getActiveMarkets();
-  const bySourceRef = new Map(markets.map((m) => [m.txtsourceref, m]));
-
-  const poly = new PolymarketClient({
-    gammaUrl: process.env.POLYMARKET_GAMMA_URL ?? "https://gamma-api.polymarket.com",
-    clobUrl: process.env.POLYMARKET_CLOB_URL ?? "https://clob.polymarket.com",
-  });
-
-  const signedLegs: Array<{
-    sourceRef: string;
-    outcome: Hex;
-    probabilityPPM: bigint;
-    cutoffTime: bigint;
-    earliestResolve: bigint;
-    oracleAdapter: `0x${string}`;
-  }> = [];
-
-  for (const leg of body.legs) {
-    const row = bySourceRef.get(leg.sourceRef);
-    if (!row) return NextResponse.json({ error: `unknown leg ${leg.sourceRef}` }, { status: 400 });
-
-    const isNo = leg.side === "no";
-    if (isNo && row.intnoprobppm == null) {
-      return NextResponse.json({ error: `no-side unavailable for ${leg.sourceRef}` }, { status: 400 });
+  let built;
+  try {
+    built = await buildLegs(body.legs);
+  } catch (e) {
+    if (e instanceof LegBuildError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
     }
-
-    // Default PPM from DB (already YES-side for both; contract flips for no-bets).
-    let yesPpm = row.intyesprobppm;
-
-    // For polymarket legs, refresh the mid from CLOB.
-    if (row.txtsource === "polymarket") {
-      const parsed = parsePolySourceRef(leg.sourceRef);
-      if (parsed) {
-        try {
-          const market = await poly.fetchMarket(parsed.conditionId);
-          const book = await poly.fetchOrderBook(market.yesTokenId);
-          const bestBid = Number(book.bids[0]?.price ?? 0);
-          const bestAsk = Number(book.asks[0]?.price ?? 0);
-          if (bestBid > 0 && bestAsk > 0) {
-            const mid = (bestBid + bestAsk) / 2;
-            yesPpm = midToPpm(mid);
-          }
-        } catch {
-          // Fall back to DB PPM — don't fail the quote if CLOB is flaky.
-        }
-      }
-    }
-
-    signedLegs.push({
-      sourceRef: leg.sourceRef,
-      outcome: isNo ? NO_OUTCOME : YES_OUTCOME,
-      probabilityPPM: BigInt(yesPpm),
-      cutoffTime: BigInt(row.bigcutofftime),
-      earliestResolve: BigInt(row.bigearliestresolve),
-      oracleAdapter: getAddress(oracleAddr),
-    });
+    throw e;
   }
+
+  const signedLegs = built.map((leg) => ({
+    sourceRef: leg.sourceRef,
+    outcome: leg.outcome,
+    probabilityPPM: BigInt(leg.probabilityPPM),
+    cutoffTime: BigInt(leg.cutoffTime),
+    earliestResolve: BigInt(leg.earliestResolve),
+    oracleAdapter: getAddress(oracleAddr),
+  }));
 
   const nonce = BigInt("0x" + crypto.randomUUID().replace(/-/g, "")) & ((1n << 128n) - 1n);
   // 10 min: the buy flow is approve-then-buy, so a tight TTL (e.g. 60s) expires

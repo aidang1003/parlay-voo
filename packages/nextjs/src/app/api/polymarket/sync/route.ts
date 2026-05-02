@@ -25,8 +25,11 @@ const SPORT_TAGS = ["nba", "nfl", "mlb", "nhl"] as const;
  *   3. Per-sport — NBA/NFL/MLB/NHL tag queries, so sport inventory isn't
  *      gated on cracking the global volume leaderboard
  *
- * Re-runs are idempotent: existing rows get probability/cutoff/score
- * refreshed but their on-chain leg ids are preserved (upsertMarket COALESCE).
+ * Re-runs are idempotent: existing rows get probability / cutoff / curation
+ * score / api payload refreshed; leg ids, question, category, earliestResolve,
+ * blnactive, and game group are preserved on conflict so a sync can never
+ * clobber registration metadata or rename a market the catalog has already
+ * advertised.
  */
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {

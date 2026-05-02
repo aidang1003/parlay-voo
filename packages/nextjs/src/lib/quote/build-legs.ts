@@ -1,4 +1,5 @@
 import { type Hex } from "viem";
+import type { PolymarketOrderBook } from "@parlayvoo/shared";
 import { getActiveMarkets } from "@/lib/db/client";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
@@ -55,11 +56,8 @@ export async function buildLegs(inputs: LegInput[]): Promise<BuiltLeg[]> {
         try {
           const market = await poly.fetchMarket(parsed.conditionId);
           const book = await poly.fetchOrderBook(market.yesTokenId);
-          const bestBid = Number(book.bids[0]?.price ?? 0);
-          const bestAsk = Number(book.asks[0]?.price ?? 0);
-          if (bestBid > 0 && bestAsk > 0) {
-            yesPpm = midToPpm((bestBid + bestAsk) / 2);
-          }
+          const mid = bookMidPpm(book);
+          if (mid != null) yesPpm = mid;
         } catch {
           // Swallow — fall back to DB PPM so a flaky CLOB doesn't break the flow.
         }
@@ -84,4 +82,26 @@ export class LegBuildError extends Error {
     super(message);
     this.name = "LegBuildError";
   }
+}
+
+/** Best-bid / best-ask mid in PPM, or null if the book is unusable.
+ *
+ *  Polymarket's CLOB `/book` endpoint returns bids and asks as plain arrays
+ *  with no documented sort order, so we don't trust `[0]` to be the top of
+ *  book — we take max of bids and min of asks regardless of input order.
+ *  Crossed/inverted books (best ask <= best bid) are stale fetches and are
+ *  rejected so callers fall back to the DB PPM rather than computing a
+ *  nonsense mid (e.g. dust orders straddling a dead market → 50/50). */
+export function bookMidPpm(book: PolymarketOrderBook): number | null {
+  const bids = book.bids
+    .map((b) => Number(b.price))
+    .filter((p) => Number.isFinite(p) && p > 0);
+  const asks = book.asks
+    .map((a) => Number(a.price))
+    .filter((p) => Number.isFinite(p) && p > 0);
+  if (bids.length === 0 || asks.length === 0) return null;
+  const bestBid = Math.max(...bids);
+  const bestAsk = Math.min(...asks);
+  if (bestAsk <= bestBid) return null;
+  return midToPpm((bestBid + bestAsk) / 2);
 }

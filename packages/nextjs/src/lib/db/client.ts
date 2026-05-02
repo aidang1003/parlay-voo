@@ -1,23 +1,29 @@
-import { neon } from "@neondatabase/serverless";
+import postgres, { type Sql } from "postgres";
 
 /**
- * Neon HTTP client. One shared instance per server lambda.
+ * Postgres client (postgres.js). One shared instance per server lambda.
  * Throws on first use if DATABASE_URL is missing so misconfiguration fails fast.
+ *
+ * Configured for Supabase's transaction pooler (port 6543), which does not
+ * support prepared statements — hence `prepare: false`. `max: 1` keeps the
+ * pool footprint minimal under Vercel's serverless concurrency model.
  */
-let cached: ReturnType<typeof neon> | null = null;
+let cached: Sql | null = null;
 
-export function sql() {
+export function sql(): Sql {
   if (!cached) {
     const url = process.env.DATABASE_URL;
     if (!url) {
-      throw new Error("DATABASE_URL is not set. See packages/nextjs/.env.example");
+      throw new Error("DATABASE_URL is not set. See .env.example");
     }
-    cached = neon(url);
+    cached = postgres(url, {
+      prepare: false,
+      max: 1,
+    });
   }
   return cached;
 }
 
-// One row per market, yes/no sides as sibling columns.
 export type LegSource = "seed" | "polymarket";
 
 export interface MarketRow {

@@ -159,9 +159,20 @@ function computeCurationScore(args: {
 }
 
 function bookMid(book: PolymarketOrderBook): number {
-  const bestBid = book.bids.length > 0 ? Number(book.bids[0].price) : 0;
-  const bestAsk = book.asks.length > 0 ? Number(book.asks[0].price) : 0;
-  if (bestBid > 0 && bestAsk > 0) return (bestBid + bestAsk) / 2;
+  // Polymarket's `/book` doesn't document its sort order, so don't trust [0]
+  // to be top of book — take max of bids and min of asks.
+  const bidPrices = book.bids
+    .map((b) => Number(b.price))
+    .filter((p) => Number.isFinite(p) && p > 0);
+  const askPrices = book.asks
+    .map((a) => Number(a.price))
+    .filter((p) => Number.isFinite(p) && p > 0);
+  const bestBid = bidPrices.length > 0 ? Math.max(...bidPrices) : 0;
+  const bestAsk = askPrices.length > 0 ? Math.min(...askPrices) : 0;
+  if (bestBid > 0 && bestAsk > 0) {
+    if (bestAsk <= bestBid) throw new Error("inverted orderbook");
+    return (bestBid + bestAsk) / 2;
+  }
   if (bestBid > 0) return bestBid;
   if (bestAsk > 0) return bestAsk;
   throw new Error("empty orderbook");

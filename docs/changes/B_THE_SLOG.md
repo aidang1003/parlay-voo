@@ -204,3 +204,6 @@ Carryover from `A_DAY_SCALING_SPRINT.md`. The A-DAY doc is closed; remaining unf
 - U-1: header now mounts `<HeaderPositionPill>` between Help and ConnectKit
 - U-1: `VaultDashboard.tsx` restructured with My Position / Vault Overview tabs; lock positions and pending-rewards moved into the My Position branch; vault stats stay under Overview (replaced "Your Position" stat card with "Reserved")
 - U-1: `VaultDashboard.test.tsx` mocks `useVaultPosition` and asserts the new "Reserved" stat label
+- U-2: added `useTicketActivity` hook in `lib/hooks/ticket.ts` reading `TicketPurchased` / `TicketSettled` / `EarlyCashout` events from block 0; resolves block timestamps batched and clipped at `limit`
+- U-2: new `ActivityFeed.tsx` renders rows with short address (or ENS via `useEnsName` against mainnet), action verb, ticket id, stake/payout, relative timestamp; rows route to `/ticket/[id]`
+- U-2: `/tickets/page.tsx` wraps existing personal block in My Tickets / Activity tabs; default view = My Tickets when connected, Activity otherwise; status-filter tabs scoped to My Tickets only

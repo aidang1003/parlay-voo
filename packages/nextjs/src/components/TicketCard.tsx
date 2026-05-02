@@ -12,6 +12,8 @@ export interface TicketLeg {
   resolved: boolean;
   result: number; // 0 = unresolved, 1 = Won, 2 = Lost, 3 = Voided (oracle LegStatus)
   probabilityPPM?: number;
+  /** On-chain legId, surfaced on hover for provenance. */
+  legId?: bigint;
 }
 
 export interface TicketData {
@@ -68,7 +70,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
   const canCashout = ticket.status === "Active" && !hasLostLeg && !allResolved;
 
   return (
-    <div className="glass-card overflow-hidden">
+    <div className="glass-card flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 px-6 py-4">
         <div>
@@ -87,7 +89,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
       </div>
 
       {/* Legs */}
-      <div className="divide-y divide-white/5 px-6">
+      <div className="flex-1 divide-y divide-white/5 px-6">
         {ticket.legs.map((leg, i) => {
           const status = getLegStatus(leg);
           return (
@@ -110,7 +112,10 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
                 </div>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-gray-300">
+                <p
+                  className="truncate text-sm text-gray-300"
+                  title={leg.legId !== undefined ? `Leg #${leg.legId.toString()}` : undefined}
+                >
                   {leg.description}
                 </p>
                 <p className="text-xs text-gray-500">

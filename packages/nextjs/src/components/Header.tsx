@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { ConnectKitButton } from "connectkit";
 import { HelpCircle } from "lucide-react";
 import { useFTUE } from "./FTUESpotlight";
+import { HeaderPositionPill } from "./HeaderPositionPill";
 
 const NAV_LINKS = [
   { href: "/", label: "Parlay" },
@@ -75,6 +76,7 @@ export function Header() {
           >
             <HelpCircle className="h-4 w-4" />
           </button>
+          <HeaderPositionPill />
           <div id="ftue-connect-wallet">
             <ConnectKitButton />
           </div>

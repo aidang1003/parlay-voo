@@ -6,7 +6,7 @@ import { useDeployedContract } from "./useDeployedContract";
 import { useAllTickets } from "./ticket";
 import { useContractClient, usePinnedChainId } from "./_internal";
 import type { LegInfo } from "./leg";
-
+import { parseOutcomeChoice } from "../utils";
 export function useIsTestnet(): boolean {
   const chainId = usePinnedChainId();
   return chainId === LOCAL_CHAIN_ID || chainId === BASE_SEPOLIA_CHAIN_ID;
@@ -25,27 +25,17 @@ export interface OpenLeg {
   /** On-chain value, kept as a last-resort display fallback. */
   onChainProbabilityPPM: bigint;
   oracleAdapter: `0x${string}`;
+  /** Active tickets that bet YES on this leg. */
+  yesCount: number;
+  /** Active tickets that bet NO on this leg. */
+  noCount: number;
+  /** Summed stake (USDC, 6dp) of YES bets on this leg. */
+  yesStake: bigint;
+  /** Summed stake (USDC, 6dp) of NO bets on this leg. */
+  noStake: bigint;
 }
 
-interface MarketsApiResponse {
-  legs: Array<{
-    sourceRef: string;
-    question: string;
-    probabilityPPM: number;
-    noProbabilityPPM?: number;
-  }>;
-}
-
-async function fetchMarketMap(): Promise<Map<string, MarketsApiResponse["legs"][number]>> {
-  const res = await fetch("/api/markets", { cache: "no-store" });
-  if (!res.ok) return new Map();
-  const markets = (await res.json()) as Array<MarketsApiResponse>;
-  const map = new Map<string, MarketsApiResponse["legs"][number]>();
-  for (const m of markets) {
-    for (const leg of m.legs) map.set(leg.sourceRef, leg);
-  }
-  return map;
-}
+import { fetchSourceRefMap } from "../markets-cache";
 
 /**
  * Lists every unresolved leg referenced by any ticket in the engine. Powers
@@ -72,6 +62,33 @@ export function useOpenLegs() {
     return Array.from(set).map((s) => BigInt(s));
   }, [tickets]);
 
+  // Aggregate YES/NO counts and summed stake per leg across active tickets.
+  // Only active tickets count: settled / cashed-out tickets no longer drive
+  // outcomes that could change with this resolver click.
+  const positionsByLeg = useMemo(() => {
+    const map = new Map<string, { yesCount: number; noCount: number; yesStake: bigint; noStake: bigint }>();
+    for (const t of tickets) {
+      if (t.ticket.status !== 0) continue;
+      t.ticket.legIds.forEach((legId, i) => {
+        const key = legId.toString();
+        const choice = parseOutcomeChoice(t.ticket.outcomes[i]);
+        let entry = map.get(key);
+        if (!entry) {
+          entry = { yesCount: 0, noCount: 0, yesStake: 0n, noStake: 0n };
+          map.set(key, entry);
+        }
+        if (choice === 1) {
+          entry.yesCount++;
+          entry.yesStake += t.ticket.stake;
+        } else if (choice === 2) {
+          entry.noCount++;
+          entry.noStake += t.ticket.stake;
+        }
+      });
+    }
+    return map;
+  }, [tickets]);
+
   const legIdsKey = useMemo(() => uniqueLegIds.map((id) => id.toString()).join(","), [uniqueLegIds]);
 
   const fetchLegs = useCallback(async () => {
@@ -85,7 +102,7 @@ export function useOpenLegs() {
     }
 
     const [marketMap, ...legResults] = await Promise.all([
-      fetchMarketMap(),
+      fetchSourceRefMap(),
       ...uniqueLegIds.map(async (legId) => {
         try {
           const [leg, canResolve] = await Promise.all([
@@ -123,6 +140,11 @@ export function useOpenLegs() {
         noProbabilityPPM: dbRow?.noProbabilityPPM ?? null,
         onChainProbabilityPPM: leg.probabilityPPM,
         oracleAdapter: leg.oracleAdapter,
+        // Aggregates filled in below from positionsByLeg
+        yesCount: 0,
+        noCount: 0,
+        yesStake: 0n,
+        noStake: 0n,
       });
     }
 
@@ -141,5 +163,127 @@ export function useOpenLegs() {
     fetchLegs();
   }, [refetchTickets, fetchLegs]);
 
-  return { legs, isLoading: isLoading || ticketsLoading, refetch };
+  // Decorate legs with the latest YES/NO position aggregates. Done as a
+  // derived view (not inside fetchLegs) so live ticket polling updates the
+  // counts without re-running the on-chain leg + canResolve reads.
+  const legsWithPositions = useMemo(() => {
+    return legs.map((row) => {
+      const positions = positionsByLeg.get(row.legId.toString());
+      if (!positions) return row;
+      return {
+        ...row,
+        yesCount: positions.yesCount,
+        noCount: positions.noCount,
+        yesStake: positions.yesStake,
+        noStake: positions.noStake,
+      };
+    });
+  }, [legs, positionsByLeg]);
+
+  return { legs: legsWithPositions, isLoading: isLoading || ticketsLoading, refetch };
+}
+
+export interface ResolvedLegRow {
+  legId: bigint;
+  question: string;
+  status: number; // 1 = Won, 2 = Lost, 3 = Voided
+  resolvedAt: number; // unix seconds
+  txHash: `0x${string}`;
+  resolver: `0x${string}`;
+}
+
+/**
+ * Recently resolved legs from the AdminOracleAdapter, newest-first, capped at
+ * `limit`. Joins each `LegResolved` event with the LegRegistry record so the
+ * resolver can audit which question they marked Won/Lost/Voided. Polls every
+ * 30s; the testnet backfill from block 0 is cheap enough.
+ */
+export function useRecentResolutions({ limit = 20 }: { limit?: number } = {}) {
+  const publicClient = useContractClient();
+  const oracle = useDeployedContract("AdminOracleAdapter");
+  const registry = useDeployedContract("LegRegistry");
+  const [rows, setRows] = useState<ResolvedLegRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const fetchIdRef = useRef(0);
+
+  const fetchResolved = useCallback(async () => {
+    if (!publicClient || !oracle || !registry) {
+      setRows([]);
+      setIsLoading(false);
+      return;
+    }
+    const localId = ++fetchIdRef.current;
+
+    try {
+      const logs = await publicClient.getContractEvents({
+        address: oracle.address,
+        abi: oracle.abi,
+        eventName: "LegResolved",
+        fromBlock: 0n,
+        toBlock: "latest",
+      });
+
+      // Newest-first by block, then clip; resolves block timestamps + leg
+      // questions in parallel only for the rows we'll actually render.
+      const sorted = [...logs].sort((a, b) =>
+        a.blockNumber === b.blockNumber ? 0 : a.blockNumber > b.blockNumber ? -1 : 1,
+      );
+      const clipped = sorted.slice(0, limit);
+
+      const [marketMap, ...enriched] = await Promise.all([
+        fetchSourceRefMap(),
+        ...clipped.map(async (log) => {
+          const args = (log as unknown as { args: Record<string, unknown> }).args;
+          const legId = args.legId as bigint;
+          const status = Number(args.status as number | bigint);
+          const [block, leg, tx] = await Promise.all([
+            publicClient.getBlock({ blockNumber: log.blockNumber! }).catch(() => null),
+            publicClient.readContract({
+              address: registry.address,
+              abi: registry.abi,
+              functionName: "getLeg",
+              args: [legId],
+            }).catch(() => null) as Promise<LegInfo | null>,
+            publicClient.getTransaction({ hash: log.transactionHash! }).catch(() => null),
+          ]);
+          return {
+            legId,
+            leg,
+            status,
+            resolvedAt: block ? Number(block.timestamp) : 0,
+            txHash: log.transactionHash!,
+            resolver: (tx?.from ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
+          };
+        }),
+      ]);
+
+      const finalRows: ResolvedLegRow[] = enriched.map((r) => {
+        const dbRow = r.leg ? marketMap.get(r.leg.sourceRef) : undefined;
+        return {
+          legId: r.legId,
+          question: dbRow?.question || r.leg?.question || "—",
+          status: r.status,
+          resolvedAt: r.resolvedAt,
+          txHash: r.txHash,
+          resolver: r.resolver,
+        };
+      });
+
+      if (localId !== fetchIdRef.current) return;
+      setRows(finalRows);
+    } catch (err) {
+      if (localId !== fetchIdRef.current) return;
+      console.error("Failed to load resolved legs:", err);
+    } finally {
+      if (localId === fetchIdRef.current) setIsLoading(false);
+    }
+  }, [publicClient, oracle?.address, registry?.address, limit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetchResolved();
+    const interval = setInterval(fetchResolved, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchResolved]);
+
+  return { rows, isLoading, refetch: fetchResolved };
 }

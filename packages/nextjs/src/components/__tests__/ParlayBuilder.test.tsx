@@ -66,6 +66,8 @@ vi.mock("@/lib/hooks", () => ({
   useVaultStats: () => mockUseVaultStats(),
   useParlayConfig: () => mockUseParlayConfig(),
   useMintTestUSDC: () => ({ mint: vi.fn(), isPending: false, isConfirming: false, isSuccess: false }),
+  useLegDescriptions: () => new Map(),
+  useLegStatuses: () => new Map(),
 }));
 
 // Mock MultiplierClimb

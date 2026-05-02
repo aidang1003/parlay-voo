@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useDeployedContract } from "./useDeployedContract";
 import { useContractClient } from "./_internal";
+import { fetchQuestionMapCached } from "../markets-cache";
 
 export interface LegInfo {
   question: string;
@@ -29,21 +30,29 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
   const fetchLegs = useCallback(async () => {
     if (!publicClient || !registry || legIds.length === 0) return;
 
+    const uniqueIds = Array.from(new Set(legIds.map((id) => id.toString())));
+    const [questionMap, ...results] = await Promise.all([
+      fetchQuestionMapCached(),
+      ...uniqueIds.map(async (key) => {
+        try {
+          const data = await publicClient.readContract({
+            address: registry.address,
+            abi: registry.abi,
+            functionName: "getLeg",
+            args: [BigInt(key)],
+          });
+          return { key, leg: data as LegInfo };
+        } catch {
+          return null;
+        }
+      }),
+    ]);
+
     const map = new Map<string, LegInfo>();
-    for (const legId of legIds) {
-      const key = legId.toString();
-      if (map.has(key)) continue;
-      try {
-        const data = await publicClient.readContract({
-          address: registry.address,
-          abi: registry.abi,
-          functionName: "getLeg",
-          args: [legId],
-        });
-        map.set(key, data as LegInfo);
-      } catch {
-        // skip
-      }
+    for (const r of results) {
+      if (!r) continue;
+      const dbQuestion = questionMap.get(r.leg.sourceRef);
+      map.set(r.key, dbQuestion ? { ...r.leg, question: dbQuestion } : r.leg);
     }
     setLegs(map);
   }, [publicClient, registry?.address, legIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { formatUnits } from "viem";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 import type { TicketStatus } from "@/components/TicketCard";
+
+// shadcn helper — Tailwind class merger
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 /**
  * Format a raw USDC (6-decimal) amount as a string.

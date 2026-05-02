@@ -6,19 +6,7 @@ When an item here is implemented, strip it from this file and mention it in the 
 
 ---
 
-## 1. Admin parameter dashboard
-
-**Current state:** `/admin` exists as a debug console (ticket inspector + DB sync). Fee/cap parameters (`baseFee`, `perLegFee`, `maxLegs`, `minStake`, `maxPayoutBps`) still set at deploy time. Contract setters exist; the UI to call them does not.
-
-**Improvement:**
-- Admin page gated by `owner()` check
-- Read current params from contract, update via setters
-- Frontend fee display should read from contract instead of hardcoded `PARLAY_CONFIG`
-- Constructor should accept fee params instead of hardcoding defaults
-
----
-
-## 2. Dynamic max payout
+## 1. Dynamic max payout
 
 **Current state:** Max payout per ticket = 5% of TVL (`maxPayoutBps = 500`). On a $10k vault, max payout = $500. A 57x parlay is capped at ~$8.77 stake.
 
@@ -31,7 +19,7 @@ When an item here is implemented, strip it from this file and mention it in the 
 
 ---
 
-## 3. Dynamic fee scaling
+## 2. Dynamic fee scaling
 
 **Current state:** Flat fee = `baseFee + perLegFee * numLegs` regardless of vault utilization.
 
@@ -47,7 +35,7 @@ Implementation: add `dynamicFee()` view to `ParlayEngine` that reads vault utili
 
 ---
 
-## 4. Payout tiers & jackpot pool
+## 3. Payout tiers & jackpot pool
 
 **Problem:** A single 200x payout can wreck the vault. Capping multipliers kills the fun.
 
@@ -60,28 +48,7 @@ Lets users build massive multiplier parlays for excitement while protecting vaul
 
 ---
 
-## 5. Fee config in constructor
-
-`ParlayEngine` constructor should accept initial fee configuration:
-
-```solidity
-constructor(
-    HouseVault _vault,
-    LegRegistry _registry,
-    IERC20 _usdc,
-    uint256 _bootstrapEndsAt,
-    uint256 _baseFee,
-    uint256 _perLegFee,
-    uint256 _minStake,
-    uint256 _maxLegs
-)
-```
-
-Makes deployments configurable without post-deploy admin calls.
-
----
-
-## 6. Oracle fault recovery
+## 4. Oracle fault recovery
 
 **Current state:** If an oracle adapter returns inconsistent or stale data (a leg stays `Unresolved` indefinitely, or an external oracle goes down), tickets referencing that leg become stuck — they can't settle, and progressive claims can't include that leg. No mechanism to recover from a persistently faulty oracle.
 
@@ -109,11 +76,39 @@ ParlayEngine:
 
 ---
 
+## 5. ABIs in Postgres (shared deployment registry)
+
+**Current state:** Each `pnpm deploy:*` regenerates `packages/nextjs/src/contracts/deployedContracts.ts` locally; the file is committed to the repo. Vercel builds from GitHub, so whoever last deployed has to commit the refreshed file. The DB is not involved.
+
+**Problem:** Bites once multiple devs make frontend-only changes against a shared deploy. Today everyone regenerates `deployedContracts.ts` locally and re-commits, which creates spurious diffs and rebases. Single-dev today, so the win is theoretical.
+
+**Possible approach:**
+- Add `tbcontractabi (chainid, name, deployedat, address, abi)` to `lib/db/schema.sql`.
+- Have `scripts/generate-deployed-contracts.ts` mirror each contract into the DB after the file write (best-effort; tolerant of missing `DATABASE_URL`).
+- `/api/db/init` backfills the table from the committed `deployedContracts.ts` so the app can come up before the DB is initialized (the file remains the bootstrap source).
+- Keep the committed TS file as the zero-latency fast path; the DB is a secondary mirror.
+
+**Why deferred:** Single-dev project today, and the DB isn't intended to live long-term at the current phase. Pick this back up if the team grows, or if we ever care about verifying old tickets against the ABI they were minted under.
+
+---
+
+## See also — deferred design docs
+
+Long-form deferred designs that don't fit the bullet shape above live as full change docs:
+
+- [`RFQ.md`](RFQ.md) — peer-to-peer parlay markets. Two-sided fills with the vault as maker-of-last-resort. Deferred until there's enough flow for an RFQ window to find takers, and a concrete maker-set answer. Design sketch only — no code planned.
+
+---
+
+## 6
+Once a leg is lost the ticket should be resolveable since the person has no chance of winning.
+Let them complete the ticket
+---
+
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
-2. Admin parameter dashboard — low effort, high value for operators.
-3. Fee config in constructor — trivial, improves deploy flexibility.
-4. Dynamic fee scaling — medium effort, strong DeFi mechanic.
-5. Dynamic max payout — medium effort, unlocks larger tickets.
-6. Jackpot pool — high effort, major feature expansion.
+2. Dynamic fee scaling — medium effort, strong DeFi mechanic.
+3. Dynamic max payout — medium effort, unlocks larger tickets.
+4. Jackpot pool — high effort, major feature expansion.
+5. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.

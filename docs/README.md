@@ -43,7 +43,7 @@ Each file below has an LLM-spec mirror at `llm-spec/<same-name>.md`. The human d
 
 | File | What it covers |
 |---|---|
-| `BACKLOG.md` | Ideas that aren't scheduled. Not a roadmap promise. |
+| `changes/BACKLOG.md` | Ideas that aren't scheduled. Not a roadmap promise. |
 
 ### Subfolders
 

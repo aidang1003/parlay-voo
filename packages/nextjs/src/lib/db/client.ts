@@ -113,9 +113,11 @@ export interface UpsertMarketInput {
 }
 
 /**
- * Upsert a market row. On conflict we refresh probs/cutoff/etc. but preserve
- * any existing on-chain leg ids (sync must never clobber a registered id with
- * NULL once set).
+ * Upsert a market row. On conflict we refresh only the volatile fields a sync
+ * needs (probs, cutoff, curation score, payload). Registration metadata —
+ * leg ids, question, category, earliestResolve, active flag, game group — is
+ * preserved once written so a re-sync can't clobber a registered id or rename
+ * a market the catalog has already advertised.
  */
 export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
@@ -137,18 +139,11 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       ${curationScore}, ${gameGroup}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
-      intyeslegid        = COALESCE(tblegmapping.intyeslegid, EXCLUDED.intyeslegid),
-      intnolegid         = COALESCE(tblegmapping.intnolegid,  EXCLUDED.intnolegid),
-      txtquestion        = EXCLUDED.txtquestion,
-      txtcategory        = EXCLUDED.txtcategory,
       intyesprobppm      = EXCLUDED.intyesprobppm,
       intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
-      bigearliestresolve = EXCLUDED.bigearliestresolve,
-      blnactive          = EXCLUDED.blnactive,
       jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload),
-      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore),
-      txtgamegroup       = COALESCE(EXCLUDED.txtgamegroup, tblegmapping.txtgamegroup)
+      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore)
   `;
 }
 

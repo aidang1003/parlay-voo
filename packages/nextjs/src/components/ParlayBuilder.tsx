@@ -20,6 +20,8 @@ import {
   useUSDCBalance,
   useVaultStats,
   useMintTestUSDC,
+  useLegDescriptions,
+  useLegStatuses,
 } from "@/lib/hooks";
 import { MultiplierClimb } from "./MultiplierClimb";
 
@@ -431,10 +433,31 @@ export function ParlayBuilder() {
   const effectiveBaseFee = baseFeeBps ?? BASE_FEE_BPS;
   const effectivePerLegFee = perLegFeeBps ?? PER_LEG_FEE_BPS;
 
+  // Pull on-chain status for any DisplayLeg that has a real (non-synthetic)
+  // legId. Synthetic ids are negative (set in markets.ts when the row hasn't
+  // been JIT-registered yet) and have no oracle to query — skip them.
+  const onChainLegIds = useMemo(
+    () => allLegs.map((l) => l.id).filter((id) => id >= 0n),
+    [allLegs],
+  );
+  const builderLegMap = useLegDescriptions(onChainLegIds);
+  const builderLegStatuses = useLegStatuses(onChainLegIds, builderLegMap, 30_000);
+
+  // Drop legs the oracle has already resolved (status 1/2/3). Buying them
+  // would revert at quote-sign time; nothing the user can do with them.
+  const liveLegs = useMemo(() => {
+    if (builderLegStatuses.size === 0) return allLegs;
+    return allLegs.filter((l) => {
+      if (l.id < 0n) return true;
+      const status = builderLegStatuses.get(l.id.toString());
+      return !status?.resolved;
+    });
+  }, [allLegs, builderLegStatuses]);
+
   const filteredLegs = useMemo(() => {
-    if (activeCategory === "all") return allLegs;
-    return allLegs.filter((l) => l.category === activeCategory);
-  }, [allLegs, activeCategory]);
+    if (activeCategory === "all") return liveLegs;
+    return liveLegs.filter((l) => l.category === activeCategory);
+  }, [liveLegs, activeCategory]);
 
   useEffect(() => {
     if (
@@ -854,16 +877,16 @@ export function ParlayBuilder() {
           {/* Selected legs summary with numbered badges */}
           {selectedLegs.length > 0 && (
             <div className="space-y-2">
-              {selectedLegs.map((s, i) => (
+              {selectedLegs.map((s) => (
                 <div
                   key={s.leg.id.toString()}
                   className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
                 >
-                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full gradient-bg text-[10px] font-bold text-white">
-                    {i + 1}
-                  </span>
                   <span className="min-w-0 flex-1 truncate text-gray-300">
                     {s.leg.description}
+                  </span>
+                  <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
+                    {effectiveOdds(s.leg, s.outcomeChoice).toFixed(2)}x
                   </span>
                   <span
                     className={`ml-2 flex-shrink-0 text-xs font-bold ${
@@ -995,6 +1018,11 @@ export function ParlayBuilder() {
                 </span>
               </div>
             </div>
+            {stakeNum > 0 && (
+              <p className="mt-1 text-right text-xs text-gray-500">
+                = ${stakeNum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            )}
             {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
               <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
                 <span>

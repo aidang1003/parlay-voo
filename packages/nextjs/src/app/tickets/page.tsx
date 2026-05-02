@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useUserTickets, useLegDescriptions, useLegStatuses, type OnChainTicket, type LegInfo, type LegOracleResult } from "@/lib/hooks";
 import { TicketCard, type TicketData, type TicketLeg, type TicketStatus } from "@/components/TicketCard";
 import { RehabClaimBanner } from "@/components/RehabClaimBanner";
+import { ActivityFeed } from "@/components/ActivityFeed";
 import { mapStatus, parseOutcomeChoice, isLegWon } from "@/lib/utils";
 import { PPM, BASE_CASHOUT_PENALTY_BPS, computeClientCashoutValue } from "@/lib/cashout";
 
 type TabFilter = "all" | "active" | "settled" | "cashed";
+type ViewTab = "myTickets" | "activity";
 
 const TABS: { key: TabFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -68,6 +70,7 @@ function toTicketData(
       resolved,
       result,
       probabilityPPM: effectivePPM,
+      legId,
     };
   });
 
@@ -91,6 +94,12 @@ export default function TicketsPage() {
   const { isConnected } = useAccount();
   const { tickets, totalCount, isLoading, error, refetch } = useUserTickets();
   const [activeTab, setActiveTab] = useState<TabFilter>("all");
+  const [viewTab, setViewTab] = useState<ViewTab>("activity");
+
+  // Default tab: My Tickets when connected, Activity when not.
+  useEffect(() => {
+    if (isConnected) setViewTab("myTickets");
+  }, [isConnected]);
 
   const allLegIds = useMemo(() => {
     const ids: bigint[] = [];
@@ -132,110 +141,146 @@ export default function TicketsPage() {
       <section className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black text-white">
-            My <span className="gradient-text">Tickets</span>
-            {tickets.length > 0 && (
+            <span className="gradient-text">Tickets</span>
+            {viewTab === "myTickets" && tickets.length > 0 && (
               <span className="text-lg font-medium text-gray-500">
                 {" "}({tickets.length})
               </span>
             )}
           </h1>
           <p className="mt-2 text-gray-400">
-            Track your parlays, settle resolved tickets, and claim winnings.
+            {viewTab === "myTickets"
+              ? "Track your parlays, settle resolved tickets, and claim winnings."
+              : "Live feed of every ticket bought, settled, or cashed out across the protocol."}
           </p>
-          {totalCount > 0 && (
+          {viewTab === "myTickets" && totalCount > 0 && (
             <p className="mt-1 text-xs text-gray-500">
               {totalCount} total ticket{totalCount !== 1 ? "s" : ""} on-chain
             </p>
           )}
         </div>
-        <button
-          onClick={() => refetch()}
-          className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          Refresh
-        </button>
+        {viewTab === "myTickets" && (
+          <button
+            onClick={() => refetch()}
+            className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            Refresh
+          </button>
+        )}
       </section>
 
-      {/* Status tabs */}
-      {tickets.length > 0 && (
-        <div className="flex gap-1 rounded-xl border border-white/5 bg-gray-900/50 p-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-all ${
-                activeTab === tab.key
-                  ? "gradient-bg text-white shadow-lg"
-                  : "text-gray-500 hover:text-gray-300"
-              }`}
-            >
-              {tab.label}
-              {tabCounts[tab.key] > 0 && (
-                <span
-                  className={`ml-1.5 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+      {/* View tabs */}
+      <div className="flex gap-1 rounded-xl border border-white/5 bg-gray-900/50 p-1">
+        {([
+          { key: "myTickets" as const, label: "My Tickets" },
+          { key: "activity" as const, label: "Activity" },
+        ]).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setViewTab(t.key)}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-all ${
+              viewTab === t.key
+                ? "gradient-bg text-white shadow-lg"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {viewTab === "activity" && <ActivityFeed />}
+
+      {viewTab === "myTickets" && (
+        <>
+          {!isConnected && (
+            <div className="py-16 text-center">
+              <p className="text-gray-500">Connect your wallet to see your tickets.</p>
+            </div>
+          )}
+
+          {/* Status filter tabs (only inside My Tickets) */}
+          {isConnected && tickets.length > 0 && (
+            <div className="flex gap-1 rounded-xl border border-white/5 bg-gray-900/50 p-1">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-all ${
                     activeTab === tab.key
-                      ? "bg-white/20 text-white"
-                      : "bg-white/5 text-gray-600"
+                      ? "gradient-bg text-white shadow-lg"
+                      : "text-gray-500 hover:text-gray-300"
                   }`}
                 >
-                  {tabCounts[tab.key]}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+                  {tab.label}
+                  {tabCounts[tab.key] > 0 && (
+                    <span
+                      className={`ml-1.5 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold ${
+                        activeTab === tab.key
+                          ? "bg-white/20 text-white"
+                          : "bg-white/5 text-gray-600"
+                      }`}
+                    >
+                      {tabCounts[tab.key]}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
-      {error && (
-        <div className="rounded-lg bg-neon-red/10 px-4 py-3 text-sm text-neon-red">
-          Failed to load tickets: {error.length > 200 ? error.slice(0, 200) + "..." : error}
-        </div>
-      )}
+          {isConnected && error && (
+            <div className="rounded-lg bg-neon-red/10 px-4 py-3 text-sm text-neon-red">
+              Failed to load tickets: {error.length > 200 ? error.slice(0, 200) + "..." : error}
+            </div>
+          )}
 
-      {isLoading && (
-        <div className="flex min-h-[30vh] items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-pink border-t-transparent" />
-        </div>
-      )}
+          {isConnected && isLoading && (
+            <div className="flex min-h-[30vh] items-center justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-pink border-t-transparent" />
+            </div>
+          )}
 
-      {!isLoading && filtered.length > 0 && (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((td) => (
-            <Link
-              key={td.id.toString()}
-              href={`/ticket/${td.id.toString()}`}
-              className="block transition-transform hover:scale-[1.02]"
-            >
-              <TicketCard ticket={td} />
-            </Link>
-          ))}
-        </div>
-      )}
+          {isConnected && !isLoading && filtered.length > 0 && (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((td) => (
+                <Link
+                  key={td.id.toString()}
+                  href={`/ticket/${td.id.toString()}`}
+                  className="block h-full transition-transform hover:scale-[1.02]"
+                >
+                  <TicketCard ticket={td} />
+                </Link>
+              ))}
+            </div>
+          )}
 
-      {!isLoading && tickets.length > 0 && filtered.length === 0 && (
-        <div className="py-16 text-center">
-          <p className="text-gray-500">
-            No {activeTab === "active" ? "active" : activeTab === "settled" ? "settled" : activeTab === "cashed" ? "cashed out" : ""} tickets.
-          </p>
-        </div>
-      )}
+          {isConnected && !isLoading && tickets.length > 0 && filtered.length === 0 && (
+            <div className="py-16 text-center">
+              <p className="text-gray-500">
+                No {activeTab === "active" ? "active" : activeTab === "settled" ? "settled" : activeTab === "cashed" ? "cashed out" : ""} tickets.
+              </p>
+            </div>
+          )}
 
-      {!isLoading && tickets.length === 0 && (
-        <div className="py-20 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl gradient-bg-subtle">
-            <svg className="h-8 w-8 text-brand-pink" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 010 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 010-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375z" />
-            </svg>
-          </div>
-          <p className="text-lg font-semibold text-gray-400">No tickets yet</p>
-          <p className="mt-1 text-sm text-gray-500">Build your first parlay and your tickets will show up here.</p>
-          <Link
-            href="/"
-            className="btn-gradient mt-6 inline-block rounded-xl px-6 py-2.5 text-sm font-bold text-white"
-          >
-            Build Your First Parlay
-          </Link>
-        </div>
+          {isConnected && !isLoading && tickets.length === 0 && (
+            <div className="py-20 text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl gradient-bg-subtle">
+                <svg className="h-8 w-8 text-brand-pink" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 010 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 010-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375z" />
+                </svg>
+              </div>
+              <p className="text-lg font-semibold text-gray-400">No tickets yet</p>
+              <p className="mt-1 text-sm text-gray-500">Build your first parlay and your tickets will show up here.</p>
+              <Link
+                href="/"
+                className="btn-gradient mt-6 inline-block rounded-xl px-6 py-2.5 text-sm font-bold text-white"
+              >
+                Build Your First Parlay
+              </Link>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

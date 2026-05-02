@@ -70,6 +70,7 @@ function toTicketData(
       resolved,
       result,
       probabilityPPM: effectivePPM,
+      legId,
     };
   });
 

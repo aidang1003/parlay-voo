@@ -132,6 +132,7 @@ export default function TicketPage() {
       resolved,
       result,
       probabilityPPM: effectivePPM,
+      legId,
     };
   });
 

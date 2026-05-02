@@ -12,6 +12,8 @@ export interface TicketLeg {
   resolved: boolean;
   result: number; // 0 = unresolved, 1 = Won, 2 = Lost, 3 = Voided (oracle LegStatus)
   probabilityPPM?: number;
+  /** On-chain legId, surfaced on hover for provenance. */
+  legId?: bigint;
 }
 
 export interface TicketData {
@@ -110,7 +112,10 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
                 </div>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-gray-300">
+                <p
+                  className="truncate text-sm text-gray-300"
+                  title={leg.legId !== undefined ? `Leg #${leg.legId.toString()}` : undefined}
+                >
                   {leg.description}
                 </p>
                 <p className="text-xs text-gray-500">

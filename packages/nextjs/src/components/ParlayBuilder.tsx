@@ -464,6 +464,7 @@ export function ParlayBuilder() {
   const effectiveMaxLegs = maxLegs ?? MAX_LEGS;
   const effectiveMinStake = minStakeUSDC ?? MIN_STAKE_USDC;
   const effectiveProtocolFee = protocolFeeBps ?? PROTOCOL_FEE_BPS;
+  const netLegFactor = (BPS - effectiveProtocolFee) / BPS;
   const effectiveCorrAsymptote = correlationAsymptoteBps ?? CORRELATION_ASYMPTOTE_BPS;
   const effectiveCorrHalfSat = correlationHalfSatPpm ?? CORRELATION_HALF_SAT_PPM;
   const effectiveMaxLegsPerGroup = maxLegsPerGroup ?? MAX_LEGS_PER_GROUP;
@@ -564,6 +565,19 @@ export function ParlayBuilder() {
   }, [selectedLegs, effectiveProtocolFee, effectiveCorrAsymptote, effectiveCorrHalfSat]);
 
   const potentialPayout = stakeNum * multiplier;
+
+  // Per-leg multipliers fed to the chart climb. Distribute the (fee +
+  // correlation) discount evenly across legs so the cumulative product at
+  // the chart's last point equals the cart's final multiplier — keeps the
+  // big headline number aligned with the potential-payout calculation.
+  const climbLegMultipliers = useMemo(() => {
+    if (selectedLegs.length === 0) return [];
+    const raw = selectedLegs.map((s) => effectiveOdds(s.leg, s.outcomeChoice));
+    const rawProduct = raw.reduce((acc, m) => acc * m, 1);
+    if (!Number.isFinite(rawProduct) || rawProduct <= 0 || multiplier <= 0) return raw;
+    const scale = Math.pow(multiplier / rawProduct, 1 / raw.length);
+    return raw.map((m) => m * scale);
+  }, [selectedLegs, multiplier]);
 
   // Payment amount the wallet will be asked to approve. Rounds the typed
   // stake UP to the nearest $0.01 so a sub-cent rounding mismatch never
@@ -942,7 +956,7 @@ export function ParlayBuilder() {
                         >
                           <span>Yes</span>
                           <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                            {leg.yesOdds.toFixed(2)}x
+                            {(leg.yesOdds * netLegFactor).toFixed(2)}x
                           </span>
                         </button>
                         <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
@@ -962,7 +976,7 @@ export function ParlayBuilder() {
                           >
                             <span>No</span>
                             <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                              {(leg.noOdds ?? effectiveOdds(leg, 2)).toFixed(2)}x
+                              {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
                             </span>
                           </button>
                         )}
@@ -983,10 +997,7 @@ export function ParlayBuilder() {
         <div className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
           {/* Multiplier climb */}
           <div id="parlay-multiplier">
-            <MultiplierClimb
-              legMultipliers={selectedLegs.map((s) => effectiveOdds(s.leg, s.outcomeChoice))}
-              animated
-            />
+            <MultiplierClimb legMultipliers={climbLegMultipliers} animated />
           </div>
 
           {/* Selected legs summary with numbered badges */}
@@ -1001,7 +1012,7 @@ export function ParlayBuilder() {
                     {s.leg.description}
                   </span>
                   <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
-                    {effectiveOdds(s.leg, s.outcomeChoice).toFixed(2)}x
+                    {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
                   </span>
                   <span
                     className={`ml-2 flex-shrink-0 text-xs font-bold ${

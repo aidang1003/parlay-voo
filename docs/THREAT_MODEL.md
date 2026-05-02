@@ -7,7 +7,7 @@
 | LP deposits (USDC) | HouseVault | High |
 | Ticket payouts | HouseVault (reserved) | High |
 | Oracle integrity | OracleAdapters | High |
-| Proposer/challenger bonds | OptimisticOracle | Medium |
+| Asserter/disputer bonds | UmaOracleAdapter (forwarded to UMA OOv3) | Medium |
 | Admin keys | Deployer EOA | Critical |
 | JIT quote signer key | Hot EOA on Vercel | High |
 | Cron secret | Vercel env | Medium |
@@ -23,21 +23,21 @@
 - Utilization check at ticket purchase time
 - Reserved amount tracked and enforced
 
-### T2: Oracle Manipulation (FAST mode)
+### T2: Oracle Manipulation (AdminOracleAdapter, testnet)
 **Risk**: Admin resolves legs dishonestly.
 **Mitigations**:
-- FAST mode is bootstrap-only (time-limited)
-- Admin key is disclosed as centralized trust assumption
-- Upgrade path to OPTIMISTIC mode documented
+- `AdminOracleAdapter.resolve()` reverts on Base mainnet (`require(block.chainid != 8453)`) — unreachable in production.
+- Restricted to Anvil + Base Sepolia for dev/QA. Admin key is disclosed as centralized trust on testnet only.
+- Mainnet replacement is `UmaOracleAdapter` (T3).
 
-### T3: Oracle Manipulation (OPTIMISTIC mode)
-**Risk**: Proposer submits false outcome, no one challenges.
+### T3: Oracle Manipulation (UmaOracleAdapter, mainnet)
+**Risk**: Asserter submits false outcome, no one disputes; or UMA DVM is corrupted.
 **Mitigations**:
-- Bond required to propose (10 USDC)
-- Challenge window (30 min) before finalization
-- Challenger bond required (prevents spam challenges)
-- Loser gets slashed, winner gets rewarded
-- Arbiter (admin in MVP) resolves disputes
+- Asserter posts a bond (USDC) into UMA OOv3 via `assertTruth`.
+- Liveness window (default 7200s on Base; tunable via `setLiveness`) — anyone can dispute by matching the bond.
+- Disputed assertions escalate to UMA's DVM (token-holder vote on Ethereum mainnet, ~2 days). Loser's bond is slashed.
+- The **only** writer to `_finalStatus` / `_finalOutcome` / `_isFinalized` is `assertionResolvedCallback`, gated by `msg.sender == address(uma)`. No `onlyOwner` function in the oracle path can mutate outcome state. Verified by unit test `test_adminSetters_cannotWriteOutcomeState`.
+- Bond is refundable on truthful settlement (minus UMA's final fee), so capital recirculates rather than being a per-resolution cost.
 
 ### T4: Reentrancy
 **Risk**: Callback during token transfer drains funds.
@@ -103,7 +103,7 @@
 ## Known Limitations (Hackathon Scope)
 
 1. Single admin key (not multisig)
-2. Arbiter in optimistic mode is admin (not truly decentralized)
+2. AdminOracleAdapter remains deployed on testnets (mainnet `resolve()` reverts; testnet path is owner-arbitrated)
 3. No timelock on admin actions
 4. No formal verification
 5. Probability feeds are manual (not from live oracles)

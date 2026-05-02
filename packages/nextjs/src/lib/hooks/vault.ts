@@ -7,6 +7,44 @@ import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
+/**
+ * Connected user's vault position: VOO share balance and its USDC asset value.
+ * Wraps the two reads (`balanceOf` + `convertToAssets(shares)`) that the
+ * dashboard and header pill both need. Returns `0n` for both when disconnected
+ * or when the vault isn't deployed on the active chain.
+ */
+export function useVaultPosition() {
+  const { address } = useAccount();
+  const vault = useDeployedContract("HouseVault");
+  const baseContract = { address: vault?.address, abi: vault?.abi ?? EMPTY_ABI } as const;
+
+  const sharesResult = useReadContract({
+    ...baseContract,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: !!address && !!vault, refetchInterval: 10_000 },
+  });
+  const shares = (sharesResult.data as bigint | undefined) ?? 0n;
+
+  const assetsResult = useReadContract({
+    ...baseContract,
+    functionName: "convertToAssets",
+    args: shares > 0n ? [shares] : undefined,
+    query: { enabled: !!vault && shares > 0n, refetchInterval: 10_000 },
+  });
+  const assets = (assetsResult.data as bigint | undefined) ?? 0n;
+
+  return {
+    shares,
+    assets,
+    isLoading: sharesResult.isLoading || assetsResult.isLoading,
+    refetch: () => {
+      sharesResult.refetch();
+      assetsResult.refetch();
+    },
+  };
+}
+
 export function useVaultStats() {
   const vault = useDeployedContract("HouseVault");
   const baseContract = { address: vault?.address, abi: vault?.abi ?? EMPTY_ABI } as const;

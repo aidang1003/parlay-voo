@@ -36,6 +36,12 @@ vi.mock("@/lib/hooks", () => ({
     error: null,
   })),
   useUSDCBalance: vi.fn(() => ({ balance: 1_000_000_000n })),
+  useVaultPosition: vi.fn(() => ({
+    shares: 0n,
+    assets: 0n,
+    isLoading: false,
+    refetch: vi.fn(),
+  })),
   useLockVault: vi.fn(() => ({
     lock: vi.fn(),
     isPending: false,
@@ -86,6 +92,7 @@ vi.mock("@/lib/hooks", () => ({
 import { useAccount, useReadContract } from "wagmi";
 import {
   useUSDCBalance,
+  useVaultPosition,
   useDepositVault,
   useWithdrawVault,
   useLockVault,
@@ -94,6 +101,7 @@ import {
 type UseAccountReturn = ReturnType<typeof useAccount>;
 type UseReadContractReturn = ReturnType<typeof useReadContract>;
 type UseUSDCBalanceReturn = ReturnType<typeof useUSDCBalance>;
+type UseVaultPositionReturn = ReturnType<typeof useVaultPosition>;
 type UseDepositVaultReturn = ReturnType<typeof useDepositVault>;
 type UseWithdrawVaultReturn = ReturnType<typeof useWithdrawVault>;
 type UseLockVaultReturn = ReturnType<typeof useLockVault>;
@@ -110,6 +118,12 @@ function mockConnectedWithShares(shares = 100_000_000n) {
     if (args?.functionName === "convertToAssets") return { data: shares } as UseReadContractReturn;
     return { data: undefined } as UseReadContractReturn;
   });
+  vi.mocked(useVaultPosition).mockReturnValue({
+    shares,
+    assets: shares,
+    isLoading: false,
+    refetch: vi.fn(),
+  } as unknown as UseVaultPositionReturn);
 }
 
 describe("VaultDashboard", () => {
@@ -119,6 +133,12 @@ describe("VaultDashboard", () => {
       address: undefined,
     } as unknown as UseAccountReturn);
     vi.mocked(useReadContract).mockReturnValue({ data: undefined } as UseReadContractReturn);
+    vi.mocked(useVaultPosition).mockReturnValue({
+      shares: 0n,
+      assets: 0n,
+      isLoading: false,
+      refetch: vi.fn(),
+    } as unknown as UseVaultPositionReturn);
   });
 
   it("renders without crashing", () => {
@@ -131,7 +151,7 @@ describe("VaultDashboard", () => {
     expect(screen.getByText("Total TVL")).toBeInTheDocument();
     expect(screen.getByText("Utilization")).toBeInTheDocument();
     expect(screen.getByText("Free Liquidity")).toBeInTheDocument();
-    expect(screen.getByText("Your Position")).toBeInTheDocument();
+    expect(screen.getByText("Reserved")).toBeInTheDocument();
   });
 
   it("shows TVL value from vault stats", () => {

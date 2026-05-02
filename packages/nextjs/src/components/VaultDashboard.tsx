@@ -6,6 +6,7 @@ import { formatUnits, parseUnits } from "viem";
 import { sanitizeNumericInput, blockNonNumericKeys, formatUSDC as fmtUSDCShared } from "@/lib/utils";
 import {
   useVaultStats,
+  useVaultPosition,
   useDepositVault,
   useWithdrawVault,
   useUSDCBalance,
@@ -16,16 +17,14 @@ import {
   useLockPositions,
   useLockStats,
   useMintTestUSDC,
-  useCreditBalance,
   LockTier,
 } from "@/lib/hooks";
-import { useReadContract } from "wagmi";
-import { useDeployedContract } from "@/lib/hooks/useDeployedContract";
 import {
   feeShareForDuration,
   penaltyBpsForRemaining,
   LOCK_MIN_DURATION_SECS,
 } from "@parlayvoo/shared";
+import { MyPositionPanel } from "./MyPositionPanel";
 
 // Local alias so the dashboard keeps its preferred `toLocaleString`
 // rendering ("1,234.56") without passing `{ locale: true }` at every call site.
@@ -85,30 +84,37 @@ function daysToSlider(days: number): number {
 }
 
 type Tab = "deposit" | "withdraw" | "lock";
+type ViewTab = "myPosition" | "overview";
 
 export function VaultDashboard() {
   const { address, isConnected, chain } = useAccount();
   const noUsdcWarning = `Your wallet needs USDC on ${chain?.name ?? "the connected"} network`;
   const vaultStats = useVaultStats();
   const { balance: usdcBalance } = useUSDCBalance();
+  const { shares: userShares, assets: sharesValue } = useVaultPosition();
   const depositHook = useDepositVault();
   const withdrawHook = useWithdrawVault();
   const lockHook = useLockVault();
   const unlockHook = useUnlockVault();
   const earlyWithdrawHook = useEarlyWithdraw();
   const graduateHook = useGraduate();
-  const { positions, userTotalLocked, refetch: refetchPositions } = useLockPositions();
+  const { positions, refetch: refetchPositions } = useLockPositions();
   const lockStats = useLockStats();
   const mintHook = useMintTestUSDC();
-  const { credit } = useCreditBalance();
 
   const [tab, setTab] = useState<Tab>("deposit");
+  const [viewTab, setViewTab] = useState<ViewTab>("overview");
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [lockAmount, setLockAmount] = useState("");
   const [lockDays, setLockDays] = useState<number>(LOCK_DEFAULT_DAYS);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Default tab: My Position when connected, Vault Overview when not.
+  useEffect(() => {
+    if (isConnected) setViewTab("myPosition");
+  }, [isConnected]);
 
   // Live preview derived from selected duration.
   const lockDurationSecs = BigInt(lockDays) * SECS_PER_DAY;
@@ -117,48 +123,8 @@ export function VaultDashboard() {
     : 10_000n;
   const lockDay0PenaltyBps = penaltyBpsForRemaining(lockDurationSecs);
 
-  const vaultContract = useDeployedContract("HouseVault");
-
-  // User's vault share balance
-  const { data: userShares } = useReadContract({
-    address: vaultContract?.address,
-    abi: vaultContract?.abi,
-    functionName: "balanceOf",
-    args: address ? [address] : undefined,
-    query: { enabled: !!address && !!vaultContract?.address, refetchInterval: 10_000 },
-  });
-
-  const { data: sharesValue } = useReadContract({
-    address: vaultContract?.address,
-    abi: vaultContract?.abi,
-    functionName: "convertToAssets",
-    args: userShares ? [userShares as bigint] : undefined,
-    query: { enabled: !!userShares && (userShares as bigint) > 0n, refetchInterval: 10_000 },
-  });
-
-  const userSharesBigInt = (userShares as bigint) ?? 0n;
-  const userSharesValueBigInt = (sharesValue as bigint) ?? 0n;
-
-  // Split locks by tier so the dashboard can tell FULL savings from PARTIAL
-  // rehab positions from LEAST (principal already routed back to LPs).
-  const fullPositions = positions.filter((p) => p.position.tier === LockTier.FULL);
-  const partialPositions = positions.filter((p) => p.position.tier === LockTier.PARTIAL);
-  const leastPositions = positions.filter((p) => p.position.tier === LockTier.LEAST);
-  const fullShares = fullPositions.reduce((s, p) => s + p.position.shares, 0n);
-  const partialShares = partialPositions.reduce((s, p) => s + p.position.shares, 0n);
-  const leastShares = leastPositions.reduce((s, p) => s + p.position.shares, 0n);
-
-  // Convert locked shares to asset value (total across all tiers)
-  const { data: lockedValue } = useReadContract({
-    address: vaultContract?.address,
-    abi: vaultContract?.abi,
-    functionName: "convertToAssets",
-    args: userTotalLocked ? [userTotalLocked] : undefined,
-    query: { enabled: !!userTotalLocked && userTotalLocked > 0n, refetchInterval: 10_000 },
-  });
-  const lockedValueBigInt = (lockedValue as bigint) ?? 0n;
-  const totalPositionValue = userSharesValueBigInt + lockedValueBigInt;
-  const creditBigInt = credit ?? 0n;
+  const userSharesBigInt = userShares;
+  const userSharesValueBigInt = sharesValue;
 
   const hasShares = userSharesBigInt > 0n;
 
@@ -309,71 +275,142 @@ export function VaultDashboard() {
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_380px]">
-      {/* Left column: Stats + Position + Utilization + Mechanics */}
+      {/* Left column: tabbed personal vs global view */}
       <div className="space-y-6">
+        {/* View tabs */}
+        <div className="flex gap-1 rounded-xl border border-white/5 bg-gray-900/50 p-1">
+          {([
+            { key: "myPosition" as const, label: "My Position" },
+            { key: "overview" as const, label: "Vault Overview" },
+          ]).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setViewTab(t.key)}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-all ${
+                viewTab === t.key
+                  ? "gradient-bg text-white shadow-lg"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {viewTab === "myPosition" && (
+          mounted && isConnected ? (
+            <>
+              <MyPositionPanel variant="full" />
+              {positions.length > 0 && (
+                <div className="glass-card p-6">
+                  <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
+                    Your Lock Positions
+                  </h3>
+                  <div className="space-y-3">
+                    {positions.map(({ id, position }) => {
+                      const now = Math.floor(Date.now() / 1000);
+                      const isPartial = position.tier === LockTier.PARTIAL;
+                      const isLeast = position.tier === LockTier.LEAST;
+                      const isFull = position.tier === LockTier.FULL;
+                      const matured = !isPartial && now >= Number(position.unlockAt);
+                      const daysLeft = matured || isPartial
+                        ? 0
+                        : Math.ceil((Number(position.unlockAt) - now) / 86400);
+                      const feeShareLabel = bpsToMultiplier(position.feeShareBps);
+                      const durationDays = Number(position.duration / SECS_PER_DAY);
+                      const tierBadge = isPartial
+                        ? { label: "Partial", cls: "bg-amber-500/10 text-amber-300 border-amber-500/30" }
+                        : isLeast
+                          ? { label: "Least", cls: "bg-gray-500/10 text-gray-400 border-gray-500/30" }
+                          : { label: "Full", cls: "bg-brand-purple/10 text-brand-purple-1 border-brand-purple/30" };
+                      return (
+                        <div key={id.toString()} className="rounded-lg bg-white/5 px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-semibold text-white">
+                                  {formatUSDC(position.shares)} VOO
+                                </p>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${tierBadge.cls}`}>
+                                  {tierBadge.label}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                {isPartial
+                                  ? `${feeShareLabel} fee share -- locked until you graduate`
+                                  : isLeast
+                                    ? "Principal routed to LPs -- no further claim"
+                                    : `${feeShareLabel} fee share -- ${formatDuration(durationDays)}${
+                                        matured ? " -- Matured" : ` -- ${daysLeft}d left`
+                                      }`}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              {isPartial && (
+                                <button
+                                  onClick={() => handleGraduate(id)}
+                                  disabled={graduateHook.isPending || graduateHook.isConfirming}
+                                  title="Commit this position to a 2-year FULL lock. Earns fee share + promo credit."
+                                  className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-all hover:bg-amber-500/30 disabled:opacity-50"
+                                >
+                                  {graduateHook.isPending
+                                    ? "Signing..."
+                                    : graduateHook.isConfirming
+                                      ? "Confirming..."
+                                      : "Graduate to Full"}
+                                </button>
+                              )}
+                              {isFull && matured && (
+                                <button
+                                  onClick={() => handleUnlock(id)}
+                                  disabled={unlockHook.isPending}
+                                  className="rounded-lg bg-neon-green/20 px-3 py-1.5 text-xs font-semibold text-neon-green transition-all hover:bg-neon-green/30 disabled:opacity-50"
+                                >
+                                  {unlockHook.isPending ? "..." : "Unlock"}
+                                </button>
+                              )}
+                              {isFull && !matured && (
+                                <button
+                                  onClick={() => handleEarlyWithdraw(id)}
+                                  disabled={earlyWithdrawHook.isPending}
+                                  className="rounded-lg bg-yellow-500/20 px-3 py-1.5 text-xs font-semibold text-yellow-400 transition-all hover:bg-yellow-500/30 disabled:opacity-50"
+                                >
+                                  {earlyWithdrawHook.isPending ? "..." : "Early Exit"}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {graduateHook.error && (
+                    <p className="mt-2 rounded-lg bg-neon-red/10 px-3 py-2 text-center text-xs text-neon-red">
+                      {graduateHook.error.message.length > 120
+                        ? graduateHook.error.message.slice(0, 120) + "..."
+                        : graduateHook.error.message}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="glass-card p-10 text-center">
+              <p className="text-sm text-gray-400">Connect your wallet to see your position.</p>
+            </div>
+          )
+        )}
+
+        {viewTab === "overview" && (
+          <>
         {/* Stats cards */}
         <div className="grid gap-4 sm:grid-cols-2">
           <StatCard label="Total TVL" value={`$${formatUSDC(totalAssets)}`} accent="pink" />
           <StatCard label="Utilization" value={`${utilization.toFixed(1)}%`} accent="purple" />
           <StatCard label="Free Liquidity" value={`$${formatUSDC(freeLiquidity)}`} accent="green" />
           <StatCard
-            label="Your Position"
-            value={totalPositionValue > 0n ? `$${formatUSDC(totalPositionValue)}` : "$0.00"}
-            accent="gold"
-          />
+            label="Reserved" value={`$${formatUSDC(totalReserved)}`} accent="gold" />
         </div>
-
-        {/* Your position detail */}
-        {mounted && isConnected && (
-          <div className="glass-card p-6">
-            <h3 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-              Your Vault Position
-            </h3>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-              <div>
-                <p className="text-xs text-gray-500">Vault VOO</p>
-                <p className="text-lg font-semibold text-white">
-                  {formatUSDC(userSharesBigInt)}
-                </p>
-                <p className="text-[10px] text-gray-600">
-                  ${formatUSDC(userSharesValueBigInt)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Full locks</p>
-                <p className="text-lg font-semibold text-brand-purple-1">
-                  {formatUSDC(fullShares)}
-                </p>
-                <p className="text-[10px] text-gray-600">{fullPositions.length} position(s)</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Partial locks</p>
-                <p className="text-lg font-semibold text-amber-300">
-                  {formatUSDC(partialShares)}
-                </p>
-                <p className="text-[10px] text-gray-600">
-                  {partialPositions.length} rehab position(s)
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Least locks</p>
-                <p className="text-lg font-semibold text-gray-400">
-                  {formatUSDC(leastShares)}
-                </p>
-                <p className="text-[10px] text-gray-600">
-                  principal routed to LPs
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Lossless credit</p>
-                <p className="text-lg font-semibold text-neon-green">
-                  ${formatUSDC(creditBigInt)}
-                </p>
-                <p className="text-[10px] text-gray-600">spend via lossless mode</p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Utilization bar */}
         <div className="glass-card p-6">
@@ -423,114 +460,7 @@ export function VaultDashboard() {
           </ul>
         </div>
 
-        {/* Existing lock positions */}
-        {positions.length > 0 && (
-          <div className="glass-card p-6">
-            <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
-              Your Lock Positions
-            </h3>
-            <div className="space-y-3">
-              {positions.map(({ id, position }) => {
-                const now = Math.floor(Date.now() / 1000);
-                const isPartial = position.tier === LockTier.PARTIAL;
-                const isLeast = position.tier === LockTier.LEAST;
-                const isFull = position.tier === LockTier.FULL;
-                const matured = !isPartial && now >= Number(position.unlockAt);
-                const daysLeft = matured || isPartial
-                  ? 0
-                  : Math.ceil((Number(position.unlockAt) - now) / 86400);
-
-                const feeShareLabel = bpsToMultiplier(position.feeShareBps);
-                const durationDays = Number(position.duration / SECS_PER_DAY);
-
-                const tierBadge = isPartial
-                  ? { label: "Partial", cls: "bg-amber-500/10 text-amber-300 border-amber-500/30" }
-                  : isLeast
-                    ? { label: "Least", cls: "bg-gray-500/10 text-gray-400 border-gray-500/30" }
-                    : { label: "Full", cls: "bg-brand-purple/10 text-brand-purple-1 border-brand-purple/30" };
-
-                return (
-                  <div
-                    key={id.toString()}
-                    className="rounded-lg bg-white/5 px-4 py-3"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-white">
-                            {formatUSDC(position.shares)} VOO
-                          </p>
-                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${tierBadge.cls}`}>
-                            {tierBadge.label}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          {isPartial
-                            ? `${feeShareLabel} fee share -- locked until you graduate`
-                            : isLeast
-                              ? "Principal routed to LPs -- no further claim"
-                              : `${feeShareLabel} fee share -- ${formatDuration(durationDays)}${
-                                  matured ? " -- Matured" : ` -- ${daysLeft}d left`
-                                }`}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        {isPartial && (
-                          <button
-                            onClick={() => handleGraduate(id)}
-                            disabled={graduateHook.isPending || graduateHook.isConfirming}
-                            title="Commit this position to a 2-year FULL lock. Earns fee share + promo credit."
-                            className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-all hover:bg-amber-500/30 disabled:opacity-50"
-                          >
-                            {graduateHook.isPending
-                              ? "Signing..."
-                              : graduateHook.isConfirming
-                                ? "Confirming..."
-                                : "Graduate to Full"}
-                          </button>
-                        )}
-                        {isFull && matured && (
-                          <button
-                            onClick={() => handleUnlock(id)}
-                            disabled={unlockHook.isPending}
-                            className="rounded-lg bg-neon-green/20 px-3 py-1.5 text-xs font-semibold text-neon-green transition-all hover:bg-neon-green/30 disabled:opacity-50"
-                          >
-                            {unlockHook.isPending ? "..." : "Unlock"}
-                          </button>
-                        )}
-                        {isFull && !matured && (
-                          <button
-                            onClick={() => handleEarlyWithdraw(id)}
-                            disabled={earlyWithdrawHook.isPending}
-                            className="rounded-lg bg-yellow-500/20 px-3 py-1.5 text-xs font-semibold text-yellow-400 transition-all hover:bg-yellow-500/30 disabled:opacity-50"
-                          >
-                            {earlyWithdrawHook.isPending ? "..." : "Early Exit"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {graduateHook.error && (
-              <p className="mt-2 rounded-lg bg-neon-red/10 px-3 py-2 text-center text-xs text-neon-red">
-                {graduateHook.error.message.length > 120
-                  ? graduateHook.error.message.slice(0, 120) + "..."
-                  : graduateHook.error.message}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Pending rewards */}
-        {lockStats.pendingRewards && lockStats.pendingRewards > 0n && (
-          <div className="rounded-xl border border-neon-green/20 bg-neon-green/5 p-4 text-center">
-            <p className="text-sm text-gray-400">Pending Fee Rewards</p>
-            <p className="text-xl font-bold text-neon-green">
-              ${formatUSDC(lockStats.pendingRewards)}
-            </p>
-          </div>
+          </>
         )}
       </div>
 

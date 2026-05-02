@@ -194,3 +194,13 @@ Carryover from `A_DAY_SCALING_SPRINT.md`. The A-DAY doc is closed; remaining unf
 ## Subsumed / superseded
 
 - *USDC balance in the header* — subsumed by **U-1**'s header pill (which also shows vault $ value). No separate item needed.
+
+---
+
+### Change log
+
+- U-1: added `useVaultPosition` hook in `lib/hooks/vault.ts`
+- U-1: new `MyPositionPanel.tsx` (pill + full variants) and `HeaderPositionPill.tsx`
+- U-1: header now mounts `<HeaderPositionPill>` between Help and ConnectKit
+- U-1: `VaultDashboard.tsx` restructured with My Position / Vault Overview tabs; lock positions and pending-rewards moved into the My Position branch; vault stats stay under Overview (replaced "Your Position" stat card with "Reserved")
+- U-1: `VaultDashboard.test.tsx` mocks `useVaultPosition` and asserts the new "Reserved" stat label

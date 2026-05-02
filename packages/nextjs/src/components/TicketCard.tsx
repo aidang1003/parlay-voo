@@ -70,7 +70,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
   const canCashout = ticket.status === "Active" && !hasLostLeg && !allResolved;
 
   return (
-    <div className="glass-card overflow-hidden">
+    <div className="glass-card flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 px-6 py-4">
         <div>
@@ -89,7 +89,7 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
       </div>
 
       {/* Legs */}
-      <div className="divide-y divide-white/5 px-6">
+      <div className="flex-1 divide-y divide-white/5 px-6">
         {ticket.legs.map((leg, i) => {
           const status = getLegStatus(leg);
           return (

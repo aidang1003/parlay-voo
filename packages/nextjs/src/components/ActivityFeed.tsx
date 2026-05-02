@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useEnsName } from "wagmi";
 import { mainnet } from "wagmi/chains";
 import { useTicketActivity, useTicket, type ActivityEvent } from "@/lib/hooks";
-import { formatUSDC } from "@/lib/utils";
+import { useLegDescriptions } from "@/lib/hooks/leg";
+import { formatUSDC, parseOutcomeChoice } from "@/lib/utils";
 
 function shortAddress(addr: `0x${string}`) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -19,13 +20,6 @@ function relativeTime(ts: number | undefined): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
 }
-
-const STATUS_LABEL: Record<number, { label: string; cls: string }> = {
-  1: { label: "won", cls: "text-neon-green" },
-  2: { label: "lost", cls: "text-neon-red" },
-  3: { label: "voided", cls: "text-gray-400" },
-  4: { label: "claimed", cls: "text-neon-green" },
-};
 
 export function ActivityFeed() {
   const { events, isLoading, error } = useTicketActivity({ limit: 100 });
@@ -64,79 +58,84 @@ export function ActivityFeed() {
 }
 
 function ActivityRow({ event }: { event: ActivityEvent }) {
-  const { ticket } = useTicket(event.kind === "purchased" ? undefined : event.ticketId);
+  const { ticket } = useTicket(event.ticketId);
 
-  // Resolve buyer for `settled` events (event itself doesn't carry it).
+  const legIds = useMemo(() => (ticket?.legIds ? Array.from(ticket.legIds) : []), [ticket?.legIds]);
+  const legMap = useLegDescriptions(legIds);
+  const firstLegQuestion = legIds.length > 0 ? legMap.get(legIds[0].toString())?.question : undefined;
+  const moreCount = Math.max(0, legIds.length - 1);
+
+  const stake = ticket?.stake;
   const fallbackBuyer = useMemo(() => ticket?.buyer, [ticket?.buyer]);
   const addr = event.buyer ?? fallbackBuyer;
-
   const ensResult = useEnsName({ address: addr, chainId: mainnet.id });
   const display = ensResult.data ?? (addr ? shortAddress(addr) : "—");
 
-  const verbNode = renderVerb(event, ticket);
+  const summary = firstLegQuestion ?? `Ticket #${event.ticketId.toString()}`;
 
   return (
     <Link
       href={`/ticket/${event.ticketId.toString()}`}
-      className="flex flex-wrap items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-4 py-3 text-sm transition-colors hover:bg-white/10"
+      className="flex flex-wrap items-center gap-3 rounded-xl border border-white/5 bg-white/5 px-4 py-3 text-sm transition-colors hover:bg-white/10"
     >
-      <span className="font-mono text-xs text-gray-400">{display}</span>
-      {verbNode}
-      <span className="ml-auto text-xs text-gray-500">{relativeTime(event.timestamp)}</span>
+      <span className="font-mono text-xs text-gray-400 sm:w-32 sm:flex-shrink-0">{display}</span>
+      <span className="min-w-0 flex-1 truncate text-gray-200" title={summary}>
+        {summary}
+        {moreCount > 0 && <span className="text-gray-500"> +{moreCount} more</span>}
+      </span>
+      {stake !== undefined && (
+        <span className="flex-shrink-0 font-mono text-xs font-semibold text-white">
+          ${formatUSDC(stake, { locale: true })}
+        </span>
+      )}
+      <StatusPill event={event} ticket={ticket} legIds={legIds} />
+      <span className="flex-shrink-0 text-xs text-gray-500">{relativeTime(event.timestamp)}</span>
     </Link>
   );
 }
 
-function renderVerb(event: ActivityEvent, ticket: ReturnType<typeof useTicket>["ticket"]) {
-  switch (event.kind) {
-    case "purchased": {
-      const stake = ticket?.stake;
-      const legCount = ticket?.legIds.length;
-      return (
-        <>
-          <span className="text-white">bought</span>
-          <span className="rounded-md bg-brand-pink/10 px-2 py-0.5 text-xs font-semibold text-brand-pink">
-            #{event.ticketId.toString()}
-          </span>
-          {legCount !== undefined && (
-            <span className="text-xs text-gray-500">{legCount} leg{legCount === 1 ? "" : "s"}</span>
-          )}
-          {stake !== undefined && (
-            <span className="text-xs font-semibold text-white">
-              ${formatUSDC(stake, { locale: true })}
-            </span>
-          )}
-        </>
-      );
-    }
-    case "settled": {
-      const meta = STATUS_LABEL[event.status ?? 0];
-      return (
-        <>
-          <span className="text-gray-400">settled</span>
-          <span className="rounded-md bg-brand-purple/10 px-2 py-0.5 text-xs font-semibold text-brand-purple-1">
-            #{event.ticketId.toString()}
-          </span>
-          {meta && (
-            <span className={`text-xs font-semibold ${meta.cls}`}>{meta.label}</span>
-          )}
-        </>
-      );
-    }
-    case "cashedOut": {
-      return (
-        <>
-          <span className="text-gray-400">cashed out</span>
-          <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-300">
-            #{event.ticketId.toString()}
-          </span>
-          {event.cashoutValue !== undefined && (
-            <span className="text-xs font-semibold text-amber-300">
-              ${formatUSDC(event.cashoutValue, { locale: true })}
-            </span>
-          )}
-        </>
-      );
-    }
+function StatusPill({
+  event,
+  ticket,
+  legIds,
+}: {
+  event: ActivityEvent;
+  ticket: ReturnType<typeof useTicket>["ticket"];
+  legIds: bigint[];
+}) {
+  // Cashout always wins regardless of current ticket status, since the row's
+  // event itself records the cashout action.
+  if (event.kind === "cashedOut") return <Pill tone="amber" label="Cashed out" />;
+
+  const status = ticket?.status;
+
+  // Active / unknown → show the side they bought on the first leg.
+  if (status === undefined || status === 0) {
+    const first = ticket?.outcomes?.[0];
+    const choice = first ? parseOutcomeChoice(first) : 0;
+    if (choice === 1) return <Pill tone="green" label={legIds.length > 1 ? "YES (leg 1)" : "YES"} />;
+    if (choice === 2) return <Pill tone="red" label={legIds.length > 1 ? "NO (leg 1)" : "NO"} />;
+    return <Pill tone="gray" label="Pending" />;
   }
+  if (status === 1) return <Pill tone="green" label="Won" />;
+  if (status === 2) return <Pill tone="red" label="Lost" />;
+  if (status === 3) return <Pill tone="gray" label="Voided" />;
+  if (status === 4) return <Pill tone="green" label="Claimed" />;
+  return null;
+}
+
+function Pill({ tone, label }: { tone: "green" | "red" | "amber" | "gray"; label: string }) {
+  const cls = {
+    green: "bg-neon-green/15 text-neon-green border-neon-green/30",
+    red: "bg-neon-red/15 text-neon-red border-neon-red/30",
+    amber: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    gray: "bg-white/5 text-gray-400 border-white/10",
+  }[tone];
+  return (
+    <span
+      className={`flex-shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${cls}`}
+    >
+      {label}
+    </span>
+  );
 }

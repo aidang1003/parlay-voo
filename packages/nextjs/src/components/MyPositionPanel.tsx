@@ -75,23 +75,77 @@ export function MyPositionPanel({ variant }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Wallet USDC" value={`$${formatUSDC(usdcBigInt)}`} accent="pink" />
-        <StatCard label="Total vault value" value={`$${formatUSDC(totalPositionValue)}`} accent="purple" />
         <StatCard label="Pending fee rewards" value={`$${formatUSDC(pendingBigInt)}`} accent="green" />
         <StatCard label="Lossless credit" value={`$${formatUSDC(creditBigInt)}`} accent="gold" />
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-2">
+        <PositionBox
+          label="Vault VOO"
+          primary={`${formatUSDC(userShares)} VOO`}
+          secondary={`$${formatUSDC(userSharesValue)} value`}
+          accent="white"
+          tooltip={{
+            title: "Liquid vault shares",
+            body: "Unlocked VOO. Withdrawable any time, subject to free liquidity. No fee-share boost — lock to earn.",
+          }}
+        />
+        <PositionBox
+          label="Lossless credit"
+          primary={`$${formatUSDC(creditBigInt)}`}
+          secondary="spend via lossless mode"
+          accent="green"
+          tooltip={{
+            title: "Bet-only credit",
+            body: "Issued when you lose a parlay — equal to 12 months of projected yield on your now-Least-locked stake. Spend it on lossless tickets; if it expires unspent, the locked principal reverts to LPs.",
+          }}
+        />
+      </div>
+
       <div className="glass-card p-6">
-        <h3 className="mb-3 text-sm font-medium uppercase tracking-wider text-gray-500">
-          Your Vault Position
-        </h3>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <Cell label="Vault VOO" primary={formatUSDC(userShares)} secondary={`$${formatUSDC(userSharesValue)}`} primaryClass="text-white" />
-          <Cell label="Full locks" primary={formatUSDC(fullShares)} secondary={`${fullPositions.length} position(s)`} primaryClass="text-brand-purple-1" />
-          <Cell label="Partial locks" primary={formatUSDC(partialShares)} secondary={`${partialPositions.length} rehab position(s)`} primaryClass="text-amber-300" />
-          <Cell label="Least locks" primary={formatUSDC(leastShares)} secondary="principal routed to LPs" primaryClass="text-gray-400" />
-          <Cell label="Lossless credit" primary={`$${formatUSDC(creditBigInt)}`} secondary="spend via lossless mode" primaryClass="text-neon-green" />
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-medium uppercase tracking-wider text-gray-500">
+            Lock Hierarchy
+          </h3>
+          <span className="text-[11px] text-gray-600">hover for details</span>
+        </div>
+
+        <div className="space-y-2">
+          <TierRow
+            label="Full"
+            tier="full"
+            shares={fullShares}
+            positionCount={fullPositions.length}
+            tooltip={{
+              title: "Full lock — top tier",
+              body: "Time-locked VOO earning a fee-share boost. Curve: 1× at 7 days, 2× at 1 year, asymptotic 4× ceiling. Earnings stream into Pending Fee Rewards (above).",
+            }}
+          />
+          <Connector />
+          <TierRow
+            label="Partial"
+            tier="partial"
+            shares={partialShares}
+            positionCount={partialPositions.length}
+            tooltip={{
+              title: "Partial — credit-funded win",
+              body: "Minted when you win a lossless (credit-funded) parlay. Principal stays locked forever; earnings are fully liquid. Graduate to Full to commit to a 2-year lock and pick up the standard fee-share boost.",
+            }}
+          />
+          <Connector />
+          <TierRow
+            label="Least"
+            tier="least"
+            shares={leastShares}
+            positionCount={leastPositions.length}
+            tooltipPlacement="top"
+            tooltip={{
+              title: "Least — losing parlay",
+              body: "Minted when you lose a parlay. Your stake is locked here as productive capital and you get bet-only credit equal to 12 months of projected yield. If credit expires unspent, the principal reverts to LPs.",
+            }}
+          />
         </div>
       </div>
 
@@ -101,6 +155,115 @@ export function MyPositionPanel({ variant }: Props) {
           <p className="text-xl font-bold text-neon-green">${formatUSDC(pendingBigInt)}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function Tooltip({
+  title,
+  body,
+  placement = "bottom",
+}: {
+  title: string;
+  body: string;
+  placement?: "top" | "bottom";
+}) {
+  const positionCls =
+    placement === "top"
+      ? "bottom-full mb-2"
+      : "top-full mt-2";
+  return (
+    <div className={`pointer-events-none absolute left-1/2 z-50 w-64 -translate-x-1/2 rounded-lg border border-white/15 bg-gray-950 p-3 text-left opacity-0 shadow-2xl ring-1 ring-black/40 transition-opacity duration-150 group-hover:opacity-100 ${positionCls}`}>
+      <p className="text-xs font-semibold text-white">{title}</p>
+      <p className="mt-1 text-[11px] leading-snug text-gray-400">{body}</p>
+    </div>
+  );
+}
+
+function PositionBox({
+  label,
+  primary,
+  secondary,
+  accent,
+  tooltip,
+}: {
+  label: string;
+  primary: string;
+  secondary: string;
+  accent: "white" | "green";
+  tooltip: { title: string; body: string };
+}) {
+  const accentCls =
+    accent === "green"
+      ? "border-neon-green/25 bg-neon-green/5"
+      : "border-white/10 bg-white/[0.03]";
+  const valueCls = accent === "green" ? "text-neon-green" : "text-white";
+  return (
+    <div className={`group relative rounded-xl border p-5 ${accentCls}`}>
+      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">{label}</p>
+      <p className={`mt-1 text-2xl font-bold ${valueCls}`}>{primary}</p>
+      <p className="mt-0.5 text-[11px] text-gray-600">{secondary}</p>
+      <Tooltip {...tooltip} />
+    </div>
+  );
+}
+
+function TierRow({
+  label,
+  tier,
+  shares,
+  positionCount,
+  tooltip,
+  tooltipPlacement,
+}: {
+  label: string;
+  tier: "full" | "partial" | "least";
+  shares: bigint;
+  positionCount: number;
+  tooltip: { title: string; body: string };
+  tooltipPlacement?: "top" | "bottom";
+}) {
+  const styles = {
+    full: {
+      box: "border-brand-purple/30 bg-brand-purple/10",
+      badge: "bg-brand-purple/20 text-brand-purple-1",
+      text: "text-brand-purple-1",
+    },
+    partial: {
+      box: "border-amber-500/30 bg-amber-500/10",
+      badge: "bg-amber-500/20 text-amber-300",
+      text: "text-amber-300",
+    },
+    least: {
+      box: "border-gray-500/30 bg-gray-500/10",
+      badge: "bg-gray-500/20 text-gray-400",
+      text: "text-gray-400",
+    },
+  }[tier];
+  return (
+    <div className={`group relative flex items-center justify-between rounded-lg border px-4 py-3 ${styles.box}`}>
+      <div className="flex items-center gap-3">
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${styles.badge}`}>
+          {label}
+        </span>
+        <span className={`text-sm font-semibold ${styles.text}`}>
+          {formatUSDC(shares)} VOO
+        </span>
+      </div>
+      <span className="text-xs text-gray-500">
+        {positionCount} {positionCount === 1 ? "position" : "positions"}
+      </span>
+      <Tooltip {...tooltip} placement={tooltipPlacement} />
+    </div>
+  );
+}
+
+function Connector() {
+  return (
+    <div className="flex justify-center" aria-hidden>
+      <svg width="14" height="10" viewBox="0 0 14 10" className="text-gray-600">
+        <path d="M7 0 V8 M2 5 L7 9 L12 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </div>
   );
 }

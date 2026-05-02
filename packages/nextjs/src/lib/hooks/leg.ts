@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useDeployedContract } from "./useDeployedContract";
 import { useContractClient } from "./_internal";
+import { fetchQuestionMapCached } from "../markets-cache";
 
 export interface LegInfo {
   question: string;
@@ -19,26 +20,6 @@ export interface LegOracleResult {
   status: number; // 0=Unresolved, 1=Won, 2=Lost, 3=Voided
 }
 
-// On-chain `leg.question` is set to sourceRef by ParlayEngine.getOrCreateBySourceRef,
-// so for polymarket-sourced legs it's a 0x… conditionId hash. /api/markets joins
-// against the DB's txtquestion to get the human-readable text.
-async function fetchQuestionMap(): Promise<Map<string, string>> {
-  try {
-    const res = await fetch("/api/markets", { cache: "no-store" });
-    if (!res.ok) return new Map();
-    const markets = (await res.json()) as Array<{
-      legs: Array<{ sourceRef: string; question: string }>;
-    }>;
-    const map = new Map<string, string>();
-    for (const m of markets) {
-      for (const leg of m.legs) map.set(leg.sourceRef, leg.question);
-    }
-    return map;
-  } catch {
-    return new Map();
-  }
-}
-
 export function useLegDescriptions(legIds: readonly bigint[]) {
   const publicClient = useContractClient();
   const registry = useDeployedContract("LegRegistry");
@@ -51,7 +32,7 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
 
     const uniqueIds = Array.from(new Set(legIds.map((id) => id.toString())));
     const [questionMap, ...results] = await Promise.all([
-      fetchQuestionMap(),
+      fetchQuestionMapCached(),
       ...uniqueIds.map(async (key) => {
         try {
           const data = await publicClient.readContract({

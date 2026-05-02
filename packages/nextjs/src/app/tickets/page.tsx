@@ -247,7 +247,7 @@ export default function TicketsPage() {
                 <Link
                   key={td.id.toString()}
                   href={`/ticket/${td.id.toString()}`}
-                  className="block transition-transform hover:scale-[1.02]"
+                  className="block h-full transition-transform hover:scale-[1.02]"
                 >
                   <TicketCard ticket={td} />
                 </Link>

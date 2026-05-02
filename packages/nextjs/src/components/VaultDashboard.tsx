@@ -403,38 +403,68 @@ export function VaultDashboard() {
 
         {viewTab === "overview" && (
           <>
-        {/* Stats cards */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <StatCard label="Total TVL" value={`$${formatUSDC(totalAssets)}`} accent="pink" />
-          <StatCard label="Utilization" value={`${utilization.toFixed(1)}%`} accent="purple" />
-          <StatCard label="Free Liquidity" value={`$${formatUSDC(freeLiquidity)}`} accent="green" />
-          <StatCard
-            label="Reserved" value={`$${formatUSDC(totalReserved)}`} accent="gold" />
-        </div>
-
-        {/* Utilization bar */}
-        <div className="glass-card p-6">
-          <h3 className="mb-4 text-sm font-medium uppercase tracking-wider text-gray-500">
-            Vault Utilization
-          </h3>
-          <div className="relative h-6 overflow-hidden rounded-full bg-gray-800">
-            <div
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-brand-pink to-brand-purple transition-all duration-700"
-              style={{ width: `${Math.min(utilization, 100)}%` }}
-            />
-            {/* 80% cap marker */}
-            <div
-              className="absolute inset-y-0 border-l-2 border-dashed border-yellow-400/50"
-              style={{ left: "80%" }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">
-              {utilization.toFixed(1)}% utilized
+        {/* TVL composition: shows TVL = Reserved + Free, and Utilization = Reserved / TVL */}
+        <div className="glass-card space-y-5 p-6">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Total TVL</p>
+              <p className="mt-1 text-3xl font-bold text-white">${formatUSDC(totalAssets)}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Utilization</p>
+              <p className="mt-1 text-3xl font-bold text-brand-purple-1">{utilization.toFixed(1)}%</p>
+              <p className="text-[10px] text-gray-600">reserved &divide; TVL</p>
             </div>
           </div>
-          <div className="mt-2 flex justify-between text-xs text-gray-500">
-            <span>0%</span>
-            <span className="text-yellow-400/70">Max 80%</span>
-            <span>100%</span>
+
+          {/* Stacked composition bar: Reserved (purple) | Free (green). Width sums to TVL. */}
+          {totalAssets > 0n ? (
+            <div className="space-y-2">
+              <div className="relative flex h-7 overflow-hidden rounded-full bg-gray-800">
+                <div
+                  className="bg-gradient-to-r from-brand-pink to-brand-purple transition-all duration-700"
+                  style={{ width: `${Math.min(utilization, 100)}%` }}
+                  title={`Reserved · $${formatUSDC(totalReserved)}`}
+                />
+                <div
+                  className="flex-1 bg-neon-green/40 transition-all duration-700"
+                  title={`Free liquidity · $${formatUSDC(freeLiquidity)}`}
+                />
+                <div
+                  className="absolute inset-y-0 border-l-2 border-dashed border-yellow-400/60"
+                  style={{ left: "80%" }}
+                  title="80% utilization cap"
+                />
+              </div>
+              <div className="flex justify-between text-[11px] text-gray-500">
+                <span>0%</span>
+                <span className="text-yellow-400/70">Max 80%</span>
+                <span>100%</span>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-white/5 bg-white/5 p-4 text-center text-xs text-gray-500">
+              No deposits yet — deposit USDC to activate the vault.
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-brand-purple/25 bg-brand-purple/5 p-4">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-gradient-to-r from-brand-pink to-brand-purple" />
+                <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Reserved</p>
+              </div>
+              <p className="mt-1 text-xl font-bold text-white">${formatUSDC(totalReserved)}</p>
+              <p className="mt-0.5 text-[11px] text-gray-500">Locked to cover potential payouts on active tickets.</p>
+            </div>
+            <div className="rounded-lg border border-neon-green/25 bg-neon-green/5 p-4">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-neon-green/60" />
+                <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Free Liquidity</p>
+              </div>
+              <p className="mt-1 text-xl font-bold text-white">${formatUSDC(freeLiquidity)}</p>
+              <p className="mt-0.5 text-[11px] text-gray-500">TVL minus Reserved — available to back new tickets and withdrawals.</p>
+            </div>
           </div>
         </div>
 
@@ -445,12 +475,12 @@ export function VaultDashboard() {
           </h2>
           <ul className="space-y-3 text-sm text-gray-400">
             {[
-              { color: "bg-brand-pink", text: "Deposits earn a pro-rata share of all fees collected from parlay ticket purchases." },
-              { color: "bg-brand-purple-1", text: "The vault underwrites potential payouts. Reserved liquidity backs active tickets." },
-              { color: "bg-neon-green", text: "Withdrawals are available up to the unreserved balance (max 80% utilization cap)." },
-              { color: "bg-brand-gold", text: "When bettors lose, their stakes flow to the vault -- increasing share value for all depositors." },
-              { color: "bg-brand-blue", text: "Lock your VOO shares for any duration (min 7 days). Longer locks earn a higher fee-share multiplier, up to ~4x at the asymptote." },
-              { color: "bg-amber-400", text: "Lossless wins mint a PARTIAL lock: principal stays in the vault forever, but you can graduate it to a 2-year FULL lock to unlock fee share and ~6% APR promo credit." },
+              { color: "bg-brand-pink", text: "Deposits mint VOO shares (ERC4626-like). Withdrawals are capped by free liquidity, with an 80% utilization ceiling." },
+              { color: "bg-brand-purple-1", text: "The vault underwrites every active ticket: each ticket's potential payout is reserved on buy and released on settle / cashout." },
+              { color: "bg-neon-green", text: "Fee routing: 90% of ticket fees stream to lockers via LockVaultV2, 5% feeds the safety buffer, 5% stays in the vault. Plain (unlocked) VOO earns share-value appreciation only — lock to claim the 90% stream." },
+              { color: "bg-brand-blue", text: "Lock curve: VOO can be locked for any duration ≥ 7 days. Continuous fee-share boost — 1× at 7 days, exactly 2× at 1 year, asymptotic 4× ceiling." },
+              { color: "bg-brand-gold", text: "Losing stakes mint a Least lock (the bettor's principal stays locked) plus 12 months of projected yield as bet-only credit. Spend the credit lossless or forfeit the principal to LPs at expiry." },
+              { color: "bg-amber-400", text: "Winning a credit-funded (lossless) parlay mints a Partial position — principal locked forever, earnings fully liquid. Graduate Partial → Full to commit to a 2-year lock and pick up the standard fee share." },
             ].map((item, i) => (
               <li key={i} className="flex gap-3">
                 <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${item.color}`} />

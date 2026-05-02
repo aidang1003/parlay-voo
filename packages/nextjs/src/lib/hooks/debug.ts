@@ -7,7 +7,6 @@ import { useAllTickets } from "./ticket";
 import { useContractClient, usePinnedChainId } from "./_internal";
 import type { LegInfo } from "./leg";
 import { parseOutcomeChoice } from "../utils";
-
 export function useIsTestnet(): boolean {
   const chainId = usePinnedChainId();
   return chainId === LOCAL_CHAIN_ID || chainId === BASE_SEPOLIA_CHAIN_ID;
@@ -36,25 +35,7 @@ export interface OpenLeg {
   noStake: bigint;
 }
 
-interface MarketsApiResponse {
-  legs: Array<{
-    sourceRef: string;
-    question: string;
-    probabilityPPM: number;
-    noProbabilityPPM?: number;
-  }>;
-}
-
-async function fetchMarketMap(): Promise<Map<string, MarketsApiResponse["legs"][number]>> {
-  const res = await fetch("/api/markets", { cache: "no-store" });
-  if (!res.ok) return new Map();
-  const markets = (await res.json()) as Array<MarketsApiResponse>;
-  const map = new Map<string, MarketsApiResponse["legs"][number]>();
-  for (const m of markets) {
-    for (const leg of m.legs) map.set(leg.sourceRef, leg);
-  }
-  return map;
-}
+import { fetchSourceRefMap } from "../markets-cache";
 
 /**
  * Lists every unresolved leg referenced by any ticket in the engine. Powers
@@ -121,7 +102,7 @@ export function useOpenLegs() {
     }
 
     const [marketMap, ...legResults] = await Promise.all([
-      fetchMarketMap(),
+      fetchSourceRefMap(),
       ...uniqueLegIds.map(async (legId) => {
         try {
           const [leg, canResolve] = await Promise.all([
@@ -250,7 +231,7 @@ export function useRecentResolutions({ limit = 20 }: { limit?: number } = {}) {
       const clipped = sorted.slice(0, limit);
 
       const [marketMap, ...enriched] = await Promise.all([
-        fetchMarketMap(),
+        fetchSourceRefMap(),
         ...clipped.map(async (log) => {
           const args = (log as unknown as { args: Record<string, unknown> }).args;
           const legId = args.legId as bigint;

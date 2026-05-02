@@ -33,6 +33,9 @@ export interface ChainInfo {
   forgeRpcAlias: string;
   /** Block explorer base URL, no trailing slash. Empty for local. */
   explorerUrl: string;
+  /** Canonical Circle USDC on this chain. Undefined for local. Mirrors
+   *  `USDC_BASE_SEPOLIA` / `USDC_BASE_MAINNET` in HelperConfig.s.sol. */
+  circleUsdc?: `0x${string}`;
 }
 
 export const CHAINS: Record<SupportedChainId, ChainInfo> = {
@@ -50,6 +53,7 @@ export const CHAINS: Record<SupportedChainId, ChainInfo> = {
     rpcEnvVar: "BASE_SEPOLIA_RPC_URL",
     forgeRpcAlias: "base-sepolia",
     explorerUrl: "https://sepolia.basescan.org",
+    circleUsdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   },
   [BASE_MAINNET_CHAIN_ID]: {
     id: BASE_MAINNET_CHAIN_ID,
@@ -58,8 +62,16 @@ export const CHAINS: Record<SupportedChainId, ChainInfo> = {
     rpcEnvVar: "BASE_MAINNET_RPC_URL",
     forgeRpcAlias: "base-mainnet",
     explorerUrl: "https://basescan.org",
+    circleUsdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   },
 };
+
+/** True if `address` is the canonical Circle USDC on `chainId`. */
+export function isCircleUsdc(chainId: SupportedChainId, address: string | undefined): boolean {
+  const canonical = CHAINS[chainId]?.circleUsdc;
+  if (!canonical || !address) return false;
+  return canonical.toLowerCase() === address.toLowerCase();
+}
 
 /** Resolve the RPC URL for a chain, honoring the chain's env-var override. */
 export function getRpcUrl(

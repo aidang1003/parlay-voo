@@ -877,18 +877,15 @@ export function ParlayBuilder() {
           {/* Selected legs summary with numbered badges */}
           {selectedLegs.length > 0 && (
             <div className="space-y-2">
-              {selectedLegs.map((s, i) => (
+              {selectedLegs.map((s) => (
                 <div
                   key={s.leg.id.toString()}
                   className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
                 >
-                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full gradient-bg text-[10px] font-bold text-white">
-                    {i + 1}
-                  </span>
                   <span className="min-w-0 flex-1 truncate text-gray-300">
                     {s.leg.description}
                   </span>
-                  <span className="flex-shrink-0 font-mono text-xs text-gray-400">
+                  <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
                     {effectiveOdds(s.leg, s.outcomeChoice).toFixed(2)}x
                   </span>
                   <span

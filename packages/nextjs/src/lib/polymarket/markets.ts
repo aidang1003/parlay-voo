@@ -49,6 +49,7 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
 
 function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
   const yesId = row.intyeslegid ?? nextSyntheticId();
+  const corrId = row.txtgamegroup ? stableHash32(`game:${row.txtgamegroup}`) : 0;
   const leg: Leg = {
     id: yesId,
     question: row.txtquestion,
@@ -57,12 +58,26 @@ function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
     earliestResolve: row.bigearliestresolve,
     probabilityPPM: row.intyesprobppm,
     active: true,
+    correlationGroupId: corrId,
+    exclusionGroupId: 0,
   };
   if (row.txtsource === "polymarket" && row.intnoprobppm != null) {
     leg.noId = row.intnolegid ?? nextSyntheticId();
     leg.noProbabilityPPM = row.intnoprobppm;
   }
   return leg;
+}
+
+/** FNV-1a 32-bit hash of a string. Stable across runs and platforms; used to
+ *  turn a string game-group key into the numeric correlationGroupId the
+ *  on-chain registry expects. */
+function stableHash32(input: string): number {
+  let h = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0; // FNV prime, keep unsigned
+  }
+  return h >>> 0;
 }
 
 /** Polymarket sourceRefs are the raw conditionId: a 0x-prefixed 32-byte hex.

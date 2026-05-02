@@ -9,31 +9,35 @@ import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_interna
 
 export function useParlayConfig() {
   const engine = useDeployedContract("ParlayEngine");
-  const baseContract = { address: engine?.address, abi: engine?.abi ?? EMPTY_ABI } as const;
+  const vault = useDeployedContract("HouseVault");
+  const baseEngine = { address: engine?.address, abi: engine?.abi ?? EMPTY_ABI } as const;
+  const baseVault = { address: vault?.address, abi: vault?.abi ?? EMPTY_ABI } as const;
 
   const { data, isLoading, refetch } = useReadContracts({
     contracts: [
-      { ...baseContract, functionName: "baseFee" },
-      { ...baseContract, functionName: "perLegFee" },
-      { ...baseContract, functionName: "minStake" },
-      { ...baseContract, functionName: "maxLegs" },
+      { ...baseEngine, functionName: "protocolFeeBps" },
+      { ...baseEngine, functionName: "minStake" },
+      { ...baseEngine, functionName: "maxLegs" },
+      { ...baseVault, functionName: "corrConfig" },
     ],
-    query: { enabled: !!engine, refetchInterval: 10000 },
+    query: { enabled: !!engine && !!vault, refetchInterval: 10000 },
   });
 
-  const pick = (i: number) =>
-    data?.[i]?.status === "success" ? (data[i].result as bigint) : undefined;
-
-  const baseFee = pick(0);
-  const perLegFee = pick(1);
-  const minStake = pick(2);
-  const maxLegs = pick(3);
+  const protocolFeeRes = data?.[0]?.status === "success" ? (data[0].result as bigint) : undefined;
+  const minStakeRes = data?.[1]?.status === "success" ? (data[1].result as bigint) : undefined;
+  const maxLegsRes = data?.[2]?.status === "success" ? (data[2].result as bigint) : undefined;
+  const corrRes =
+    data?.[3]?.status === "success"
+      ? (data[3].result as readonly [bigint, bigint, bigint])
+      : undefined;
 
   return {
-    baseFeeBps: baseFee !== undefined ? Number(baseFee) : undefined,
-    perLegFeeBps: perLegFee !== undefined ? Number(perLegFee) : undefined,
-    maxLegs: maxLegs !== undefined ? Number(maxLegs) : undefined,
-    minStakeUSDC: minStake !== undefined ? Number(minStake) / 1e6 : undefined,
+    protocolFeeBps: protocolFeeRes !== undefined ? Number(protocolFeeRes) : undefined,
+    correlationAsymptoteBps: corrRes !== undefined ? Number(corrRes[0]) : undefined,
+    correlationHalfSatPpm: corrRes !== undefined ? Number(corrRes[1]) : undefined,
+    maxLegsPerGroup: corrRes !== undefined ? Number(corrRes[2]) : undefined,
+    maxLegs: maxLegsRes !== undefined ? Number(maxLegsRes) : undefined,
+    minStakeUSDC: minStakeRes !== undefined ? Number(minStakeRes) / 1e6 : undefined,
     isLoading,
     refetch,
   };

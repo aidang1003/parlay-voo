@@ -2,14 +2,15 @@ import { createPublicClient, http, formatUnits, type Abi } from "viem";
 import { baseSepolia, foundry } from "viem/chains";
 import {
   computeMultiplier,
-  computeEdge,
-  applyEdge,
+  applyFee,
+  applyCorrelation,
   computePayout,
   PPM,
-  BPS,
   USDC_DECIMALS,
-  BASE_FEE_BPS,
-  PER_LEG_FEE_BPS,
+  PROTOCOL_FEE_BPS,
+  CORRELATION_ASYMPTOTE_BPS,
+  CORRELATION_HALF_SAT_PPM,
+  MAX_LEGS_PER_GROUP,
   RiskAction,
   SEED_MARKETS,
   LOCAL_CHAIN_ID,
@@ -145,15 +146,14 @@ export async function getQuote(input: {
 }): Promise<{
   valid: boolean;
   multiplier: string;
-  edgeBps: number;
   potentialPayout: string;
-  feePaid: string;
   legs: Array<{ id: number; question: string; probabilityPPM: number }>;
   error?: string;
 }> {
   await refreshLegMap();
   const legs: Array<{ id: number; question: string; probabilityPPM: number }> = [];
   const probs: number[] = [];
+  const groupCounts = new Map<number, number>();
 
   for (const id of input.legIds) {
     const leg = LEG_MAP.get(id);
@@ -161,42 +161,40 @@ export async function getQuote(input: {
       return {
         valid: false,
         multiplier: "0",
-        edgeBps: 0,
         potentialPayout: "0",
-        feePaid: "0",
         legs: [],
         error: `Leg ${id} not found`,
       };
     }
     legs.push({ id: leg.id, question: leg.question, probabilityPPM: leg.probabilityPPM });
     probs.push(leg.probabilityPPM);
+    const corrId = leg.correlationGroupId ?? 0;
+    if (corrId !== 0) {
+      groupCounts.set(corrId, (groupCounts.get(corrId) ?? 0) + 1);
+    }
   }
 
   if (probs.length < 2 || probs.length > 5) {
     return {
       valid: false,
       multiplier: "0",
-      edgeBps: 0,
       potentialPayout: "0",
-      feePaid: "0",
       legs,
       error: `Need 2-5 legs, got ${probs.length}`,
     };
   }
 
+  const groupSizes = Array.from(groupCounts.values());
   const stakeRaw = BigInt(Math.round(input.stake * 10 ** USDC_DECIMALS));
   const fairMult = computeMultiplier(probs);
-  const edge = computeEdge(probs.length);
-  const netMult = applyEdge(fairMult, edge);
+  const feeAdjusted = applyFee(fairMult, probs.length, PROTOCOL_FEE_BPS);
+  const netMult = applyCorrelation(feeAdjusted, groupSizes, CORRELATION_ASYMPTOTE_BPS, CORRELATION_HALF_SAT_PPM);
   const payout = computePayout(stakeRaw, netMult);
-  const fee = computePayout(stakeRaw, fairMult) - payout;
 
   return {
     valid: true,
     multiplier: `${(Number(netMult) / PPM).toFixed(2)}x`,
-    edgeBps: edge,
     potentialPayout: `${formatUnits(payout, USDC_DECIMALS)} USDC`,
-    feePaid: `${formatUnits(fee, USDC_DECIMALS)} USDC`,
     legs,
   };
 }
@@ -337,11 +335,11 @@ export async function assessRisk(input: {
   reasoning: string;
   warnings: string[];
   multiplier: string;
-  edgeBps: number;
 }> {
   await refreshLegMap();
   const probs: number[] = [];
   const categories: string[] = [];
+  const groupCounts = new Map<number, number>();
 
   for (const id of input.legIds) {
     const leg = LEG_MAP.get(id);
@@ -355,18 +353,21 @@ export async function assessRisk(input: {
         reasoning: `Leg ${id} not found`,
         warnings: [],
         multiplier: "0x",
-        edgeBps: 0,
       };
     }
     probs.push(leg.probabilityPPM);
     categories.push(leg.category);
+    const corrId = leg.correlationGroupId ?? 0;
+    if (corrId !== 0) {
+      groupCounts.set(corrId, (groupCounts.get(corrId) ?? 0) + 1);
+    }
   }
 
   const riskTolerance: RiskProfile = "moderate";
   const bankroll = input.bankroll ?? 1000;
   const caps = RISK_CAPS[riskTolerance];
   const numLegs = probs.length;
-  const edgeBps = computeEdge(numLegs);
+  const groupSizes = Array.from(groupCounts.values());
   const warnings: string[] = [];
 
   let fairMultiplierX1e6: bigint;
@@ -382,7 +383,6 @@ export async function assessRisk(input: {
       reasoning: "Invalid probabilities",
       warnings: [],
       multiplier: "0x",
-      edgeBps,
     };
   }
 
@@ -396,11 +396,16 @@ export async function assessRisk(input: {
       reasoning: "Multiplier too large -- parlay is extremely unlikely to win",
       warnings: [],
       multiplier: "overflow",
-      edgeBps,
     };
   }
 
-  const netMultiplierX1e6 = applyEdge(fairMultiplierX1e6, edgeBps);
+  const feeAdjusted = applyFee(fairMultiplierX1e6, numLegs, PROTOCOL_FEE_BPS);
+  const netMultiplierX1e6 = applyCorrelation(
+    feeAdjusted,
+    groupSizes,
+    CORRELATION_ASYMPTOTE_BPS,
+    CORRELATION_HALF_SAT_PPM,
+  );
   const fairMultFloat = Number(fairMultiplierX1e6) / PPM;
   const netMultFloat = Number(netMultiplierX1e6) / PPM;
   const winProbability = 1 / fairMultFloat;
@@ -421,7 +426,9 @@ export async function assessRisk(input: {
     warnings.push(`Win probability ${(winProbability * 100).toFixed(2)}% is below moderate minimum of ${(caps.minWinProb * 100).toFixed(0)}%`);
   }
 
-  // Correlation detection
+  // Loose category-overlap heuristic — surfaces a soft signal when multiple
+  // legs share a category (independent of the on-chain correlationGroupId,
+  // which is the authoritative source).
   const catCounts: Record<string, number> = {};
   for (const cat of categories) {
     catCounts[cat] = (catCounts[cat] || 0) + 1;
@@ -440,7 +447,7 @@ export async function assessRisk(input: {
     reasoning = `${numLegs}-leg parlay at ${(winProbability * 100).toFixed(2)}% win probability exceeds moderate risk tolerance.`;
   } else if (kellyFraction === 0) {
     action = RiskAction.REDUCE_STAKE;
-    reasoning = `House edge (${edgeBps}bps) exceeds edge on fair odds. Kelly suggests $0.`;
+    reasoning = `Net multiplier (${netMultFloat.toFixed(2)}x) leaves no positive Kelly edge. Kelly suggests $0.`;
   } else if (suggestedStake < input.stake) {
     action = RiskAction.REDUCE_STAKE;
     reasoning = `Kelly suggests ${suggestedStake.toFixed(2)} USDC (${(kellyFraction * 100).toFixed(2)}% of bankroll). Your proposed ${input.stake} USDC exceeds this.`;
@@ -457,14 +464,14 @@ export async function assessRisk(input: {
     reasoning,
     warnings,
     multiplier: `${netMultFloat.toFixed(2)}x`,
-    edgeBps,
   };
 }
 
 export async function getProtocolConfig(): Promise<{
   chain: { id: number; name: string };
   contracts: Record<string, string>;
-  fees: { baseBps: number; perLegBps: number; exampleEdge: Record<string, number> };
+  fee: { protocolFeeBps: number };
+  correlation: { asymptoteBps: number; halfSatPpm: number; maxLegsPerGroup: number };
   limits: { minLegs: number; maxLegs: number; minStakeUSDC: number; maxUtilizationBps: number; maxPayoutBps: number };
 }> {
   return {
@@ -475,15 +482,11 @@ export async function getProtocolConfig(): Promise<{
       legRegistry: addr.legRegistry,
       usdc: addr.usdc,
     },
-    fees: {
-      baseBps: BASE_FEE_BPS,
-      perLegBps: PER_LEG_FEE_BPS,
-      exampleEdge: {
-        "2-leg": computeEdge(2),
-        "3-leg": computeEdge(3),
-        "4-leg": computeEdge(4),
-        "5-leg": computeEdge(5),
-      },
+    fee: { protocolFeeBps: PROTOCOL_FEE_BPS },
+    correlation: {
+      asymptoteBps: CORRELATION_ASYMPTOTE_BPS,
+      halfSatPpm: CORRELATION_HALF_SAT_PPM,
+      maxLegsPerGroup: MAX_LEGS_PER_GROUP,
     },
     limits: {
       minLegs: 2,

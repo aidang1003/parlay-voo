@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { formatUnits } from "viem";
 import {
   computeMultiplier,
-  computeEdge,
-  applyEdge,
+  applyFee,
+  applyCorrelation,
   computePayout,
   PPM,
   USDC_DECIMALS,
+  PROTOCOL_FEE_BPS,
+  CORRELATION_ASYMPTOTE_BPS,
+  CORRELATION_HALF_SAT_PPM,
   RiskAction,
 } from "@parlayvoo/shared";
 import type { RiskProfile } from "@parlayvoo/shared";
@@ -49,6 +52,7 @@ export async function POST(req: Request) {
 
     const probs: number[] = [];
     const categories: string[] = [];
+    const groupCounts = new Map<number, number>();
     for (const id of legIds) {
       const leg = LEG_MAP.get(id);
       if (!leg) {
@@ -65,7 +69,12 @@ export async function POST(req: Request) {
       }
       probs.push(leg.probabilityPPM);
       categories.push(leg.category);
+      const corrId = leg.correlationGroupId ?? 0;
+      if (corrId !== 0) {
+        groupCounts.set(corrId, (groupCounts.get(corrId) ?? 0) + 1);
+      }
     }
+    const groupSizes = Array.from(groupCounts.values());
 
     // ── Quote computation ──────────────────────────────────────────────
     const stakeNum = parseFloat(stake) || 0;
@@ -78,19 +87,21 @@ export async function POST(req: Request) {
 
     const stakeRaw = BigInt(Math.round(stakeNum * 10 ** USDC_DECIMALS));
     const fairMultiplierX1e6 = computeMultiplier(probs);
-    const edgeBps = computeEdge(probs.length);
-    const netMultiplierX1e6 = applyEdge(fairMultiplierX1e6, edgeBps);
+    const feeAdjusted = applyFee(fairMultiplierX1e6, probs.length, PROTOCOL_FEE_BPS);
+    const netMultiplierX1e6 = applyCorrelation(
+      feeAdjusted,
+      groupSizes,
+      CORRELATION_ASYMPTOTE_BPS,
+      CORRELATION_HALF_SAT_PPM,
+    );
     const payout = computePayout(stakeRaw, netMultiplierX1e6);
-    const fee = computePayout(stakeRaw, fairMultiplierX1e6) - payout;
 
     const quote = {
       legIds,
       outcomes,
       stake,
-      multiplierX1e6: fairMultiplierX1e6.toString(),
+      multiplierX1e6: netMultiplierX1e6.toString(),
       potentialPayout: formatUnits(payout, USDC_DECIMALS),
-      feePaid: formatUnits(fee, USDC_DECIMALS),
-      edgeBps,
       probabilities: probs,
       valid: true,
     };
@@ -120,7 +131,6 @@ export async function POST(req: Request) {
           riskTolerance: profile,
           fairMultiplier: 0,
           netMultiplier: 0,
-          edgeBps,
         },
       });
     }
@@ -170,7 +180,7 @@ export async function POST(req: Request) {
       reasoning = `${numLegs}-leg parlay at ${(winProbability * 100).toFixed(2)}% win probability exceeds ${profile} risk tolerance limits.`;
     } else if (kellyFraction === 0) {
       action = RiskAction.REDUCE_STAKE;
-      reasoning = `House edge (${edgeBps}bps) exceeds edge on fair odds. Kelly suggests $0.`;
+      reasoning = `Net multiplier (${netMultFloat.toFixed(2)}x) leaves no positive Kelly edge. Kelly suggests $0.`;
     } else if (suggestedStake < stakeNum) {
       action = RiskAction.REDUCE_STAKE;
       reasoning = `Kelly criterion suggests ${suggestedStake.toFixed(2)} USDC (${(kellyFraction * 100).toFixed(2)}% of bankroll). Your proposed stake of ${stake} USDC exceeds this.`;
@@ -192,7 +202,6 @@ export async function POST(req: Request) {
       riskTolerance: profile,
       fairMultiplier: Math.round(fairMultFloat * 100) / 100,
       netMultiplier: Math.round(netMultFloat * 100) / 100,
-      edgeBps,
     };
 
     return NextResponse.json({ quote, risk });

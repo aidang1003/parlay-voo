@@ -33,6 +33,8 @@ export async function GET(req: Request) {
       probabilityPPM: l.probabilityPPM,
       noProbabilityPPM: l.noProbabilityPPM,
       active: l.active,
+      correlationGroupId: l.correlationGroupId ?? 0,
+      exclusionGroupId: l.exclusionGroupId ?? 0,
     })),
   }));
 

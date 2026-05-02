@@ -100,6 +100,11 @@ Long-form deferred designs that don't fit the bullet shape above live as full ch
 
 ---
 
+## 6
+Once a leg is lost the ticket should be resolveable since the person has no chance of winning.
+Let them complete the ticket
+---
+
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.

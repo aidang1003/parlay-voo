@@ -47,3 +47,11 @@ When we come back to this, these are the decisions that drive everything else:
 - Re-read the open questions above and make sure the answers we pick still hang together as one system, not nine independent choices.
 
 No code changes land from this doc. When the design is ready to implement, this file gets rewritten as a real change doc with Part 1 / Part 2 split per the standard template.
+
+
+
+
+## User
+I figured out how this will work.
+Our AMM pool will take the other side of a parlay on checkout, then open the legs up to the market
+If anyone want to buy the other end of a parlay we'll sell it to them at the odds we got it at plus a fee

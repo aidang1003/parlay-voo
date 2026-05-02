@@ -1,2 +1,15 @@
 packages:
   - "packages/*"
+
+overrides:
+  wagmi: "^2.14.0"
+  viem: "^2.21.0"
+  "@tanstack/react-query": "^5.62.0"
+
+ignoredBuiltDependencies:
+  - bufferutil
+  - esbuild
+  - keccak
+  - msw
+  - unrs-resolver
+  - utf-8-validate

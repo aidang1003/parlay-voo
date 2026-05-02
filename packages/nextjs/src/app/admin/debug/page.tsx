@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { parseUnits, formatUnits } from "viem";
 import { useMintTestUSDC, useUSDCBalance } from "@/lib/hooks";
-import { useIsTestnet, useOpenLegs, type OpenLeg } from "@/lib/hooks/debug";
+import { useIsTestnet, useOpenLegs, useRecentResolutions, type OpenLeg } from "@/lib/hooks/debug";
+import { formatUSDC } from "@/lib/utils";
 
 type ResolveStatus = 1 | 2 | 3;
 
@@ -36,6 +37,7 @@ export default function AdminDebugPage() {
       <MintSection />
       <DatabaseSection />
       <LegResolverSection />
+      <RecentResolutionsSection />
     </div>
   );
 }
@@ -247,6 +249,7 @@ function LegResolverSection() {
                 <th className="px-4 py-3">Question</th>
                 <th className="px-4 py-3 text-right">YES</th>
                 <th className="px-4 py-3 text-right">NO</th>
+                <th className="px-4 py-3 text-right" title="Active tickets that bet YES vs NO on this leg, with summed stake.">Positions</th>
                 <th className="px-4 py-3">Cutoff</th>
                 <th className="px-4 py-3 text-right">Resolve</th>
               </tr>
@@ -275,6 +278,16 @@ function LegResolverSection() {
                           (leg.yesProbabilityPPM != null ? 1_000_000 - leg.yesProbabilityPPM : null),
                       )}
                     </td>
+                    <td className="px-4 py-3 text-right font-mono text-xs leading-tight">
+                      <div className="text-emerald-300">
+                        {leg.yesCount} <span className="text-gray-500">·</span>{" "}
+                        ${fmtStake(leg.yesStake)}
+                      </div>
+                      <div className="text-red-300">
+                        {leg.noCount} <span className="text-gray-500">·</span>{" "}
+                        ${fmtStake(leg.noStake)}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-xs text-gray-500">{fmtTime(Number(leg.cutoffTime))}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
@@ -298,6 +311,93 @@ function LegResolverSection() {
       )}
     </Section>
   );
+}
+
+// ── Recently resolved ────────────────────────────────────────────────────
+
+function RecentResolutionsSection() {
+  const { rows, isLoading, refetch } = useRecentResolutions({ limit: 20 });
+
+  return (
+    <Section
+      title="Recently Resolved"
+      action={
+        <button
+          onClick={refetch}
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          Refresh
+        </button>
+      }
+    >
+      <p className="mb-4 text-xs text-gray-500">
+        Audit trail of the last 20 leg resolutions, newest first. Once resolved
+        on-chain, a leg is immutable — this list is read-only.
+      </p>
+
+      {isLoading && (
+        <div className="flex min-h-[10vh] items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-pink border-t-transparent" />
+        </div>
+      )}
+
+      {!isLoading && rows.length === 0 && (
+        <div className="py-6 text-center text-gray-500">No resolved legs yet.</div>
+      )}
+
+      {!isLoading && rows.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-white/5 bg-gray-900/40">
+          <table className="w-full text-sm">
+            <thead className="border-b border-white/5 bg-white/5 text-left text-xs uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Leg #</th>
+                <th className="px-4 py-3">Question</th>
+                <th className="px-4 py-3 text-center">Outcome</th>
+                <th className="px-4 py-3">Resolver</th>
+                <th className="px-4 py-3">When</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {rows.map((r) => (
+                <tr key={`${r.txHash}:${r.legId.toString()}`} className="align-top text-gray-300">
+                  <td className="px-4 py-3 font-mono text-gray-500">#{r.legId.toString()}</td>
+                  <td className="px-4 py-3 max-w-[360px]">
+                    <div className="whitespace-normal">{r.question}</div>
+                  </td>
+                  <td className="px-4 py-3 text-center font-mono text-xs">
+                    <span className={`rounded-full border px-2 py-0.5 ${outcomeBadge(r.status)}`}>
+                      {outcomeLabel(r.status)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{shortAddr(r.resolver)}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{fmtTime(r.resolvedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function outcomeLabel(status: number): string {
+  if (status === 1) return "YES";
+  if (status === 2) return "NO";
+  if (status === 3) return "VOID";
+  return "—";
+}
+
+function outcomeBadge(status: number): string {
+  if (status === 1) return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (status === 2) return "border-red-500/40 bg-red-500/10 text-red-300";
+  if (status === 3) return "border-white/10 bg-white/5 text-gray-400";
+  return "border-white/10 bg-white/5 text-gray-500";
+}
+
+function shortAddr(addr: `0x${string}`): string {
+  if (!addr || addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 function ResolveButton({
@@ -365,6 +465,10 @@ function fmtTime(ts: number): string {
 function fmtPct(ppm: number | null | undefined): string {
   if (ppm == null) return "—";
   return `${(ppm / 10_000).toFixed(1)}%`;
+}
+
+function fmtStake(stake: bigint): string {
+  return formatUSDC(stake, { locale: true });
 }
 
 function prettyJson(raw: string): string {

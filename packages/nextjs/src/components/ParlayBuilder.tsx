@@ -20,6 +20,8 @@ import {
   useUSDCBalance,
   useVaultStats,
   useMintTestUSDC,
+  useLegDescriptions,
+  useLegStatuses,
 } from "@/lib/hooks";
 import { MultiplierClimb } from "./MultiplierClimb";
 
@@ -431,10 +433,31 @@ export function ParlayBuilder() {
   const effectiveBaseFee = baseFeeBps ?? BASE_FEE_BPS;
   const effectivePerLegFee = perLegFeeBps ?? PER_LEG_FEE_BPS;
 
+  // Pull on-chain status for any DisplayLeg that has a real (non-synthetic)
+  // legId. Synthetic ids are negative (set in markets.ts when the row hasn't
+  // been JIT-registered yet) and have no oracle to query — skip them.
+  const onChainLegIds = useMemo(
+    () => allLegs.map((l) => l.id).filter((id) => id >= 0n),
+    [allLegs],
+  );
+  const builderLegMap = useLegDescriptions(onChainLegIds);
+  const builderLegStatuses = useLegStatuses(onChainLegIds, builderLegMap, 30_000);
+
+  // Drop legs the oracle has already resolved (status 1/2/3). Buying them
+  // would revert at quote-sign time; nothing the user can do with them.
+  const liveLegs = useMemo(() => {
+    if (builderLegStatuses.size === 0) return allLegs;
+    return allLegs.filter((l) => {
+      if (l.id < 0n) return true;
+      const status = builderLegStatuses.get(l.id.toString());
+      return !status?.resolved;
+    });
+  }, [allLegs, builderLegStatuses]);
+
   const filteredLegs = useMemo(() => {
-    if (activeCategory === "all") return allLegs;
-    return allLegs.filter((l) => l.category === activeCategory);
-  }, [allLegs, activeCategory]);
+    if (activeCategory === "all") return liveLegs;
+    return liveLegs.filter((l) => l.category === activeCategory);
+  }, [liveLegs, activeCategory]);
 
   useEffect(() => {
     if (

@@ -28,6 +28,12 @@ abstract contract CodeConstants {
     uint64 internal constant UMA_DEFAULT_LIVENESS = 7200; // 2 hours (F-5; tune later)
     uint256 internal constant UMA_BOND_SENTINEL = 0; // sentinel: "use oo.getMinimumBond(USDC) at deploy"
 
+    /* Correlation engine defaults — keep in lockstep with packages/shared/src/constants.ts. */
+    uint256 internal constant DEFAULT_PROTOCOL_FEE_BPS = 1000; // 10% per leg
+    uint256 internal constant DEFAULT_CORR_ASYMPTOTE_BPS = 8000; // D = 80%
+    uint256 internal constant DEFAULT_CORR_HALF_SAT_PPM = 1_000_000; // k = 1.0
+    uint256 internal constant DEFAULT_MAX_LEGS_PER_GROUP = 3;
+
     /* Anvil default keys (forge-std test accounts 0-2). Published foundry defaults — safe to embed. */
     uint256 internal constant ANVIL_ACCOUNT_0_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
     uint256 internal constant ANVIL_ACCOUNT_1_KEY = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
@@ -59,6 +65,14 @@ contract HelperConfig is CodeConstants, Script {
         /// Deployer / broadcast signing key. Read from env for real chains,
         /// falls back to the Anvil default key locally.
         uint256 deployerKey;
+        /// Per-leg multiplicative protocol fee (BPS). See CORRELATION.md.
+        uint256 protocolFeeBps;
+        /// Correlation asymptote `D` (BPS).
+        uint256 corrAsymptoteBps;
+        /// Correlation half-saturation `k` (PPM). 1e6 = k=1.0.
+        uint256 corrHalfSatPpm;
+        /// Builder-side hard cap on legs per correlation group.
+        uint256 maxLegsPerGroup;
     }
 
     mapping(uint256 => NetworkConfig) private _configs;
@@ -87,7 +101,11 @@ contract HelperConfig is CodeConstants, Script {
             umaBondAmount: 0,
             uniswapNFPM: address(0),
             weth: address(0),
-            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY)
+            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY),
+            protocolFeeBps: vm.envOr("NEXT_PUBLIC_PROTOCOL_FEE_BPS", DEFAULT_PROTOCOL_FEE_BPS),
+            corrAsymptoteBps: vm.envOr("NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS", DEFAULT_CORR_ASYMPTOTE_BPS),
+            corrHalfSatPpm: vm.envOr("NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM", DEFAULT_CORR_HALF_SAT_PPM),
+            maxLegsPerGroup: vm.envOr("NEXT_PUBLIC_MAX_LEGS_PER_GROUP", DEFAULT_MAX_LEGS_PER_GROUP)
         });
     }
 
@@ -103,7 +121,11 @@ contract HelperConfig is CodeConstants, Script {
             umaBondAmount: UMA_BOND_SENTINEL,
             uniswapNFPM: UNISWAP_NFPM,
             weth: WETH_BASE,
-            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0))
+            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0)),
+            protocolFeeBps: vm.envOr("NEXT_PUBLIC_PROTOCOL_FEE_BPS", DEFAULT_PROTOCOL_FEE_BPS),
+            corrAsymptoteBps: vm.envOr("NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS", DEFAULT_CORR_ASYMPTOTE_BPS),
+            corrHalfSatPpm: vm.envOr("NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM", DEFAULT_CORR_HALF_SAT_PPM),
+            maxLegsPerGroup: vm.envOr("NEXT_PUBLIC_MAX_LEGS_PER_GROUP", DEFAULT_MAX_LEGS_PER_GROUP)
         });
     }
 
@@ -116,7 +138,11 @@ contract HelperConfig is CodeConstants, Script {
             umaBondAmount: UMA_BOND_SENTINEL,
             uniswapNFPM: UNISWAP_NFPM,
             weth: WETH_BASE,
-            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0))
+            deployerKey: vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0)),
+            protocolFeeBps: vm.envOr("NEXT_PUBLIC_PROTOCOL_FEE_BPS", DEFAULT_PROTOCOL_FEE_BPS),
+            corrAsymptoteBps: vm.envOr("NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS", DEFAULT_CORR_ASYMPTOTE_BPS),
+            corrHalfSatPpm: vm.envOr("NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM", DEFAULT_CORR_HALF_SAT_PPM),
+            maxLegsPerGroup: vm.envOr("NEXT_PUBLIC_MAX_LEGS_PER_GROUP", DEFAULT_MAX_LEGS_PER_GROUP)
         });
     }
 }

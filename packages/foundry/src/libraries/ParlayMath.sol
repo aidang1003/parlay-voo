@@ -5,6 +5,7 @@ pragma solidity ^0.8.24;
 /// @notice Pure math library for parlay odds and payout calculations.
 ///         All probabilities are expressed in PPM (parts per million), so 500_000 = 50%.
 ///         Multipliers are expressed as X * 1e6 (e.g. 2x = 2_000_000).
+///         Mirrors `packages/shared/src/math.ts` exactly (math-parity invariant).
 library ParlayMath {
     uint256 internal constant PPM = 1e6;
     uint256 internal constant BPS = 10_000;
@@ -18,19 +19,53 @@ library ParlayMath {
         multiplierX1e6 = PPM; // start at 1x (1_000_000)
         for (uint256 i = 0; i < probsPPM.length; i++) {
             require(probsPPM[i] > 0 && probsPPM[i] <= PPM, "ParlayMath: prob out of range");
-            // multiplier = multiplier * (1e6 / prob_i)
-            // To avoid precision loss: multiplier = multiplier * 1e6 / prob_i
             multiplierX1e6 = (multiplierX1e6 * PPM) / probsPPM[i];
         }
     }
 
-    /// @notice Subtract the house edge from the fair multiplier.
-    /// @param fairMultiplierX1e6 The fair multiplier (scaled by 1e6).
-    /// @param edgeBps The house edge in basis points (e.g. 200 = 2%).
-    /// @return netMultiplierX1e6 The net multiplier after edge deduction.
-    function applyEdge(uint256 fairMultiplierX1e6, uint256 edgeBps) internal pure returns (uint256 netMultiplierX1e6) {
-        require(edgeBps < BPS, "ParlayMath: edge >= 100%");
-        netMultiplierX1e6 = (fairMultiplierX1e6 * (BPS - edgeBps)) / BPS;
+    /// @notice Apply per-leg multiplicative fee. Iteratively multiplies by
+    ///         (BPS - feeBps) / BPS once per leg.
+    ///           result = mul × ((BPS - f) / BPS)^numLegs
+    /// @dev    Iterative loop, not pow — must match math.ts bit-for-bit.
+    function applyFee(uint256 mulX1e6, uint256 numLegs, uint256 feeBps) internal pure returns (uint256) {
+        require(feeBps < BPS, "ParlayMath: fee >= 100%");
+        uint256 m = mulX1e6;
+        for (uint256 i = 0; i < numLegs; i++) {
+            m = (m * (BPS - feeBps)) / BPS;
+        }
+        return m;
+    }
+
+    /// @notice Saturating discount in BPS for a single correlation group of size n.
+    ///           discount = D × (n - 1) × PPM / ((n - 1) × PPM + halfSatPpm)
+    ///         Returns 0 for n < 2.
+    function correlationDiscountBps(uint256 n, uint256 asymptoteBps, uint256 halfSatPpm)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (n < 2) return 0;
+        uint256 nm1 = n - 1;
+        return (asymptoteBps * nm1 * PPM) / (nm1 * PPM + halfSatPpm);
+    }
+
+    /// @notice Compose a multiplier with per-group saturating discounts.
+    ///           mul × ∏ (BPS - discount_g) / BPS over all groups with n_g ≥ 2.
+    /// @dev    Group sizes < 2 are skipped (no discount).
+    function applyCorrelation(
+        uint256 mulX1e6,
+        uint256[] memory groupSizes,
+        uint256 asymptoteBps,
+        uint256 halfSatPpm
+    ) internal pure returns (uint256) {
+        uint256 m = mulX1e6;
+        for (uint256 i = 0; i < groupSizes.length; i++) {
+            uint256 n = groupSizes[i];
+            if (n < 2) continue;
+            uint256 discount = correlationDiscountBps(n, asymptoteBps, halfSatPpm);
+            m = (m * (BPS - discount)) / BPS;
+        }
+        return m;
     }
 
     /// @notice Compute the payout from a given stake and net multiplier.
@@ -39,19 +74,6 @@ library ParlayMath {
     /// @return payout The total payout amount.
     function computePayout(uint256 stake, uint256 netMultiplierX1e6) internal pure returns (uint256 payout) {
         payout = (stake * netMultiplierX1e6) / PPM;
-    }
-
-    /// @notice Compute the total house edge for a parlay with `numLegs` legs.
-    /// @param numLegs Number of legs in the parlay.
-    /// @param baseBps Base edge in basis points.
-    /// @param perLegBps Additional edge per leg in basis points.
-    /// @return totalBps The total edge in basis points.
-    function computeEdge(uint256 numLegs, uint256 baseBps, uint256 perLegBps)
-        internal
-        pure
-        returns (uint256 totalBps)
-    {
-        totalBps = baseBps + (numLegs * perLegBps);
     }
 
     /// @notice Compute the cashout value for an early exit.
@@ -77,19 +99,12 @@ library ParlayMath {
         require(unresolvedCount <= totalLegs, "ParlayMath: unresolved > total");
         require(basePenaltyBps <= BPS, "ParlayMath: penalty > 100%");
 
-        // Fair value = expected payout given won legs.
-        // wonMultiplier = 1/product(wonProbs) in PPM; wonValue = stake / product(wonProbs).
-        // This already equals Prob(unresolved win) × fullPayout because the unresolved
-        // probabilities cancel out when deriving EV from won legs alone.
-        // The penalty (below) prices in the risk of unresolved legs.
         uint256 wonMultiplier = computeMultiplier(wonProbsPPM);
         uint256 fairValue = computePayout(effectiveStake, wonMultiplier);
 
-        // Apply scaled penalty: more unresolved legs = higher penalty
         penaltyBps = (basePenaltyBps * unresolvedCount) / totalLegs;
         cashoutValue = (fairValue * (BPS - penaltyBps)) / BPS;
 
-        // Cap at potential payout
         if (cashoutValue > potentialPayout) {
             cashoutValue = potentialPayout;
         }

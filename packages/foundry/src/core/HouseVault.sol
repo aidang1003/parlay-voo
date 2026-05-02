@@ -76,6 +76,21 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     ///         earmarked, not LP-owned, until it gets minted into shares.
     uint256 public totalRehabClaimable;
 
+    /// @notice Correlation pricing knobs. See docs/changes/CORRELATION.md.
+    /// @param corrAsymptoteBps  Asymptotic ceiling on per-group discount (BPS).
+    /// @param corrHalfSatPpm    Half-saturation point: at (n-1)·PPM == k_ppm,
+    ///                          discount equals exactly D/2.
+    /// @param maxLegsPerGroup   Hard cap on legs from one correlation group.
+    struct CorrelationConfig {
+        uint256 corrAsymptoteBps;
+        uint256 corrHalfSatPpm;
+        uint256 maxLegsPerGroup;
+    }
+
+    /// @notice Live correlation config. Public getter returns the tuple
+    ///         (corrAsymptoteBps, corrHalfSatPpm, maxLegsPerGroup).
+    CorrelationConfig public corrConfig;
+
     // ── Events ───────────────────────────────────────────────────────────
 
     event Deposited(address indexed depositor, address indexed receiver, uint256 assets, uint256 shares);
@@ -104,6 +119,9 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     event LeastPrincipalBurned(uint256 shares);
     event LosslessWinRouted(address indexed owner, uint256 payout, uint256 sharesMinted);
     event PromoCreditIssued(address indexed user, uint256 amount);
+    event CorrAsymptoteBpsSet(uint256 oldBps, uint256 newBps);
+    event CorrHalfSatPpmSet(uint256 oldPpm, uint256 newPpm);
+    event MaxLegsPerGroupSet(uint256 oldN, uint256 newN);
 
     // ── Modifiers ────────────────────────────────────────────────────────
 
@@ -114,10 +132,22 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
 
     // ── Constructor ──────────────────────────────────────────────────────
 
-    constructor(IERC20 _asset) ERC20("ParlayVoo", "VOO") Ownable(msg.sender) {
+    constructor(
+        IERC20 _asset,
+        uint256 _corrAsymptoteBps,
+        uint256 _corrHalfSatPpm,
+        uint256 _maxLegsPerGroup
+    ) ERC20("ParlayVoo", "VOO") Ownable(msg.sender) {
+        require(_corrAsymptoteBps <= 10_000, "HouseVault: invalid corr asymptote");
+        require(_maxLegsPerGroup > 0, "HouseVault: zero maxLegsPerGroup");
         asset = _asset;
         maxUtilizationBps = 8000;
         maxPayoutBps = 500;
+        corrConfig = CorrelationConfig({
+            corrAsymptoteBps: _corrAsymptoteBps,
+            corrHalfSatPpm: _corrHalfSatPpm,
+            maxLegsPerGroup: _maxLegsPerGroup
+        });
     }
 
     // ── Admin ────────────────────────────────────────────────────────────
@@ -169,6 +199,30 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
         uint256 old = projectedAprBps;
         projectedAprBps = _bps;
         emit ProjectedAprChanged(old, _bps);
+    }
+
+    /// @notice Update the correlation discount asymptote `D` (BPS).
+    function setCorrAsymptoteBps(uint256 bps) external onlyOwner {
+        require(bps <= 10_000, "HouseVault: invalid corr asymptote");
+        uint256 old = corrConfig.corrAsymptoteBps;
+        corrConfig.corrAsymptoteBps = bps;
+        emit CorrAsymptoteBpsSet(old, bps);
+    }
+
+    /// @notice Update the correlation half-saturation `k` (in PPM).
+    function setCorrHalfSatPpm(uint256 ppm) external onlyOwner {
+        require(ppm > 0, "HouseVault: zero halfSatPpm");
+        uint256 old = corrConfig.corrHalfSatPpm;
+        corrConfig.corrHalfSatPpm = ppm;
+        emit CorrHalfSatPpmSet(old, ppm);
+    }
+
+    /// @notice Update the per-group leg cap (builder-side gate).
+    function setMaxLegsPerGroup(uint256 n) external onlyOwner {
+        require(n > 0, "HouseVault: zero maxLegsPerGroup");
+        uint256 old = corrConfig.maxLegsPerGroup;
+        corrConfig.maxLegsPerGroup = n;
+        emit MaxLegsPerGroupSet(old, n);
     }
 
     function pause() external onlyOwner {

@@ -249,8 +249,9 @@ export function useRecentResolutions({ limit = 20 }: { limit?: number } = {}) {
       );
       const clipped = sorted.slice(0, limit);
 
-      const enriched = await Promise.all(
-        clipped.map(async (log) => {
+      const [marketMap, ...enriched] = await Promise.all([
+        fetchMarketMap(),
+        ...clipped.map(async (log) => {
           const args = (log as unknown as { args: Record<string, unknown> }).args;
           const legId = args.legId as bigint;
           const status = Number(args.status as number | bigint);
@@ -261,22 +262,34 @@ export function useRecentResolutions({ limit = 20 }: { limit?: number } = {}) {
               abi: registry.abi,
               functionName: "getLeg",
               args: [legId],
-            }).catch(() => null),
+            }).catch(() => null) as Promise<LegInfo | null>,
             publicClient.getTransaction({ hash: log.transactionHash! }).catch(() => null),
           ]);
           return {
             legId,
-            question: ((leg as LegInfo | null)?.question) || "—",
+            leg,
             status,
             resolvedAt: block ? Number(block.timestamp) : 0,
             txHash: log.transactionHash!,
             resolver: (tx?.from ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
-          } as ResolvedLegRow;
+          };
         }),
-      );
+      ]);
+
+      const finalRows: ResolvedLegRow[] = enriched.map((r) => {
+        const dbRow = r.leg ? marketMap.get(r.leg.sourceRef) : undefined;
+        return {
+          legId: r.legId,
+          question: dbRow?.question || r.leg?.question || "—",
+          status: r.status,
+          resolvedAt: r.resolvedAt,
+          txHash: r.txHash,
+          resolver: r.resolver,
+        };
+      });
 
       if (localId !== fetchIdRef.current) return;
-      setRows(enriched);
+      setRows(finalRows);
     } catch (err) {
       if (localId !== fetchIdRef.current) return;
       console.error("Failed to load resolved legs:", err);

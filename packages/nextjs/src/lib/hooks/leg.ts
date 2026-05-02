@@ -19,6 +19,26 @@ export interface LegOracleResult {
   status: number; // 0=Unresolved, 1=Won, 2=Lost, 3=Voided
 }
 
+// On-chain `leg.question` is set to sourceRef by ParlayEngine.getOrCreateBySourceRef,
+// so for polymarket-sourced legs it's a 0x… conditionId hash. /api/markets joins
+// against the DB's txtquestion to get the human-readable text.
+async function fetchQuestionMap(): Promise<Map<string, string>> {
+  try {
+    const res = await fetch("/api/markets", { cache: "no-store" });
+    if (!res.ok) return new Map();
+    const markets = (await res.json()) as Array<{
+      legs: Array<{ sourceRef: string; question: string }>;
+    }>;
+    const map = new Map<string, string>();
+    for (const m of markets) {
+      for (const leg of m.legs) map.set(leg.sourceRef, leg.question);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 export function useLegDescriptions(legIds: readonly bigint[]) {
   const publicClient = useContractClient();
   const registry = useDeployedContract("LegRegistry");
@@ -29,21 +49,29 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
   const fetchLegs = useCallback(async () => {
     if (!publicClient || !registry || legIds.length === 0) return;
 
+    const uniqueIds = Array.from(new Set(legIds.map((id) => id.toString())));
+    const [questionMap, ...results] = await Promise.all([
+      fetchQuestionMap(),
+      ...uniqueIds.map(async (key) => {
+        try {
+          const data = await publicClient.readContract({
+            address: registry.address,
+            abi: registry.abi,
+            functionName: "getLeg",
+            args: [BigInt(key)],
+          });
+          return { key, leg: data as LegInfo };
+        } catch {
+          return null;
+        }
+      }),
+    ]);
+
     const map = new Map<string, LegInfo>();
-    for (const legId of legIds) {
-      const key = legId.toString();
-      if (map.has(key)) continue;
-      try {
-        const data = await publicClient.readContract({
-          address: registry.address,
-          abi: registry.abi,
-          functionName: "getLeg",
-          args: [legId],
-        });
-        map.set(key, data as LegInfo);
-      } catch {
-        // skip
-      }
+    for (const r of results) {
+      if (!r) continue;
+      const dbQuestion = questionMap.get(r.leg.sourceRef);
+      map.set(r.key, dbQuestion ? { ...r.leg, question: dbQuestion } : r.leg);
     }
     setLegs(map);
   }, [publicClient, registry?.address, legIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps

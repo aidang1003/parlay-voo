@@ -6,7 +6,7 @@ Carryover from `A_DAY_SCALING_SPRINT.md`. The A-DAY doc is closed; remaining unf
 
 | Item | Status | Notes |
 |---|---|---|
-| R-1 — ABIs in Postgres | 🔲 deferred | Carried forward from A-DAY + UI/UX sprint |
+| R-1 — ABIs in Postgres | ✅ | Schema + write path + historical lookup endpoint; file remains the fast path |
 | U-1 — `/vault` personal/global split | ✅ | Header pill + tabs; UX decisions locked on `ui/personal-global-intro` |
 | U-2 — `/tickets` personal/global split | ✅ | My Tickets / Activity tabs; event-sourced feed |
 | U-3 — Polymarket sync: upsert instead of rebuild | ✅ | Preserve fast-changing fields; stop nuking the cache |
@@ -215,3 +215,9 @@ Carryover from `A_DAY_SCALING_SPRINT.md`. The A-DAY doc is closed; remaining unf
 - U-8: new `useRecentResolutions` hook reads `LegResolved` events from `AdminOracleAdapter`, joins each row with the leg's question + resolver address; new "Recently Resolved" section on `/admin/debug` shows the last 20
 - U-9: `ParlayBuilder` now drops legs whose oracle status is non-Unresolved before rendering. Implemented client-side via `useLegDescriptions` + `useLegStatuses` over the on-chain (non-synthetic) leg ids in `allLegs`; selectedLegs reconcile effect already drops legs that disappear from `allLegs`. Test mock for `@/lib/hooks` extended with the two new hooks.
 - U-10: deposit / withdraw / lock inputs (VaultDashboard) and the parlay stake input (ParlayBuilder) and the admin debug mint input now render a formatted `= $X,XXX.XX` shadow line below the field, sourced from `formatUSDC(...,{locale:true})` (or `toLocaleString` for the integer mint slider).
+- R-1: new `tbcontractabi` table (PK `intchainid, txtname, tsdeployedat`) in `lib/db/schema.sql`; auto-applies via the existing `/api/db/init` route
+- R-1: `lib/db/client.ts` — `recordContractAbi`, `getLatestContractAbi`, `getContractAbiHistory`, `getContractAbiByAddress`, plus `closeSql` for one-shot scripts
+- R-1: `scripts/generate-deployed-contracts.ts` mirrors each contract to Postgres after the file write, keyed off the broadcast timestamp; tolerant of missing `DATABASE_URL` / unreachable DB
+- R-1: new `/api/contracts/abi` route serving lookups by `address` or `(chainId, name)`, with optional `history=1` for the full audit trail
+- R-1: `lib/hooks/useDeployedContract.ts` — added `fetchHistoricalDeployedContract(chainId, name)` async helper; the existing sync hook is unchanged (file-based fast path stays the source of truth)
+- R-1: `/api/db/init` now backfills `tbcontractabi` from the committed `deployedContracts.ts` after applying schema; address-deduped via new `recordContractAbiIfNew` helper so re-running the init route is idempotent. Breaks the chicken/egg where the deploy-script mirror needed the table to exist before the app could come up to run init

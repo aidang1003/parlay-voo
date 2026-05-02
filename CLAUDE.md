@@ -4,6 +4,10 @@
 
 ParlayVoo (protocol name: ParlayCity) -- Crash-Parlay AMM on Base. Users buy 2-5 leg parlay tickets, watch multiplier climb as legs resolve, cash out early or ride to full payout. LPs provide liquidity via ERC4626-like vault.
 
+## Comments
+
+No long explanatory comments in code. No one reads them, and the WHY rots faster than the code. If you think context is important enough to write down, put it in `docs/` (architecture, subsystem spec, or change doc) and reference it from a one-line comment if needed. One-line `// see docs/changes/X.md` is fine. Multi-line block comments and JSDoc paragraphs are not.
+
 ## Invariants
 
 1. **Engine never holds USDC.** All stake flows directly to HouseVault via `safeTransferFrom`.
@@ -141,7 +145,7 @@ Any architectural change (adding/removing a contract, reorganizing docs, retirin
 - `docs/RUNBOOK.md` -- operational runbook
 - `docs/MCP.md` -- `/api/mcp` endpoint reference (external AI agents)
 - `docs/REHAB_MODE.md` / `docs/POLYMARKET.md` / `docs/UNISWAP_LP_STRATEGY.md` -- subsystem specs (each with an `llm-spec/` mirror)
-- `docs/BACKLOG.md` -- deferred ideas
+- `docs/changes/BACKLOG.md` -- deferred ideas
 - `docs/changes/` -- architectural change log
 
 ## Environment

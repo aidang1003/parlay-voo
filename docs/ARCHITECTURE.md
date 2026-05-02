@@ -161,6 +161,21 @@ All offchain services run as Next.js serverless routes under `packages/nextjs/sr
 
 Live NBA markets are fetched inline from BallDontLie (`packages/nextjs/src/lib/bdl.ts`, 5-min cache). Seed markets live in `packages/shared/src/seed.ts`. Curated Polymarket entries live in `packages/shared/src/polymarket/curated.ts`.
 
+## Protocol Parameters
+
+Pricing knobs are configured via `.env` as non-sensitive `NEXT_PUBLIC_*` variables. They drive both the off-chain quote engine and the on-chain pricing math, with hardcoded fallbacks in `packages/shared/src/constants.ts` so CI and fresh clones work without an `.env`. The deploy script (`HelperConfig.s.sol`) reads the same names via `vm.envOr(...)` and constructor-injects them; contracts retain `onlyOwner` setters for live tuning. See [changes/CORRELATION.md](changes/CORRELATION.md) for the math.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEXT_PUBLIC_PROTOCOL_FEE_BPS` | `1000` | Per-leg fee `f` in BPS (10%). Applied multiplicatively as `(1 − f)` per leg before correlation. |
+| `NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS` | `8000` | Correlation `D`: asymptotic ceiling on per-group discount in BPS (80%). |
+| `NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM` | `1000000` | Correlation `k × 1e6`: half-saturation point in PPM (k = 1.0). |
+| `NEXT_PUBLIC_MAX_LEGS_PER_GROUP` | `3` | Hard cap on legs from one correlation group. Builder-side gate; not part of the multiplier math. |
+
+If admin updates a value on-chain via the `setProtocolFeeBps` / `setCorrAsymptoteBps` / `setCorrHalfSatPpm` / `setMaxLegsPerGroup` setters, the corresponding `.env` entry must be refreshed in the same PR — otherwise the off-chain quote engine and the on-chain pricing check drift apart and the math-parity invariant breaks.
+
+The fee and correlation discount are both invisible in the UI: cart, quote API, and MCP tools all return one final multiplier with no breakdown rows.
+
 ## Security Model
 
 See [THREAT_MODEL.md](THREAT_MODEL.md) for full analysis.

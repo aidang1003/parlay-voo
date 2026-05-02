@@ -1,10 +1,10 @@
 # Correlation Engine
 
-**Status:** Research / design. No implementation yet.
+**Status:** Design finalized. V1 implementation pending.
 
-Some legs in a parlay are not independent. Same-game parlays (SGP) are the obvious case — "Lakers ML" + "LeBron over 25 pts" are positively correlated, so the naive multiplier `∏(1/p_i)` overpays. Cross-asset crypto bets ("BTC up 5%" + "ETH up 5%") are similarly correlated. A correlation engine estimates the joint probability of all legs hitting and applies a discount to the multiplier so the vault is paid the right risk premium.
+Some legs in a parlay are not independent. Same-game parlays (SGP) are the obvious case — "Lakers ML" + "LeBron over 25 pts" are positively correlated, so the naive multiplier `∏(1/p_i)` overpays. Separately, some legs are *mutually exclusive* — only one can resolve true (e.g., "Lakers win NBA Finals" + "Celtics win NBA Finals"). The first gets repriced; the second gets blocked at the builder.
 
-This doc is the research deep-dive the user asked for. It surveys how the industry and the literature handle this, then narrows to a recommended scope for ParlayVoo.
+V1 also reworks the fee structure into a single per-leg multiplicative fee, replacing today's `baseFee + perLegFee × n` schedule. All three knobs (fee, correlation asymptote `D`, correlation half-saturation `k`) become `.env`-driven.
 
 ---
 
@@ -12,278 +12,359 @@ This doc is the research deep-dive the user asked for. It surveys how the indust
 
 ### Why this matters now
 
-- `RISK_MODEL.md` already calls out "correlation-aware discounts" as Level 2.
+- `RISK_MODEL.md` calls out correlation-aware discounts as future Level 2 work — this doc moves it in-scope as V1.
 - The data model already groups Polymarket markets by `gameGroup`. The grouping primitive exists; the math doesn't.
-- Without correlation, a 4-leg SGP on the same NBA game can quote ~50× when the true joint probability supports ~15×. That is a vault-bleeding bug the moment we open SGP-friendly markets.
+- Without correlation pricing, a 4-leg SGP on the same NBA game can quote ~50× when the true joint probability supports ~15×. Bleeds the vault on every same-game ticket.
+- Without exclusion gating, a user can stack mutually exclusive winners (every team to win the title) at independent-multiplier prices for an unwinnable ticket. The vault still reserves the payout.
+- Today's two-knob fee (`baseFee + perLegFee × n`) is awkward to tune and harder to mirror in `.env`. Folding it into a single per-leg knob simplifies the call graph and lines up cleanly with the new `.env` config surface.
 
-### Where correlation comes from
+### Three distinct concerns
 
-Three distinct sources, each with a different magnitude and a different remedy:
+1. **Per-leg fee** — flat, applies to every ticket. Replaces the existing edge math.
+2. **Correlation pricing** — legs that are *more likely* to all hit than independence assumes. Adjust the multiplier downward.
+3. **Mutual exclusion** — legs that *cannot* all hit. Block at the builder; never let the ticket mint.
 
-1. **Same-game / same-event** — multiple bets on one underlying game. Strong, well-studied, *positively* correlated for "rooting for the same outcome" parlays (team win + player over) and *negatively* correlated for hedge-shaped parlays (team A wins + team B covers). This is the dominant source. [DraftKings patent](https://patents.google.com/patent/US20180322749A1) targets exactly this.
-2. **Same-narrative / cross-event** — different events that share a driver. "BTC > $100k" + "ETH > $5k" on the same day; both NFL favorites covering on a windy weekend. Weaker but non-trivial. Hard to attribute.
-3. **Same-resolution-source** — both legs depend on the same oracle adapter. Strictly an oracle-failure correlation, not a market-fundamentals one. Lives in the threat model, not the pricing model.
+Different remedies, different code paths.
 
-ParlayVoo only needs to price (1) accurately, treat (2) as a configurable knob, and ignore (3) here (it's a `THREAT_MODEL` concern).
+### Per-leg fee
 
-### The complexity spectrum
+A single multiplicative fee `f` is applied to each leg's contribution to the multiplier, before correlation:
 
-There is no "the correct" correlation model. Books and academics span five rungs of complexity, each one an order of magnitude more expensive than the last. The decision is which rung to climb to.
-
-**Level 0 — Independence (today's state).** `multiplier = ∏(1/p_i)`. Wrong for SGP, fine for cross-event single-leg parlays where independence is a defensible assumption.
-
-**Level 1 — Block correlation discount.** Tag each leg with a `correlationGroupId`. Count legs per group. For each group with `n > 1`, subtract a flat discount in BPS:
 ```
-corrBps = ∑_groups corrPerExtraLegBps(category) × max(0, n_g − 1)
-multiplier = ∏(1/p_i) × (1 − corrBps/10_000) × (1 − edgeBps/10_000)
+mult = ∏[(1 − f) × (1/p_i)]   ×   ∏ corrFactor(n_g, D, k)
+     = (1 − f)^n × ∏(1/p_i)   ×   ∏ corrFactor(n_g, D, k)
 ```
-This is the simplest model that captures the right *direction* of the bias (more legs in a group → more discount). On-chain, deterministic, pure integer math, mirrors cleanly into TypeScript. **Pinnacle** historically just refused SGP rather than build something more complex; this is a respectable middle ground. Configuration: one `corrPerExtraLegBps` per leg category (NBA: ~600 bps/leg, NFL: ~800, prediction-market event: ~300, independent: 0).
 
-**Level 2 — Pairwise correlation matrix.** Each leg carries a `legType` tag (e.g., `home_ml`, `home_total_over`, `qb_pass_yds_over`). An admin-curated symmetric matrix `ρ[i][j] ∈ [−1, 1]` defines pairwise correlation by type. Joint probability of binary outcomes given marginals `(p_i, p_j)` and correlation `ρ` follows the Bahadur expansion:
+Multiplication is order-invariant; "fee per-leg, before correlation" is the conceptual order in the call graph.
+
+Default **f = 1000 BPS = 10%**. Effective total fee `1 − (1−f)^n`:
+
+| n | Effective fee | Multiplier retained |
+|---|---|---|
+| 2 | 19.00% | 81.00% |
+| 3 | 27.10% | 72.90% |
+| 4 | 34.39% | 65.61% |
+| 5 | 40.95% | 59.05% |
+
+Higher than the legacy `baseFee=100, perLegFee=50` schedule (2.0–3.5% across 2–5 legs) — V1 deliberately raises the take rate on long tickets, which is also where vault risk concentrates. The fee is *invisible* in the UI: cart shows one final multiplier and one final payout, no fee row, no edge row, no breakdown.
+
+### Mutual exclusion
+
+Examples of impossible-to-co-resolve legs:
+
+- "Team A wins NBA Finals" + "Team B wins NBA Finals" — exactly one champion per season.
+- "Game ends in regulation" + "Game goes to OT" — disjoint outcomes.
+- "X scores >100" + "X scores <100" — opposites of the same threshold.
+
+Mechanic:
+
+- Each leg carries an optional `exclusionGroupId` (0 = no exclusion).
+- Builder UI: selecting a leg disables every other leg sharing its `exclusionGroupId`, with a "Conflicts with: <leg>" tooltip.
+- `ParlayEngine.buyTicket` reverts with `MutuallyExclusiveLegs(legA, legB)` if two legs share a non-zero `exclusionGroupId`. Defense in depth — not just a UI gate.
+- Polymarket sync auto-tags legs from the same "winner" series (one row per outcome, all sharing the series ID as the exclusion group). Seed markets are tagged manually in `seed.ts`.
+
+### Correlation pricing
+
+Legs that share a `correlationGroupId` (typically: same game) get a saturating per-group discount on the multiplier.
+
+**Formula:**
+
 ```
-P(A∩B) ≈ p_i × p_j + ρ × √(p_i (1−p_i) p_j (1−p_j))
+discount(n) = D × (n − 1) / (n − 1 + k)
+factor(n)   = 1 − discount(n)
+mult_corr   = mult_indep × factor(n)
 ```
-Pairwise extends to k legs by an inclusion-exclusion or by collapsing pairs into a Gaussian copula. **DraftKings**' patent describes a sequential conditional approximation that is mathematically equivalent to a Gaussian copula at the pairwise level. Configuration: the matrix is the configuration. **Sklar's theorem** is the rigorous backing — every joint distribution decomposes into marginals plus a copula, and a Gaussian copula on binaries reduces to pairwise ρ.
 
-**Level 3 — Joint distribution / copula on continuous drivers.** Model the underlying random variables (final score, player stat lines) as a multivariate distribution; legs are indicator events on that distribution. Apply a copula (Gaussian, Student-t, Archimedean) to introduce dependence. Compute leg probabilities by integrating the copula's CDF. **Genest & Favre (2007)** is the practical guide; **Embrechts, McNeil & Straumann (2002)** is the canonical "why Pearson ρ alone is dangerous" reference. Heavyweight: requires fitting copula parameters, runs off-chain only.
+For each correlation group with `n ≥ 2` legs:
 
-**Level 4 — Scenario-based simulation.** Build a per-sport game model (Glickman–Stern state-space for NFL, Markov play-by-play for NBA, Poisson goals for soccer). Monte-Carlo 10k+ scenarios per game. Joint parlay probability = fraction of scenarios where all legs hit. **DraftKings** and **FanDuel** SGP engines run at this level internally; their patents describe scenario stacks of millions per ticket. The most accurate, also the most operationally expensive — needs detailed game data, dedicated infra, and re-runs every quote.
+- **D** — asymptotic ceiling on discount as `n → ∞`. "How harsh ultimately." Default **8000 BPS = 80%**.
+- **k** — half-saturation point: at `n − 1 = k`, discount equals exactly `D / 2`. "How quickly we get there." Default **1.0**.
 
-**Bounds that constrain every level.** No matter how clever the model, the **Fréchet–Hoeffding** bounds set hard limits given marginals:
-```
-max(0, p_1 + p_2 − 1)  ≤  P(A ∩ B)  ≤  min(p_1, p_2)
-```
-Useful both as a sanity check on any computed joint probability and as a worst-case fallback if the engine misbehaves.
+Both knobs are admin-set. Multi-group tickets compound multiplicatively across groups: `mult × factor(n_A) × factor(n_B) × …`.
 
-### Recommended scope for ParlayVoo
+At the defaults, with p=0.5 and no fee applied:
 
-A tiered rollout — climb only as far as flow demands.
+| Legs in group | Indep mult | Discount | Corr mult |
+|---|---|---|---|
+| 2 | 4.00× | 40% | 2.40× |
+| 3 | 8.00× | 53% | 3.73× |
+| 4 | 16.00× | 60% | 6.40× |
+| 5 | 32.00× | 64% | 11.52× |
+| 8 | 256.00× | 70% | 76.80× |
+| ∞ | — | 80% | — |
 
-**V1 (in scope, ~2–3 days work).** Level 1 block discount, fully on-chain.
-- Add `correlationGroupId` per leg in `LegRegistry` (default 0 = uncorrelated).
-- Add `corrPerExtraLegBps` per category in `RiskConfig` (admin-set).
-- `ParlayMath.computeCorrelationBps(groupCounts, perLegBps)` returns total correlation BPS.
-- `buyTicket` applies the discount alongside the existing edge.
-- Cart UI shows the breakdown ("base multiplier 50× → correlation-adjusted 38× → after edge 36×").
-- Default to "all Polymarket markets in the same `gameGroup` share a `correlationGroupId`." Seed markets default to the market's id.
+### Why saturation, not power decay
 
-**V2 (mid-term, signed-quote only).** Level 2 pairwise matrix, off-chain + EIP-712 signed.
-- `/api/quote-sign` already signs multipliers. Extend it to compute a Bahadur/copula joint probability from a server-side `ρ`-matrix keyed by `legType`.
-- On-chain stays at Level 1 as the unsigned-path default. Signed quotes get the more accurate price; users without a server quote get the conservative block discount.
-- Matrix is a JSON config in `packages/shared/src/correlation-matrix.ts`, hot-reloadable on the server.
-- `legType` becomes a new field on `Leg`. Polymarket sync labels each market with a type (`home_ml`, `home_total_over`, `player_points_over`, `binary_event`, etc.).
+A power-law `factor = c^(n-1)` was the obvious first cut. It's too gentle on 2-leg SGPs (~30% discount where retail books that correctly price SGPs hit 35–45%) and too brutal on long tickets (92% discount on 8-leg, where the marginal correlation gain is diminishing). Saturation flips both: bites harder early where most ticket volume lives, then plateaus at the configured ceiling. The shape matches what other books do empirically.
 
-**V3 (deferred, mention only).** Level 4 scenario simulation. Only if SGP volume justifies it. Likely a sport-by-sport rollout (NBA first, since BallDontLie data is already integrated). This is the **DraftKings/FanDuel** path; it's also a 6-month engineering project. Not in scope for this protocol.
+The saturation curve is also self-limiting — no separate `corrCap` is needed. `D` *is* the ceiling.
 
-We do **not** plan to build Level 3 (continuous copulas on game-level random variables). It sits in an awkward middle — more work than Level 2, less accurate than Level 4 — and the literature backs Level 4 as the right next step once Level 2 hits its accuracy ceiling.
+### Configurability
 
-### Configurability — what knobs the admin gets
+All three protocol knobs live in `.env` as non-sensitive `NEXT_PUBLIC_*` variables, with hardcoded fallbacks in `packages/shared/src/constants.ts` so CI and tests work without a populated `.env`.
 
-V1 config (all on-chain, owner-set):
-- `corrPerExtraLegBps[category]` — strength of the discount per category. Higher for sports than for independent prediction markets.
-- `corrCap` — global ceiling on total correlation BPS so a 5-leg same-game stack cannot zero out the multiplier (e.g., 4000 = 40% max discount).
-- `maxLegsPerGroup` — hard cap on legs from one correlation group (e.g., 3). Beyond the cap, the next leg is rejected outright. Cheaper than pricing extreme stacks accurately.
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEXT_PUBLIC_PROTOCOL_FEE_BPS` | `1000` | Per-leg fee `f` in BPS (10% default). Applied multiplicatively per leg. |
+| `NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS` | `8000` | Correlation `D`: asymptotic ceiling on discount per group (80% default). |
+| `NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM` | `1000000` | Correlation `k × 1e6`: half-saturation point (k = 1.0 default). |
 
-V2 config (server-side, admin-curated):
-- `ρ-matrix` keyed by `(legType, legType)`. Admin-curated. Negative entries handle hedge legs (team A win + team B over) — though we likely floor at zero for V2 to stay conservative.
-- `categoryConservatism` — global multiplier on every entry of the matrix (0.5 = use half of the curated ρ). Lets the team dial conservatism without re-curating the matrix.
-- `signedQuoteRequired[category]` — for high-correlation categories (NBA SGP), require a signed quote so the unsigned path can't be used to dodge correlation pricing.
+In addition, `maxLegsPerGroup` (default 3) lives on-chain only — it's a builder-side UX gate, not part of the multiplier math. Hard cap on legs from one correlation group; the 4th selection is rejected. Cheaper than pricing extreme stacks accurately.
 
-### Why this scope
-
-- **Level 1 covers the 80% case.** For 2-leg same-game parlays, a flat per-leg discount and the Bahadur expansion produce multipliers within ~5–10% of each other for typical NBA `legType` pairs (positive ρ in the 0.3–0.6 range). The marginal accuracy gain from Level 2 is real but doesn't justify shipping it before there's volume.
-- **Level 2 unlocks SGP advertising.** Once we want to market "same-game parlays" as a feature, the flat discount looks crude next to the matrix. But until that marketing happens, V1 protects the vault and V2 is dead code.
-- **Signed-quote split keeps on-chain math simple.** The math-parity invariant is between `ParlayMath.sol` and `packages/shared/src/math.ts`. Pushing complexity into the off-chain quote engine doesn't break parity — the on-chain check is "did the signer authorize this multiplier", not "does the multiplier follow a specific formula."
-- **Configurability beats sophistication.** A wrong matrix calibrated by gut is no better than a flat discount. The ability to ratchet `categoryConservatism` down quickly when something looks off is more valuable than another decimal of accuracy.
+The deploy script (`HelperConfig.s.sol`) reads the same env vars via `vm.envOr(...)` and constructor-injects them into `ParlayEngine` + `HouseVault`. Contracts retain `onlyOwner` setters for live tuning. If admin updates a value on-chain, the corresponding `.env` entry must be refreshed in the same PR — otherwise the off-chain quote engine and the on-chain check drift apart.
 
 ### What the user sees
 
-- Cart UI shows three rows when correlation > 0: `Base × ∏(1/p_i)` → `Correlation discount −X%` → `House edge −Y%` → `Net multiplier`.
-- Each leg in the cart picks up a small "Same game: NYK vs BOS" tag when it shares a `correlationGroupId` with another selected leg.
-- If `maxLegsPerGroup` blocks a selection, the disabled leg shows "Already 3 legs from this game" instead of just being un-clickable.
-- Quote API exposes the breakdown so external agents (MCP) get the same transparency.
+**Mutual exclusion** is fully visible — it's a logic gate, not a hidden mechanic:
+
+- Conflicting legs grey out in the builder when a sibling is selected.
+- Tooltip: "Conflicts with: Lakers win NBA Finals."
+- If `maxLegsPerGroup` blocks a selection, the disabled leg shows neutral "Leg limit reached" copy — no mention of correlation or "same game."
+
+**Per-leg fee and correlation pricing** are invisible — other books don't surface their math, neither do we:
+
+- The cart shows one final multiplier and one final payout. No fee row, no correlation row, no "Same game" tag.
+- `/api/quote-sign` and MCP responses also collapse to one multiplier. No breakdown field — otherwise external agents would surface it.
 
 ### Open questions
 
-- **Negative correlation handling.** A bet like "Team A wins" + "Team B covers" is negatively correlated and *should* increase the multiplier. Most retail books floor at zero so they never pay above independent odds. We should match that conservatism for V1, document it as deliberate, and revisit only if a sharp user community emerges.
-- **Where does `legType` live for non-Polymarket markets?** Seed markets need a type tag too if V2 is going to work. Probably a `typeRef` field on `Leg`.
-- **Cross-game correlation (Source 2 above).** Worth a global "narrative day" knob? E.g., on FOMC days, mark every `BTC_up` and `ETH_up` leg as same-group. Probably out of scope for V1 + V2; flag for V3.
-- **Matrix curation labor.** Even a 20-`legType` matrix is 190 unique entries. Realistically we curate ~20 high-volume pairs and default the rest to 0. Labor is the same order as fee parameter tuning — doable, but allocate a day.
-- **Correlation breaks the no-arbitrage decomposition.** A user can split a correlated 3-leg ticket into three 1-leg tickets and side-step the discount. The right counter is to keep edge-on-1-leg-tickets above the savings — not to fight the arbitrage with more correlation pricing.
+- **Negative correlation handling.** "Team A wins" + "Team B covers" is negatively correlated and *should* increase the multiplier. We floor at zero (factor never exceeds 1.0) — match retail-book conservatism, document as deliberate.
+- **Correlation arbitrage.** A user can split a correlated 3-leg ticket into three 1-leg tickets to sidestep the correlation discount. The flat fee discourages this somewhat (single-leg tickets pay `1 − (1−f) = f` = 10% vs. multi-leg compounding), but it's not a complete plug. The right counter is keeping single-leg fee high enough that arbitrage isn't worth the gas — not adding more correlation pricing.
+- **Where do `correlationGroupId` and `exclusionGroupId` come from for non-Polymarket markets?** Polymarket sync uses `gameGroup` for correlation and the series ID for exclusion. Seed markets get manual tags in `seed.ts`. Future on-chain sport feeds will need a tagging convention.
 
 ### Sources consulted
 
-Industry / applied:
-- Pinnacle Sports — articles on why they avoid SGPs and how they think about correlated outcomes.
-- DraftKings patent **US 2018/0322749 A1**, "System and methods for correlated parlays."
-- FanDuel engineering presentations (Sloan Sports Analytics) on same-game parlay engines.
+- Pinnacle Sports — articles on why they avoid SGPs.
+- DraftKings and FanDuel — public engineering talks on same-game parlay pricing. (No specific patent citation: the number originally cited here belonged to a different patent and has been removed.)
 - The Action Network — applied write-ups on correlated parlay edge for retail bettors.
-
-Academic / foundational:
-- Sklar (1959) — copula decomposition theorem.
-- Glickman & Stern (1998) — "A State-Space Model for National Football League Scores."
-- Embrechts, McNeil & Straumann (2002) — "Correlation and Dependence in Risk Management: Properties and Pitfalls."
-- Genest & Favre (2007) — "Everything You Always Wanted to Know about Copulas."
-- Bahadur (1961) — representation of joint binary distributions.
-- Fréchet (1951) / Hoeffding (1940) — bounds on joint distributions given marginals.
-- Levitt (2004) — "Why Are Gambling Markets Organized So Differently from Financial Markets?"
-- Wolfers & Zitzewitz — prediction-market joint-probability extraction (relevant to Polymarket-anchored legs).
+- Fréchet (1951) / Hoeffding (1940) — bounds on joint distributions given marginals; useful as a sanity check that saturation discounts can't push the implied joint probability above `min(p_i)`.
 
 ---
 
 ## Part 2 — AI Spec Sheet
 
-### V1 constants (proposed defaults)
+### Constants (proposed defaults)
 
 ```
-corrPerExtraLegBps:
-  nba:                 600
-  nfl:                 800
-  mlb:                 400
-  nhl:                 500
-  crypto:              300
-  prediction_event:    300
-  independent:         0
-corrCap:               4000   // 40% max correlation discount
-maxLegsPerGroup:       3
+PROTOCOL_FEE_BPS            = 1000      // f, 10% per-leg fee
+CORRELATION_ASYMPTOTE_BPS   = 8000      // D, 80% asymptotic max discount
+CORRELATION_HALF_SAT_PPM    = 1_000_000 // k = 1.0
+maxLegsPerGroup             = 3         // on-chain only; not a math knob
 ```
 
-Lives in `packages/shared/src/constants.ts` and is mirrored as a `RiskConfig` field on-chain.
+`packages/shared/src/constants.ts` reads from `process.env.NEXT_PUBLIC_*` with these as hardcoded fallbacks. Removed from this file: `BASE_FEE_BPS`, `PER_LEG_FEE_BPS` (deprecated by `PROTOCOL_FEE_BPS`).
 
-### V1 state additions
+### State additions
 
 `packages/foundry/src/core/LegRegistry.sol`:
+
 ```solidity
 mapping(uint256 => uint256) public legCorrGroup;       // legId → correlationGroupId (0 = uncorrelated)
-mapping(uint256 => string) public legCategory;         // legId → category tag (e.g. "nba")
+mapping(uint256 => uint256) public legExclusionGroup;  // legId → exclusionGroupId (0 = no exclusion)
 function setLegCorrGroup(uint256 legId, uint256 groupId) external onlyOwner;
-function setLegCategory(uint256 legId, string calldata cat) external onlyOwner;
+function setLegExclusionGroup(uint256 legId, uint256 groupId) external onlyOwner;
+function getLegCorrGroups(uint256[] calldata legIds) external view returns (uint256[] memory);
+function getLegExclusionGroups(uint256[] calldata legIds) external view returns (uint256[] memory);
 ```
 
-`packages/foundry/src/core/HouseVault.sol` (extending the `RiskConfig` already sketched in `RISK_MODEL.md`):
+`packages/foundry/src/core/ParlayEngine.sol`:
+
+```solidity
+// REMOVED:
+//   uint256 public baseFee = 100;
+//   uint256 public perLegFee = 50;
+//   function setBaseFee(uint256 _bps) external onlyOwner;
+//   function setPerLegFee(uint256 _bps) external onlyOwner;
+//   event BaseFeeUpdated(uint256 oldBps, uint256 newBps);
+//   event PerLegFeeUpdated(uint256 oldBps, uint256 newBps);
+
+// ADDED:
+uint256 public protocolFeeBps;     // initialized via constructor from HelperConfig (.env-driven)
+event ProtocolFeeUpdated(uint256 oldBps, uint256 newBps);
+function setProtocolFeeBps(uint256 _bps) external onlyOwner;
+```
+
+`packages/foundry/src/core/HouseVault.sol`:
+
 ```solidity
 struct CorrelationConfig {
-    uint256 corrCap;                                   // bps
+    uint256 corrAsymptoteBps;   // D in BPS
+    uint256 corrHalfSatPpm;     // k in PPM
     uint256 maxLegsPerGroup;
-    mapping(bytes32 => uint256) corrPerExtraLegBps;    // keccak256(category) → bps
 }
 CorrelationConfig public corrConfig;
-function setCorrPerExtraLegBps(string calldata cat, uint256 bps) external onlyOwner;
-function setCorrCap(uint256 bps) external onlyOwner;
+function setCorrAsymptoteBps(uint256 bps) external onlyOwner;
+function setCorrHalfSatPpm(uint256 ppm) external onlyOwner;
 function setMaxLegsPerGroup(uint256 n) external onlyOwner;
 ```
 
-### V1 math additions
+### Math additions
 
 `packages/foundry/src/libraries/ParlayMath.sol`:
-```solidity
-/// @notice Compute total correlation BPS given per-group leg counts and per-leg-extra BPS.
-/// @param extraLegs    Array of (legCount - 1) per non-trivial group; zero-count groups omitted.
-/// @param perLegBps    Array of corrPerExtraLegBps, aligned with extraLegs.
-/// @param cap          Global corrCap.
-/// @return corrBps     Total correlation BPS, capped at `cap`.
-function computeCorrelationBps(
-    uint256[] memory extraLegs,
-    uint256[] memory perLegBps,
-    uint256 cap
-) internal pure returns (uint256 corrBps);
 
-/// @notice Apply correlation BPS as a multiplicative discount on a multiplier.
-/// @dev    netCorrelated = mul × (BPS − corrBps) / BPS. Composes with applyEdge.
+```solidity
+// REMOVED: applyEdge, computeEdge.
+
+/// @notice Apply per-leg multiplicative fee. mul × ((BPS - feeBps) / BPS)^n iteratively.
+/// @dev    Iterative loop, not pow — must match math.ts exactly for parity.
+function applyFee(
+    uint256 mulX1e6,
+    uint256 numLegs,
+    uint256 feeBps
+) internal pure returns (uint256);
+
+/// @notice Saturating discount BPS for a single correlation group of size n.
+/// @dev    discount = D × (n - 1) × PPM / ((n - 1) × PPM + k_ppm). Returns 0 for n < 2.
+function correlationDiscountBps(
+    uint256 n,
+    uint256 asymptoteBps,
+    uint256 halfSatPpm
+) internal pure returns (uint256);
+
+/// @notice Compose a multiplier with per-group saturating discounts.
+/// @dev    mul × ∏ (BPS - discount_g) / BPS over all groups with n_g ≥ 2.
 function applyCorrelation(
     uint256 mulX1e6,
-    uint256 corrBps
+    uint256[] memory groupSizes,
+    uint256 asymptoteBps,
+    uint256 halfSatPpm
 ) internal pure returns (uint256);
 ```
 
-Mirror in `packages/shared/src/math.ts` with identical bigint arithmetic — math-parity invariant.
+Mirror identical bigint logic in `packages/shared/src/math.ts` — math-parity invariant.
 
-### V1 call graph
+### Call graph
 
 ```
 ParlayEngine.buyTicket(legIds, outcomes, stake, ...)
+  → LegRegistry.getLegExclusionGroups(legIds)         // NEW
+  → ParlayEngine._checkExclusion(exclusionGroups)     // NEW: revert on dup non-zero
   → LegRegistry.getLegProbs(legIds, outcomes)
-  → LegRegistry.getLegGroups(legIds)              // NEW
-  → LegRegistry.getLegCategories(legIds)          // NEW
-  → ParlayEngine._aggregateGroups(groups, cats)   // NEW: groups → (extraLegs, perLegBps)
+  → LegRegistry.getLegCorrGroups(legIds)              // NEW
+  → ParlayEngine._aggregateGroupSizes(corrGroups)     // NEW: { gid → count }
+  → require count[g] ≤ maxLegsPerGroup ∀g             // NEW
   → ParlayMath.computeMultiplier(probs)
-  → ParlayMath.computeCorrelationBps(extraLegs, perLegBps, cap)
-  → ParlayMath.applyCorrelation(mul, corrBps)
-  → ParlayMath.applyEdge(mul, edgeBps)
+  → ParlayMath.applyFee(mul, numLegs, protocolFeeBps) // REPLACES applyEdge
+  → ParlayMath.applyCorrelation(mul, groupSizes, D, k)
   → ParlayMath.computePayout(stake, netMul)
   → HouseVault.reservePayout(payout)
-  → require ticket passes maxLegsPerGroup check    // NEW
 ```
 
-`buyTicketSigned` skips the on-chain correlation calculation and trusts the multiplier in the EIP-712 payload — V2 logic lives off-chain.
+`buyTicketSigned` runs the same exclusion + maxLegs checks but trusts the multiplier from the EIP-712 payload — server-side quote logic uses the same shared math.
 
-### V1 invariants
+### Errors
 
-1. Math parity: `ParlayMath.computeCorrelationBps` and `math.ts.computeCorrelationBps` produce identical values for all inputs.
-2. `corrBps ≤ corrCap` for every accepted ticket.
+```solidity
+error MutuallyExclusiveLegs(uint256 legA, uint256 legB);
+error TooManyLegsInGroup(uint256 groupId, uint256 legCount, uint256 cap);
+error FeeTooHigh(uint256 bps);   // protocolFeeBps must be < BPS
+```
+
+### Invariants
+
+1. Math parity: `ParlayMath.applyFee` / `applyCorrelation` and `math.ts` counterparts produce identical values for all inputs.
+2. `factor(n) ∈ (0, 1]` for all `(n, D, k)` with `D < BPS` and `k > 0`. `factor(n) == 1` ⇔ `n < 2`.
 3. For every non-zero `correlationGroupId` g present in a ticket, `count(legs with group=g) ≤ maxLegsPerGroup`.
-4. `netMultiplier ≤ fairMultiplier` always (correlation only ever discounts, never inflates — V1 floors negative correlation at zero by construction).
-5. `legCorrGroup[legId] == 0` ⇒ leg contributes 0 to `corrBps`. Backwards-compatible: existing legs with no group set behave exactly as today.
+4. For every non-zero `exclusionGroupId` e present in a ticket, exactly one leg carries that ID — `buyTicket` reverts otherwise.
+5. `netMultiplier ≤ fairMultiplier` always (fee + correlation only ever discount, never inflate).
+6. `legCorrGroup[legId] == 0` ⇒ leg contributes 0 to discount. `legExclusionGroup[legId] == 0` ⇒ leg never blocks another. Backwards-compatible: legs with no group set behave as today (modulo the fee change).
+7. `protocolFeeBps < BPS` always. `applyFee` reverts otherwise.
 
-### V1 tests required
+### Tests required
 
-- Unit `ParlayMath.t.sol`: `computeCorrelationBps` happy path, cap enforcement, zero-extra-legs no-op.
-- Unit `LegRegistry.t.sol`: only owner can set group/category; default reads return zero.
-- Unit `ParlayEngine.t.sol`: 3-leg ticket all in same group → multiplier discounted; 3-leg ticket in distinct groups → no discount; 4th leg in a capped group → revert.
-- Fuzz: random `(probs, groups, perLegBps, cap)` — invariant `netMul ≤ fairMul`, `corrBps ≤ cap`.
-- Parity: TypeScript and Solidity produce identical multipliers across 1k random vectors.
-- Integration: full `buyTicket` with a 2-leg same-game ticket vs independent-leg ticket, same probabilities — same-game should reserve less, multiplier should be lower.
+- Unit `ParlayMath.t.sol`:
+  - `applyFee` produces `mul × ((BPS-f)/BPS)^n` iteratively for n=1..10 at f=1000 BPS; matches reference table.
+  - `applyFee` edge: f=0 returns input unchanged. f=BPS-1 collapses multiplier to ~0 quickly.
+  - `correlationDiscountBps` matches reference table for default (D=8000, k=1e6) at n=1..8.
+  - `correlationDiscountBps` edge: n=0, n=1 yield 0. D=0 yields 0 for all n. Very large k flattens curve toward 0; very small k saturates near D immediately.
+- Unit `LegRegistry.t.sol`: only owner can set corr/exclusion groups; default reads return 0.
+- Unit `ParlayEngine.t.sol`:
+  - 3-leg ticket all in same correlation group → multiplier discounted by both fee and correlation as expected.
+  - 3-leg ticket in distinct correlation groups → fee applies, no correlation discount.
+  - 4th leg in capped correlation group → reverts with `TooManyLegsInGroup`.
+  - 2 legs sharing exclusion group → reverts with `MutuallyExclusiveLegs`.
+  - Leg in both correlation group and exclusion group behaves correctly (exclusion wins when triggered).
+  - `setProtocolFeeBps` updates fee live; subsequent `buyTicket` uses new fee.
+- Fuzz: random `(probs, groupSizes, f, D, k)` — invariants 2, 5, 7 hold.
+- Parity: TypeScript and Solidity produce identical multipliers across 1k random vectors at random `(f, D, k)`.
+- Integration: full `buyTicket` flow exercises fee + correlation + exclusion gating; `buyTicketSigned` honors all three.
 
-### V2 sketch (deferred, off-chain only)
+### Frontend
 
-```ts
-// packages/nextjs/src/lib/correlation/matrix.ts
-export const CORRELATION_MATRIX: Record<string, Record<string, number>> = {
-  nba_home_ml: { nba_home_total_over: 0.55, nba_home_total_under: -0.55, ... },
-  ...
-};
+- `ParlayBuilder.tsx`:
+  - Selecting a leg disables every other leg sharing its `exclusionGroupId`, tooltip "Conflicts with: <leg name>".
+  - Selecting a leg that would push a `correlationGroupId` past `maxLegsPerGroup` disables that leg with neutral "Leg limit reached" copy.
+  - Cart shows one final multiplier — no fee row, no correlation row, no "Same game" tag.
+- `app/api/markets/route.ts`: surface `correlationGroupId` and `exclusionGroupId` per leg.
+- `app/api/polymarket/sync/route.ts`: tag each ingested market with the source series ID as `exclusionGroupId` (winner-style markets) and the gameGroup as `correlationGroupId`.
+- `app/api/quote-sign/route.ts`: compute final multiplier server-side using the shared math; sign just the multiplier — no breakdown payload.
+- `lib/mcp/tools.ts`: same — single multiplier in tool responses.
 
-// packages/nextjs/src/lib/correlation/joint.ts
-// Bahadur 2nd-order expansion for k-leg joint probability.
-export function jointProbBahadur(
-  marginals: number[],     // p_i in [0,1]
-  rhoMatrix: number[][],   // symmetric, ρ_ij ∈ [-1, 1]
-): number;                 // joint probability of all legs hitting
+### Environment variables
+
+Three new `NEXT_PUBLIC_*` env vars in `.env` and `.env.example`. All non-sensitive (values are public on-chain constants):
+
+```
+# Per-leg fee in BPS. Applied as (1 - f) per leg before correlation. 1000 = 10%.
+NEXT_PUBLIC_PROTOCOL_FEE_BPS=1000
+
+# Correlation D: asymptotic discount ceiling in BPS. 8000 = 80%.
+NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS=8000
+
+# Correlation k × 1e6: half-saturation point in PPM. 1_000_000 = k=1.0.
+NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM=1000000
 ```
 
-`/api/quote-sign` swaps `computeMultiplier` for `1 / jointProbBahadur(marginals, rhoMatrix)` and signs the result. V1 on-chain math is unchanged. The signer is the only entity that needs the matrix; mis-pricing is bounded by `signedQuoteRequired` plus the on-chain `corrCap` ceiling on the unsigned path.
+`shared/constants.ts` reads these via `process.env`, falling back to the defaults above when unset (so tests, CI, and fresh clones work without an `.env`). `HelperConfig.s.sol` reads the same names via `vm.envOr(...)` and passes them to the deploy constructors.
 
 ### Files touched
 
-V1:
 ```
-packages/foundry/src/libraries/ParlayMath.sol
-packages/foundry/src/core/LegRegistry.sol
-packages/foundry/src/core/HouseVault.sol           (RiskConfig fields)
-packages/foundry/src/core/ParlayEngine.sol         (aggregation + new path)
-packages/foundry/script/Deploy.s.sol               (set defaults)
+packages/foundry/src/libraries/ParlayMath.sol      (drop applyEdge/computeEdge; add applyFee/correlationDiscountBps/applyCorrelation)
+packages/foundry/src/core/LegRegistry.sol          (corrGroup + exclusionGroup mappings)
+packages/foundry/src/core/HouseVault.sol           (CorrelationConfig)
+packages/foundry/src/core/ParlayEngine.sol         (drop baseFee/perLegFee; add protocolFeeBps; exclusion check + correlation aggregation)
+packages/foundry/script/HelperConfig.s.sol         (vm.envOr for the 3 new vars)
+packages/foundry/script/Deploy.s.sol               (pass fee + corr config to constructors)
 packages/foundry/test/unit/ParlayMath.t.sol
 packages/foundry/test/unit/LegRegistry.t.sol
 packages/foundry/test/unit/ParlayEngine.t.sol
 packages/foundry/test/fuzz/CorrelationFuzz.t.sol
-packages/shared/src/math.ts
-packages/shared/src/constants.ts
-packages/shared/src/types.ts                       (Leg.correlationGroupId, Leg.category)
-packages/nextjs/src/components/ParlayBuilder.tsx   (breakdown UI + maxLegsPerGroup gating)
-packages/nextjs/src/app/api/markets/route.ts       (surface group + category in API)
-packages/nextjs/src/app/api/polymarket/sync/route.ts (default group = gameGroup hash)
-docs/RISK_MODEL.md                                 (move correlation from Level 2 to Level 1 status: shipped)
+packages/shared/src/math.ts                        (drop applyEdge/computeEdge; add applyFee/correlationDiscountBps/applyCorrelation)
+packages/shared/src/constants.ts                   (drop BASE_FEE_BPS/PER_LEG_FEE_BPS; add 3 new env-backed constants)
+packages/shared/src/types.ts                       (Leg.correlationGroupId, Leg.exclusionGroupId)
+packages/shared/src/seed.ts                        (manual tags on seed markets where applicable)
+packages/nextjs/src/components/ParlayBuilder.tsx   (exclusion gating + maxLegs gating; no fee/corr breakdown UI)
+packages/nextjs/src/app/api/markets/route.ts       (surface group fields)
+packages/nextjs/src/app/api/polymarket/sync/route.ts (tag groups during ingest)
+packages/nextjs/src/app/api/quote-sign/route.ts    (single-multiplier output)
+packages/nextjs/src/lib/mcp/tools.ts               (single-multiplier output)
+.env                                               (3 new vars)
+.env.example                                       (3 new vars + comments)
+docs/ARCHITECTURE.md                               (Protocol Parameters section)
+docs/RISK_MODEL.md                                 (move correlation from Level 2 to Level 1: shipped)
 docs/llm-spec/RISK_MODEL.md                        (mirror)
-```
-
-V2 (additional, when picked up):
-```
-packages/shared/src/correlation-matrix.ts          (NEW)
-packages/shared/src/correlation/joint.ts           (NEW — Bahadur expansion)
-packages/nextjs/src/app/api/quote-sign/route.ts    (use joint prob)
-packages/foundry/src/core/ParlayEngine.sol         (signedQuoteRequired check)
 ```
 
 ### Change log
 
-- _(none yet — this is a research / design doc; no code lands until V1 is approved)_
+- `packages/shared/src/constants.ts` — drop `BASE_FEE_BPS` / `PER_LEG_FEE_BPS`; add env-backed `PROTOCOL_FEE_BPS`, `CORRELATION_ASYMPTOTE_BPS`, `CORRELATION_HALF_SAT_PPM`, `MAX_LEGS_PER_GROUP`.
+- `packages/shared/src/math.ts` — drop `applyEdge` / `computeEdge`; add `applyFee`, `correlationDiscountBps`, `applyCorrelation`. `computeQuote` now folds in fee + correlation discounts.
+- `packages/shared/src/types.ts` — `Leg.correlationGroupId` / `Leg.exclusionGroupId`; `QuoteResponse` / `RiskAssessResponse` drop `edgeBps` / `feePaid`.
+- `packages/shared/src/schemas.ts` — `QuoteResponseSchema` matches the slimmed shape.
+- `packages/foundry/src/libraries/ParlayMath.sol` — same drop + same three new functions, mirroring the TS implementation bit-for-bit.
+- `packages/foundry/src/core/LegRegistry.sol` — `legCorrGroup` / `legExclusionGroup` mappings, owner setters, batch view getters.
+- `packages/foundry/src/core/HouseVault.sol` — `CorrelationConfig` struct + storage + setters + constructor injection.
+- `packages/foundry/src/core/ParlayEngine.sol` — drop `baseFee` / `perLegFee` for `protocolFeeBps`; new errors (`MutuallyExclusiveLegs`, `TooManyLegsInGroup`, `FeeTooHigh`); buy path runs `_checkExclusion` + `_aggregateGroupSizes` + new `_priceQuote` (returns fee, payout, final multiplier with fee + correlation applied).
+- `packages/foundry/script/HelperConfig.s.sol` + `script/steps/CoreStep.sol` — thread the four env-driven knobs through to the constructors via `vm.envOr`.
+- `packages/foundry/test/unit/{ParlayMath,LegRegistry,ParlayEngine,FeeRouting,EarlyCashout}.t.sol` — exercise the new fee + correlation + exclusion paths and align expected values with the new fee schedule.
+- `packages/foundry/test/fuzz/CorrelationFuzz.t.sol` — new property tests for fee/correlation invariants.
+- `packages/nextjs/src/lib/__tests__/correlation-math.test.ts` — TS↔Sol parity vectors plus a randomized 1000-vector property.
+- `packages/nextjs/src/components/ParlayBuilder.tsx` — exclusion gating, `maxLegsPerGroup` gating, fee row dropped from the cart, multiplier computed via shared math.
+- `packages/nextjs/src/lib/hooks/parlay.ts` — `useParlayConfig` reads `protocolFeeBps` from `ParlayEngine` and `corrConfig` from `HouseVault`.
+- `packages/nextjs/src/app/api/markets/route.ts` — surface `correlationGroupId` / `exclusionGroupId`.
+- `packages/nextjs/src/lib/polymarket/markets.ts` — derive `correlationGroupId` from `txtgamegroup` via FNV-1a 32-bit hash.
+- `packages/nextjs/src/app/api/premium/agent-quote/route.ts` + `lib/mcp/tools.ts` — single-multiplier outputs (no `edgeBps` / `feePaid` breakdown).
+- `.env.example` — four new `NEXT_PUBLIC_*` knobs.
+- `docs/ARCHITECTURE.md` — Protocol Parameters table now lists the four knobs.
+- `docs/RISK_MODEL.md` + `docs/llm-spec/RISK_MODEL.md` — correlation moved out of Level 2 into the live pricing path.

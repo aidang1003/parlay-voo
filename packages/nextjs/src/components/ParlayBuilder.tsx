@@ -1021,6 +1021,11 @@ export function ParlayBuilder() {
                 </span>
               </div>
             </div>
+            {stakeNum > 0 && (
+              <p className="mt-1 text-right text-xs text-gray-500">
+                = ${stakeNum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            )}
             {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
               <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
                 <span>

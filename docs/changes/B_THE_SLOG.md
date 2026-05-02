@@ -7,16 +7,16 @@ Carryover from `A_DAY_SCALING_SPRINT.md`. The A-DAY doc is closed; remaining unf
 | Item | Status | Notes |
 |---|---|---|
 | R-1 — ABIs in Postgres | 🔲 deferred | Carried forward from A-DAY + UI/UX sprint |
-| U-1 — `/vault` personal/global split | 🔲 specced | Header pill + tabs; UX decisions locked on `ui/personal-global-intro` |
-| U-2 — `/tickets` personal/global split | 🔲 specced | My Tickets / Activity tabs; event-sourced feed |
-| U-3 — Polymarket sync: upsert instead of rebuild | 🔲 | Preserve fast-changing fields; stop nuking the cache |
-| U-4 — Show leg question text, not hash | 🔲 | `/admin/debug` + `/ticket/[id]` |
-| U-5 — Per-leg multiplier in the cart | 🔲 | Builder UX |
-| U-6 — Restore rocket curves on the graph | 🔲 | Visual polish |
-| U-7 — Show yes/no distribution per leg in debug | 🔲 | Resolver needs to see what users actually picked |
-| U-8 — Track resolved legs on debug page | 🔲 | Audit trail |
-| U-9 — Hide on-chain-resolved legs from the builder | 🔲 | Stop letting users build parlays with dead legs |
-| U-10 — Comma + decimal formatting on numeric inputs | 🔲 | Reduce typo risk on stake / mint amounts |
+| U-1 — `/vault` personal/global split | ✅ | Header pill + tabs; UX decisions locked on `ui/personal-global-intro` |
+| U-2 — `/tickets` personal/global split | ✅ | My Tickets / Activity tabs; event-sourced feed |
+| U-3 — Polymarket sync: upsert instead of rebuild | ✅ | Preserve fast-changing fields; stop nuking the cache |
+| U-4 — Show leg question text, not hash | ✅ | `/admin/debug` + `/ticket/[id]` |
+| U-5 — Per-leg multiplier in the cart | ✅ | Builder UX |
+| U-6 — Restore rocket curves on the graph | ✅ | Visual polish |
+| U-7 — Show yes/no distribution per leg in debug | ✅ | Resolver needs to see what users actually picked |
+| U-8 — Track resolved legs on debug page | ✅ | Audit trail |
+| U-9 — Hide on-chain-resolved legs from the builder | ✅ | Stop letting users build parlays with dead legs |
+| U-10 — Comma + decimal formatting on numeric inputs | ✅ | Reduce typo risk on stake / mint amounts |
 
 ---
 
@@ -214,3 +214,4 @@ Carryover from `A_DAY_SCALING_SPRINT.md`. The A-DAY doc is closed; remaining unf
 - U-7: `useOpenLegs` aggregates active-ticket YES/NO counts and summed stake per leg; debug table grew a "Positions" column rendering YES count · stake / NO count · stake
 - U-8: new `useRecentResolutions` hook reads `LegResolved` events from `AdminOracleAdapter`, joins each row with the leg's question + resolver address; new "Recently Resolved" section on `/admin/debug` shows the last 20
 - U-9: `ParlayBuilder` now drops legs whose oracle status is non-Unresolved before rendering. Implemented client-side via `useLegDescriptions` + `useLegStatuses` over the on-chain (non-synthetic) leg ids in `allLegs`; selectedLegs reconcile effect already drops legs that disappear from `allLegs`. Test mock for `@/lib/hooks` extended with the two new hooks.
+- U-10: deposit / withdraw / lock inputs (VaultDashboard) and the parlay stake input (ParlayBuilder) and the admin debug mint input now render a formatted `= $X,XXX.XX` shadow line below the field, sourced from `formatUSDC(...,{locale:true})` (or `toLocaleString` for the integer mint slider).

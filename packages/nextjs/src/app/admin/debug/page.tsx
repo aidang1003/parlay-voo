@@ -84,6 +84,9 @@ function MintSection() {
           className="w-28 rounded-lg border border-white/10 bg-gray-900/50 px-3 py-1.5 text-right font-mono text-sm text-gray-200"
         />
       </div>
+      <p className="mt-1 text-right text-xs text-gray-500">
+        = ${amount.toLocaleString("en-US")} USDC
+      </p>
       <div className="mt-4 flex items-center justify-between">
         <div className="text-xs text-gray-500">
           Balance:{" "}

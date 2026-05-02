@@ -530,6 +530,9 @@ export function VaultDashboard() {
                   </button>
                 )}
               </div>
+              {depositAmountBigInt > 0n && (
+                <p className="text-right text-xs text-gray-500">= ${formatUSDC(depositAmountBigInt)}</p>
+              )}
               {depositNegative && (
                 <p className="text-center text-xs text-neon-red">Amount must be positive</p>
               )}
@@ -589,6 +592,11 @@ export function VaultDashboard() {
                   </button>
                 )}
               </div>
+              {withdrawAmountBigInt > 0n && (
+                <p className="text-right text-xs text-gray-500">
+                  = {formatUSDC(withdrawAmountBigInt)} VOO
+                </p>
+              )}
               {withdrawBelowMinimum && (
                 <p className="text-center text-xs text-neon-red">Amount too small</p>
               )}
@@ -736,6 +744,11 @@ export function VaultDashboard() {
                   </button>
                 )}
               </div>
+              {lockAmountBigInt > 0n && (
+                <p className="text-right text-xs text-gray-500">
+                  = {formatUSDC(lockAmountBigInt)} VOO
+                </p>
+              )}
 
               {lockBelowMinimum && (
                 <p className="text-center text-xs text-neon-red">Minimum lock is 1 VOO</p>

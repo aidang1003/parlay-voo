@@ -35,10 +35,10 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         vm.warp(500_000);
 
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         registry = new LegRegistry();
         oracle = new AdminOracleAdapter();
-        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
 
         vault.setEngine(address(engine));
         registry.setEngine(address(engine));
@@ -81,7 +81,8 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
         uint256 feePaid = t.feePaid;
-        assertEq(feePaid, 1_000_000, "feePaid should be 1 USDC");
+        // protocolFeeBps=1000 (10%), 2 legs → effective = 1 - 0.9² = 0.19. 50 × 0.19 = 9.5 USDC.
+        assertEq(feePaid, 9_500_000, "feePaid = 9.5 USDC");
 
         uint256 expectedToLockers = (feePaid * 9000) / 10_000;
         uint256 expectedToSafety = (feePaid * 500) / 10_000;
@@ -123,10 +124,10 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     // ── buyTicketSigned Reverts Without Fee Config ──────────────────────
 
     function test_feeRouting_revertsWithoutConfig() public {
-        HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
+        HouseVault freshVault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         LegRegistry freshRegistry = new LegRegistry();
         ParlayEngine freshEngine =
-            new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+            new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
         freshVault.setEngine(address(freshEngine));
         freshRegistry.setEngine(address(freshEngine));
         freshEngine.setTrustedQuoteSigner(_signerAddr());
@@ -148,10 +149,10 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_feeRouting_revertsWithoutSafetyModule() public {
-        HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
+        HouseVault freshVault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         LegRegistry freshRegistry = new LegRegistry();
         ParlayEngine freshEngine =
-            new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+            new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
         LockVaultV2 freshLockVault = new LockVaultV2(freshVault);
         freshVault.setEngine(address(freshEngine));
         freshRegistry.setEngine(address(freshEngine));
@@ -181,8 +182,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_feeRouting_zeroFeeNoRouting() public {
-        engine.setBaseFee(0);
-        engine.setPerLegFee(0);
+        engine.setProtocolFeeBps(0);
 
         uint256 lockVaultBefore = usdc.balanceOf(address(lockVault));
         uint256 safetyBefore = usdc.balanceOf(safetyModule);
@@ -205,7 +205,8 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_feeRouting_emitsEvents() public {
-        uint256 expectedFee = 1_000_000;
+        // 50 USDC × (1 - 0.9²) = 9.5 USDC fee.
+        uint256 expectedFee = 9_500_000;
         uint256 expectedToLockers = (expectedFee * 9000) / 10_000;
         uint256 expectedToSafety = (expectedFee * 500) / 10_000;
         uint256 expectedToVault = expectedFee - expectedToLockers - expectedToSafety;
@@ -223,9 +224,10 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         _buySigned(engine, alice, _legs(), 20e6, DEADLINE);
         _buySigned(engine, alice, _legs(), 30e6, DEADLINE);
 
-        uint256 fee1 = (10e6 * 200) / 10_000;
-        uint256 fee2 = (20e6 * 200) / 10_000;
-        uint256 fee3 = (30e6 * 200) / 10_000;
+        // 2-leg ticket fee = stake × (1 - 0.9²) = stake × 0.19, so 1900 BPS effective.
+        uint256 fee1 = (10e6 * 1900) / 10_000;
+        uint256 fee2 = (20e6 * 1900) / 10_000;
+        uint256 fee3 = (30e6 * 1900) / 10_000;
         uint256 piecewiseLockers =
             (fee1 * 9000) / 10_000 + (fee2 * 9000) / 10_000 + (fee3 * 9000) / 10_000;
 
@@ -294,7 +296,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_notifyFees_noLockers_isNoOp() public {
-        HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
+        HouseVault freshVault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         LockVaultV2 freshLockVault = new LockVaultV2(freshVault);
         freshLockVault.setFeeDistributor(address(freshVault));
 
@@ -307,11 +309,11 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_undistributedFees_flowToFirstLocker() public {
-        HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
+        HouseVault freshVault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         LegRegistry freshRegistry = new LegRegistry();
         LockVaultV2 freshLockVault = new LockVaultV2(freshVault);
         ParlayEngine freshEngine =
-            new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+            new ParlayEngine(freshVault, freshRegistry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
         freshVault.setEngine(address(freshEngine));
         freshRegistry.setEngine(address(freshEngine));
         freshEngine.setTrustedQuoteSigner(_signerAddr());
@@ -333,7 +335,8 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         vm.prank(alice);
         freshEngine.buyTicketSigned(q, sig);
 
-        uint256 expectedFee = (50e6 * 200) / 10_000;
+        // protocolFeeBps=1000 (10%) per leg, 2 legs → 1900 BPS effective.
+        uint256 expectedFee = (50e6 * 1900) / 10_000;
         uint256 expectedToLockers = (expectedFee * 9000) / 10_000;
         assertEq(freshLockVault.undistributedFees(), expectedToLockers, "undistributed");
 

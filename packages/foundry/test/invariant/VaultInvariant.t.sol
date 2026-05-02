@@ -98,7 +98,7 @@ contract VaultInvariantTest is Test {
 
     function setUp() public {
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         vault.setEngine(engine);
 
         handler = new VaultHandler(usdc, vault);

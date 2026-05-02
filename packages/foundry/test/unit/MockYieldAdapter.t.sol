@@ -28,7 +28,7 @@ contract MockYieldAdapterTest is Test {
 
     function setUp() public {
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         adapter = new MockYieldAdapter(IERC20(address(usdc)), address(vault));
 
         vault.setEngine(engine);
@@ -124,7 +124,7 @@ contract MockYieldAdapterTest is Test {
 
     function test_deployIdle_noAdapter_reverts() public {
         // Deploy a fresh vault without adapter
-        HouseVault freshVault = new HouseVault(IERC20(address(usdc)));
+        HouseVault freshVault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         vm.expectRevert("HouseVault: no adapter");
         freshVault.deployIdle(1000e6);
     }

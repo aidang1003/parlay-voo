@@ -10,16 +10,29 @@ contract ParlayMathWrapper {
         return ParlayMath.computeMultiplier(probs);
     }
 
-    function applyEdge(uint256 fairMultiplierX1e6, uint256 edgeBps) external pure returns (uint256) {
-        return ParlayMath.applyEdge(fairMultiplierX1e6, edgeBps);
+    function applyFee(uint256 mulX1e6, uint256 numLegs, uint256 feeBps) external pure returns (uint256) {
+        return ParlayMath.applyFee(mulX1e6, numLegs, feeBps);
+    }
+
+    function correlationDiscountBps(uint256 n, uint256 asymptoteBps, uint256 halfSatPpm)
+        external
+        pure
+        returns (uint256)
+    {
+        return ParlayMath.correlationDiscountBps(n, asymptoteBps, halfSatPpm);
+    }
+
+    function applyCorrelation(
+        uint256 mulX1e6,
+        uint256[] memory groupSizes,
+        uint256 asymptoteBps,
+        uint256 halfSatPpm
+    ) external pure returns (uint256) {
+        return ParlayMath.applyCorrelation(mulX1e6, groupSizes, asymptoteBps, halfSatPpm);
     }
 
     function computePayout(uint256 stake, uint256 netMultiplierX1e6) external pure returns (uint256) {
         return ParlayMath.computePayout(stake, netMultiplierX1e6);
-    }
-
-    function computeEdge(uint256 numLegs, uint256 baseBps, uint256 perLegBps) external pure returns (uint256) {
-        return ParlayMath.computeEdge(numLegs, baseBps, perLegBps);
     }
 
     function computeCashoutValue(
@@ -155,22 +168,99 @@ contract ParlayMathTest is Test {
         assertEq(penaltyBps, 428);
     }
 
-    // ── applyEdge ────────────────────────────────────────────────────────
+    // ── applyFee ─────────────────────────────────────────────────────────
 
-    function test_applyEdge_200bps() public pure {
-        // 4x multiplier, 2% edge => 4 * 0.98 = 3.92x
-        uint256 net = ParlayMath.applyEdge(4_000_000, 200);
-        assertEq(net, 3_920_000);
+    function test_applyFee_2legsAt1000Bps() public pure {
+        // mul × 0.9^2 = mul × 0.81. 4_000_000 × 0.81 = 3_240_000.
+        assertEq(ParlayMath.applyFee(4_000_000, 2, 1000), 3_240_000);
     }
 
-    function test_applyEdge_zeroEdge() public pure {
-        uint256 net = ParlayMath.applyEdge(4_000_000, 0);
-        assertEq(net, 4_000_000);
+    function test_applyFee_5legsAt1000Bps() public pure {
+        // 0.9^5 ≈ 0.59049. 1e6 × 0.59049 = 590_490.
+        assertEq(ParlayMath.applyFee(1_000_000, 5, 1000), 590_490);
     }
 
-    function test_applyEdge_revertsOn100Percent() public {
-        vm.expectRevert("ParlayMath: edge >= 100%");
-        wrapper.applyEdge(4_000_000, 10_000);
+    function test_applyFee_zeroFeeReturnsInput() public pure {
+        assertEq(ParlayMath.applyFee(4_000_000, 5, 0), 4_000_000);
+    }
+
+    function test_applyFee_zeroLegsReturnsInput() public pure {
+        assertEq(ParlayMath.applyFee(4_000_000, 0, 1000), 4_000_000);
+    }
+
+    function test_applyFee_revertsAt100Percent() public {
+        vm.expectRevert("ParlayMath: fee >= 100%");
+        wrapper.applyFee(4_000_000, 1, 10_000);
+    }
+
+    // ── correlationDiscountBps ───────────────────────────────────────────
+    // Reference table: D=8000 BPS, k=1e6 PPM (k=1.0).
+    //   n=2 → 4000  | n=3 → 5333  | n=4 → 6000  | n=5 → 6400  | n=8 → 7000
+
+    function test_correlationDiscountBps_referenceTable() public pure {
+        assertEq(ParlayMath.correlationDiscountBps(2, 8000, 1_000_000), 4000);
+        assertEq(ParlayMath.correlationDiscountBps(3, 8000, 1_000_000), 5333);
+        assertEq(ParlayMath.correlationDiscountBps(4, 8000, 1_000_000), 6000);
+        assertEq(ParlayMath.correlationDiscountBps(5, 8000, 1_000_000), 6400);
+        assertEq(ParlayMath.correlationDiscountBps(8, 8000, 1_000_000), 7000);
+    }
+
+    function test_correlationDiscountBps_n0_returnsZero() public pure {
+        assertEq(ParlayMath.correlationDiscountBps(0, 8000, 1_000_000), 0);
+    }
+
+    function test_correlationDiscountBps_n1_returnsZero() public pure {
+        assertEq(ParlayMath.correlationDiscountBps(1, 8000, 1_000_000), 0);
+    }
+
+    function test_correlationDiscountBps_dZeroAlwaysZero() public pure {
+        assertEq(ParlayMath.correlationDiscountBps(2, 0, 1_000_000), 0);
+        assertEq(ParlayMath.correlationDiscountBps(8, 0, 1_000_000), 0);
+    }
+
+    function test_correlationDiscountBps_largeKFlatten() public pure {
+        // k = 100×PPM → at n=2 discount ≈ D/(101) ≈ 79 BPS.
+        uint256 d = ParlayMath.correlationDiscountBps(2, 8000, 100 * 1_000_000);
+        assertLt(d, 100);
+    }
+
+    function test_correlationDiscountBps_smallKSaturate() public pure {
+        // k = 1 PPM (much smaller than (n−1)·PPM) → discount ≈ D.
+        uint256 d = ParlayMath.correlationDiscountBps(2, 8000, 1);
+        assertGe(d, 7900);
+    }
+
+    // ── applyCorrelation ─────────────────────────────────────────────────
+
+    function test_applyCorrelation_singleGroup() public pure {
+        // 4× indep → 40% discount → 2.4×
+        uint256[] memory g = new uint256[](1);
+        g[0] = 2;
+        uint256 mul = ParlayMath.applyCorrelation(4_000_000, g, 8000, 1_000_000);
+        assertEq(mul, 2_400_000);
+    }
+
+    function test_applyCorrelation_multipleGroups() public pure {
+        // Two groups (sizes 2 + 3) → factors compose: 0.6 × 0.4666... = 0.28
+        uint256[] memory g = new uint256[](2);
+        g[0] = 2; // 40% discount
+        g[1] = 3; // 53.33% discount
+        uint256 mul = ParlayMath.applyCorrelation(10_000_000, g, 8000, 1_000_000);
+        // 10e6 × (10000-4000)/10000 = 6_000_000 → 6e6 × (10000-5333)/10000 = 2_800_200
+        assertEq(mul, 2_800_200);
+    }
+
+    function test_applyCorrelation_n1Skipped() public pure {
+        uint256[] memory g = new uint256[](2);
+        g[0] = 1; // skipped
+        g[1] = 2; // 40% discount
+        uint256 mul = ParlayMath.applyCorrelation(4_000_000, g, 8000, 1_000_000);
+        assertEq(mul, 2_400_000);
+    }
+
+    function test_applyCorrelation_emptyGroupsReturnsInput() public pure {
+        uint256[] memory g = new uint256[](0);
+        assertEq(ParlayMath.applyCorrelation(4_000_000, g, 8000, 1_000_000), 4_000_000);
     }
 
     // ── computePayout ────────────────────────────────────────────────────
@@ -189,25 +279,6 @@ contract ParlayMathTest is Test {
     function test_computePayout_1xMultiplier() public pure {
         uint256 payout = ParlayMath.computePayout(100e6, 1_000_000);
         assertEq(payout, 100e6);
-    }
-
-    // ── computeEdge ──────────────────────────────────────────────────────
-
-    function test_computeEdge_twoLegs() public pure {
-        // base=100, perLeg=50, 2 legs => 100 + 100 = 200 bps
-        uint256 edge = ParlayMath.computeEdge(2, 100, 50);
-        assertEq(edge, 200);
-    }
-
-    function test_computeEdge_fiveLegs() public pure {
-        // base=100, perLeg=50, 5 legs => 100 + 250 = 350 bps
-        uint256 edge = ParlayMath.computeEdge(5, 100, 50);
-        assertEq(edge, 350);
-    }
-
-    function test_computeEdge_zeroLegs() public pure {
-        uint256 edge = ParlayMath.computeEdge(0, 100, 50);
-        assertEq(edge, 100);
     }
 
     // ── computeCashoutValue input validation ──────────────────────────────

@@ -865,6 +865,9 @@ export function ParlayBuilder() {
                   <span className="min-w-0 flex-1 truncate text-gray-300">
                     {s.leg.description}
                   </span>
+                  <span className="flex-shrink-0 font-mono text-xs text-gray-400">
+                    {effectiveOdds(s.leg, s.outcomeChoice).toFixed(2)}x
+                  </span>
                   <span
                     className={`ml-2 flex-shrink-0 text-xs font-bold ${
                       s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"

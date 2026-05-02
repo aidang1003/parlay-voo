@@ -60,6 +60,30 @@ function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
+/**
+ * Build a smooth SVG path from a list of points using a Catmull-Rom spline
+ * converted to cubic Bezier segments. Restores the curved rocket flight
+ * styling the original `parlaycity` chart used; the straight-segment fallback
+ * before this looked like a stock chart, not a flight path.
+ */
+function smoothPath(pts: { x: number; y: number }[]): string {
+  if (pts.length === 0) return "";
+  if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
 export function MultiplierClimb({
   legMultipliers,
   crashed = false,
@@ -233,10 +257,7 @@ export function MultiplierClimb({
     return raw;
   }, [ceiling, isLog]);
 
-  const pathD =
-    points.length > 1
-      ? `M ${points.map((p) => `${p.x} ${p.y}`).join(" L ")}`
-      : "";
+  const pathD = points.length > 1 ? smoothPath(points) : "";
 
   // Reactively track SVG path total length for stroke dash animation
   const [pathLength, setPathLength] = useState(0);
@@ -256,13 +277,19 @@ export function MultiplierClimb({
     if (!animated || pathLength === 0 || points.length <= 1) return undefined;
     const totalSegments = points.length - 1;
     const revealedSegments = Math.min(animatedSegments, totalSegments);
-    // Compute actual cumulative Euclidean length (segments vary with leg multipliers)
-    let revealLen = 0;
-    for (let i = 0; i < revealedSegments; i++) {
+    // Sum straight-line segment lengths, then map onto the actual curved path
+    // length so the reveal fraction stays accurate now that we draw a smooth
+    // (longer) Bezier path instead of polylines.
+    let revealStraight = 0;
+    let totalStraight = 0;
+    for (let i = 0; i < totalSegments; i++) {
       const dx = points[i + 1].x - points[i].x;
       const dy = points[i + 1].y - points[i].y;
-      revealLen += Math.sqrt(dx * dx + dy * dy);
+      const segLen = Math.sqrt(dx * dx + dy * dy);
+      totalStraight += segLen;
+      if (i < revealedSegments) revealStraight += segLen;
     }
+    const revealLen = totalStraight > 0 ? (revealStraight / totalStraight) * pathLength : 0;
     return {
       strokeDasharray: `${pathLength}`,
       strokeDashoffset: `${pathLength - revealLen}`,

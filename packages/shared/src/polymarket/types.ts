@@ -12,6 +12,15 @@ export interface CuratedMarket {
   volume24hr?: number;
   curationScore?: number;
   gameGroup?: string;
+  /** True when the parent Polymarket event uses the negRisk mechanism. Every
+   *  child market in a negRisk event is mutually exclusive: at most one
+   *  resolves YES. The sync layer turns this + `eventId` into a non-zero
+   *  `exclusionGroupId` so the builder can grey out conflicting legs and
+   *  the engine can reject `MutuallyExclusiveLegs` on buy. */
+  negRisk?: boolean;
+  /** Polymarket event id. Stable across child markets in the same event;
+   *  used as the seed for the exclusion-group hash when `negRisk` is true. */
+  eventId?: string;
 }
 
 export interface PolymarketMetadata {

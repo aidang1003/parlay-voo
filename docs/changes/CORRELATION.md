@@ -132,6 +132,36 @@ The deploy script (`HelperConfig.s.sol`) reads the same env vars via `vm.envOr(.
 - **Correlation arbitrage.** A user can split a correlated 3-leg ticket into three 1-leg tickets to sidestep the correlation discount. The flat fee discourages this somewhat (single-leg tickets pay `1 − (1−f) = f` = 10% vs. multi-leg compounding), but it's not a complete plug. The right counter is keeping single-leg fee high enough that arbitrage isn't worth the gas — not adding more correlation pricing.
 - **Where do `correlationGroupId` and `exclusionGroupId` come from for non-Polymarket markets?** Polymarket sync uses `gameGroup` for correlation and the series ID for exclusion. Seed markets get manual tags in `seed.ts`. Future on-chain sport feeds will need a tagging convention.
 
+### Mutual-exclusion detection — phased rollout
+
+Mutual exclusion is fundamentally a *data* problem, not a math problem: the engine already reverts on duplicate `exclusionGroupId`s, but it's only as good as the tags the data layer feeds it. Rolling out in two phases:
+
+**Phase 1 — structural detection (shipped).** Polymarket's `negRisk` mechanism already groups winner-takes-all markets at the protocol level: every child market in a negRisk event shares the parent `event.id`, and Polymarket guarantees at most one resolves YES. The sync route reads `event.negRisk` from the gamma API, hashes `negrisk:<eventId>` into a numeric `exclusionGroupId`, and stores it in `tblegmapping.bigexclusiongroup`. The `/api/markets` API surfaces the field on every leg. The builder gate in `ParlayBuilder.tsx` greys out conflicting picks. On-chain enforcement requires running `LegRegistry.setLegExclusionGroup(legId, groupId)` for newly-registered legs — kept as an admin operation today (cast/script) so the JIT buy path stays uncomplicated; can be automated as a follow-up cron when there's appetite.
+
+**Phase 2 — LLM screen + human approval (TODO).** negRisk only catches markets Polymarket itself groups. The long tail is *opposite-binary* exclusions where two separate markets cover the same axis (e.g. "ETH > $4000 by Jun 30" + "ETH < $4000 by Jun 30" listed as independent markets, or two unrelated markets that happen to ask "essentially the same thing"). Plan:
+
+1. **Screen at sync time with Haiku.** When new markets land in `tblegmapping`, batch them up and ask Claude Haiku: "Are any of these markets mutually exclusive — i.e. wagers on them have no compounding effect because they ask the same question?" Cheap (~$0.0001/pair, batched), bounded latency, runs in the existing sync cron. Cache results in a new `tbexclusion_proposals` table keyed by `(sourceRefA, sourceRefB)` with status `pending` and the model's reasoning.
+2. **Final human approval gate before activation.** A new admin debug page (`/admin/exclusion-review`) lists the pending proposals. Each row shows both markets, the LLM's reasoning, and approve/reject buttons. **A market only goes live (`blnactive=true`) once any pending exclusion proposal touching it has been resolved by an admin.** Approving merges the two source refs into a shared `exclusionGroupId` (assigned server-side); rejecting marks the pair safe and never re-prompts. This keeps the false-positive surface controllable: the LLM is a screener, not the source of truth.
+3. **Schema sketch.**
+   ```sql
+   CREATE TABLE tbexclusion_proposals (
+     txtsourcerefa     TEXT NOT NULL,
+     txtsourcerefb     TEXT NOT NULL,
+     bigproposedgroup  BIGINT NOT NULL,        -- assigned on approve
+     txtstatus         TEXT NOT NULL,          -- 'pending' | 'approved' | 'rejected'
+     txtmodelreason    TEXT,                   -- Haiku's explanation
+     txtmodelid        TEXT,                   -- e.g. 'claude-haiku-4-5-20251001'
+     tsproposedat      TIMESTAMPTZ NOT NULL DEFAULT now(),
+     tsdecidedat       TIMESTAMPTZ,
+     txtdecidedby      TEXT,                   -- admin wallet / email
+     PRIMARY KEY (txtsourcerefa, txtsourcerefb)
+   );
+   ```
+4. **Trigger conditions.** Run the screener (a) on the polymarket sync's new-market output, (b) when seed markets are added or edited. Skip pairs already approved/rejected. Batch in groups of ~20 per Haiku call to amortise cost.
+5. **Activation gate.** Either gate `/api/markets` to filter rows that have unresolved `pending` proposals, or fold a `txtactivationstatus` column into `tblegmapping` driven by the proposal queue. The exact mechanism is open — pick whichever fits the catalog flow we land on.
+
+The pitch: Haiku already nails "are these the same question?" with very high recall. Pairing it with a human approve gate keeps protocol risk low (any false-positive exclusion just reduces ticket count, not solvency) without forcing us to hand-curate every market.
+
 ### Sources consulted
 
 - Pinnacle Sports — articles on why they avoid SGPs.
@@ -368,3 +398,8 @@ docs/llm-spec/RISK_MODEL.md                        (mirror)
 - `.env.example` — four new `NEXT_PUBLIC_*` knobs.
 - `docs/ARCHITECTURE.md` — Protocol Parameters table now lists the four knobs.
 - `docs/RISK_MODEL.md` + `docs/llm-spec/RISK_MODEL.md` — correlation moved out of Level 2 into the live pricing path.
+- `packages/shared/src/polymarket/types.ts` + `featured.ts` — `CuratedMarket` carries `negRisk` and `eventId` so the sync layer can derive an `exclusionGroupId` from Polymarket's negRisk grouping.
+- `packages/nextjs/src/lib/db/schema.sql` + `lib/db/client.ts` — new `bigexclusiongroup` column on `tblegmapping`; `MarketRow` / `UpsertMarketInput` plumb it; `upsertMarket` preserves any existing exclusion tag on conflict so re-syncs can't clobber an approved tag.
+- `packages/nextjs/src/lib/polymarket/markets.ts` — `rowToLeg` surfaces `bigexclusiongroup` as `Leg.exclusionGroupId`; `stableHash32` exported for the sync route.
+- `packages/nextjs/src/app/api/polymarket/sync/route.ts` — when `event.negRisk === true`, hash `negrisk:<eventId>` into the numeric exclusion group and persist it.
+- `docs/changes/CORRELATION.md` — Phase 1 (negRisk → DB → API → builder gate) lands; Phase 2 (Haiku screen + human approval) documented for later.

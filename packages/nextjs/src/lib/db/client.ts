@@ -41,6 +41,9 @@ export interface MarketRow {
   jsonbapipayload: unknown | null;
   bigcurationscore: number | null;
   txtgamegroup: string | null;
+  /** Non-zero ⇒ this market is part of a mutually-exclusive group. Legs
+   *  sharing the same value cannot co-exist on a ticket (CORRELATION.md). */
+  bigexclusiongroup: number | null;
   tscreatedat: string;
 }
 
@@ -69,6 +72,7 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     jsonbapipayload: r.jsonbapipayload ?? null,
     bigcurationscore: r.bigcurationscore == null ? null : Number(r.bigcurationscore),
     txtgamegroup: (r.txtgamegroup as string | null | undefined) ?? null,
+    bigexclusiongroup: r.bigexclusiongroup == null ? null : Number(r.bigexclusiongroup),
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -110,6 +114,9 @@ export interface UpsertMarketInput {
   apiPayload?: unknown | null;
   curationScore?: number | null;
   gameGroup?: string | null;
+  /** Stable hash of the source's exclusion identifier (Polymarket negRisk
+   *  event id). 0 / null ⇒ no exclusion. */
+  exclusionGroupId?: number | null;
 }
 
 /**
@@ -125,25 +132,35 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
     input.apiPayload == null ? null : JSON.stringify(input.apiPayload);
   const curationScore = input.curationScore ?? null;
   const gameGroup = input.gameGroup ?? null;
+  // 0 collapses to null in the DB so non-exclusion markets stay sparse and
+  // the column lookup short-circuits in the API surfacing layer.
+  const exclusionGroupId =
+    input.exclusionGroupId != null && input.exclusionGroupId !== 0
+      ? input.exclusionGroupId
+      : null;
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
       bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload,
-      bigcurationscore, txtgamegroup
+      bigcurationscore, txtgamegroup, bigexclusiongroup
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
       ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
       ${payloadJson}::jsonb,
-      ${curationScore}, ${gameGroup}
+      ${curationScore}, ${gameGroup}, ${exclusionGroupId}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyesprobppm      = EXCLUDED.intyesprobppm,
       intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
       jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload),
-      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore)
+      bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore),
+      -- Preserve a registered exclusion group; only fill in when the row
+      -- didn't have one yet, so a re-sync can never silently re-tag a leg
+      -- that admins already accepted on-chain.
+      bigexclusiongroup  = COALESCE(tblegmapping.bigexclusiongroup, EXCLUDED.bigexclusiongroup)
   `;
 }
 

@@ -36,8 +36,13 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   jsonbapipayload    JSONB,
   bigcurationscore   BIGINT,
   txtgamegroup       TEXT,
+  bigexclusiongroup  BIGINT,                                   -- non-zero ⇒ legs in this group are mutually exclusive
   tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration: add the column on databases that were initialised before
+-- bigexclusiongroup landed. Safe to re-run; no-op when the column exists.
+ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigexclusiongroup BIGINT;
 
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);

@@ -102,6 +102,24 @@ export function computePayout(stake: bigint, netMultiplierX1e6: bigint): bigint 
 }
 
 /**
+ * Round a USDC microunit amount UP to the nearest $0.01 grain.
+ * 6-decimal USDC ⇒ one cent = 10_000 microunits.
+ *
+ * Used for the USDC approval the buy flow sets before `buyTicketSigned`:
+ * the approval needs slack so a sub-cent rounding mismatch between the
+ * UI's displayed stake and the parsed bigint can never make the engine's
+ * `safeTransferFrom` revert. The ticket itself still consumes the exact
+ * raw stake the quote was signed for.
+ */
+const CENT_USDC_RAW = 10_000n;
+export function ceilToCentRaw(amountRaw: bigint): bigint {
+  if (amountRaw <= 0n) return amountRaw;
+  const remainder = amountRaw % CENT_USDC_RAW;
+  if (remainder === 0n) return amountRaw;
+  return amountRaw + (CENT_USDC_RAW - remainder);
+}
+
+/**
  * Full quote computation. Takes leg probabilities (PPM) and raw stake (USDC with decimals).
  * Returns a complete QuoteResponse. Optional `groupSizes` lets callers fold in
  * per-correlation-group sizes; defaults to none (independent legs).

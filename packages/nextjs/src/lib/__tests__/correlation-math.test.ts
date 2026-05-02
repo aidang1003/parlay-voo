@@ -4,6 +4,7 @@ import {
   correlationDiscountBps,
   applyCorrelation,
   computeMultiplier,
+  ceilToCentRaw,
   BPS,
   PPM,
   PROTOCOL_FEE_BPS,
@@ -74,6 +75,35 @@ describe("applyCorrelation", () => {
   it("returns input unchanged when all groups are < 2", () => {
     expect(applyCorrelation(4_000_000n, [], 8000, 1_000_000)).toBe(4_000_000n);
     expect(applyCorrelation(4_000_000n, [1, 1], 8000, 1_000_000)).toBe(4_000_000n);
+  });
+});
+
+describe("ceilToCentRaw", () => {
+  // 6-decimal USDC. One cent = 10_000 microunits. Used to size the buy-flow
+  // approve so a sub-cent drift can never starve the engine's transferFrom.
+  it("leaves zero unchanged", () => {
+    expect(ceilToCentRaw(0n)).toBe(0n);
+  });
+
+  it("leaves an exact cent unchanged", () => {
+    expect(ceilToCentRaw(5_930_000n)).toBe(5_930_000n);
+  });
+
+  it("rounds up sub-cent residue", () => {
+    // 5.9311 USDC → 5_931_100 → next cent is 5_940_000 (5.94 USDC).
+    expect(ceilToCentRaw(5_931_100n)).toBe(5_940_000n);
+    // 5.9301 USDC → 5_930_100 → next cent is 5_940_000.
+    expect(ceilToCentRaw(5_930_100n)).toBe(5_940_000n);
+    // 5.93001 truncated to 6dp is 5_930_010 → 5_940_000.
+    expect(ceilToCentRaw(5_930_010n)).toBe(5_940_000n);
+  });
+
+  it("rounds up the smallest possible residue", () => {
+    expect(ceilToCentRaw(1n)).toBe(10_000n);
+  });
+
+  it("passes through negative or unusable values unchanged", () => {
+    expect(ceilToCentRaw(-1n)).toBe(-1n);
   });
 });
 

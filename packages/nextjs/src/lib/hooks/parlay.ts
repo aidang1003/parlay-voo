@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAccount, useReadContracts } from "wagmi";
 import { parseUnits, parseEventLogs } from "viem";
+import { ceilToCentRaw } from "@parlayvoo/shared";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
@@ -108,11 +109,16 @@ export function useBuyTicket() {
         signature: `0x${string}`;
       };
 
+      // Round the approval up to the next $0.01 so a sub-cent drift between
+      // the UI display and the parsed bigint can never starve the engine's
+      // safeTransferFrom of allowance. The ticket itself still consumes the
+      // exact `quote.stake` value the backend signed.
+      const approveAmount = ceilToCentRaw(stakeAmount);
       const approveHash = await writeContractAsync({
         address: usdc.address,
         abi: usdc.abi,
         functionName: "approve",
-        args: [engine.address, stakeAmount],
+        args: [engine.address, approveAmount],
         dataSuffix: BUILDER_SUFFIX,
       });
       const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });

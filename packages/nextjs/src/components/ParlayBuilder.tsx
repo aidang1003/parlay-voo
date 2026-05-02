@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { formatUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import { useModal } from "connectkit";
 import type { Leg, Market } from "@parlayvoo/shared";
 import {
@@ -18,6 +18,7 @@ import {
   BPS,
   applyFee,
   applyCorrelation,
+  ceilToCentRaw,
   computeMultiplier,
 } from "@parlayvoo/shared";
 import {
@@ -563,6 +564,21 @@ export function ParlayBuilder() {
   }, [selectedLegs, effectiveProtocolFee, effectiveCorrAsymptote, effectiveCorrHalfSat]);
 
   const potentialPayout = stakeNum * multiplier;
+
+  // Payment amount the wallet will be asked to approve. Rounds the typed
+  // stake UP to the nearest $0.01 so a sub-cent rounding mismatch never
+  // makes `safeTransferFrom` revert on the engine. The on-chain ticket
+  // still consumes the exact `quote.stake` value the buy hook computes.
+  // Lossless tickets pay in credit, not USDC — no approval, no rounding.
+  const paymentAmountUsdc = useMemo(() => {
+    if (stakeNum <= 0 || useLossless) return stakeNum;
+    try {
+      const raw = parseUnits(stake || "0", 6);
+      return Number(ceilToCentRaw(raw)) / 1e6;
+    } catch {
+      return stakeNum;
+    }
+  }, [stake, stakeNum, useLossless]);
 
   // Map leg id → disabled reason (null when selectable). The builder uses
   // this to grey out conflicting legs without telling the user there's a
@@ -1119,7 +1135,8 @@ export function ParlayBuilder() {
             </div>
             {stakeNum > 0 && (
               <p className="mt-1 text-right text-xs text-gray-500">
-                = ${stakeNum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {useLossless ? "= " : "Payment: "}$
+                {paymentAmountUsdc.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             )}
             {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (

@@ -6,6 +6,7 @@ import { sql, upsertMarket } from "@/lib/db/client";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
  * One-shot DB initializer. Applies schema.sql and backfills leg_mapping with

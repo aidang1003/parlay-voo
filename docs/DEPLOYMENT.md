@@ -52,13 +52,13 @@ pnpm fund-wallet:sepolia 1000
 
 ### What `pnpm deploy:sepolia` does
 
-1. Loads `HelperConfig.getBaseSepoliaConfig()` — returns `{usdc, bootstrapDays, optimisticLiveness, optimisticBond, uniswapNFPM, weth, deployerKey}`.
-2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, OptimisticOracleAdapter, ParlayEngine. Wires permissions and fee routing.
+1. Loads `HelperConfig.getBaseSepoliaConfig()` — returns `{usdc, bootstrapDays, umaOracleV3, umaLiveness, umaBondAmount, uniswapNFPM, weth, deployerKey}`.
+2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, UmaOracleAdapter (wrapping UMA OOv3 at `0x0F7fC5E6482f096380db6158f978167b57388deE` on Base Sepolia), ParlayEngine. Wires permissions and fee routing.
 3. Deploys LockVaultV2 (continuous-duration lock curve) and the yield adapter.
 4. Calls `SetTrustedSigner` to register `QUOTE_SIGNER_PRIVATE_KEY`'s address as the engine's trusted JIT quote signer.
 5. `tsx scripts/generate-deployed-contracts.ts 84532` reads the forge broadcast JSON + ABIs from `forge out/` and writes `packages/nextjs/src/contracts/deployedContracts.ts`.
 
-Per-chain config (USDC, bootstrap length, oracle liveness/bond) lives in `packages/foundry/script/HelperConfig.s.sol`. Adding a new chain = adding a `getXxxConfig()` branch keyed on `block.chainid`.
+Per-chain config (USDC, bootstrap length, UMA OOv3 address / liveness / bond) lives in `packages/foundry/script/HelperConfig.s.sol`. Adding a new chain = adding a `getXxxConfig()` branch keyed on `block.chainid`.
 
 ## Contract verification
 

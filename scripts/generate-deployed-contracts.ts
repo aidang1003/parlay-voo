@@ -41,7 +41,7 @@ const CONTRACT_NAMES: Record<string, string> = {
   LegRegistry: "LegRegistry",
   LockVaultV2: "LockVaultV2",
   AdminOracleAdapter: "AdminOracleAdapter",
-  OptimisticOracleAdapter: "OptimisticOracleAdapter",
+  UmaOracleAdapter: "UmaOracleAdapter",
   MockYieldAdapter: "MockYieldAdapter",
 };
 

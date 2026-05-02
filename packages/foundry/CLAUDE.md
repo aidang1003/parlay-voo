@@ -18,7 +18,7 @@ All contracts use Ownable + Pausable + ReentrancyGuard, SafeERC20 on all token o
 - **LegRegistry** -- Admin-managed registry of betting outcomes. Each leg: `probabilityPPM`, `cutoffTime`, `oracleAdapter`.
 - **LockVaultV2** -- Continuous-duration VOO lock (7-day min, no upper cap). Fee share curve `10_000 + MAX_BOOST * d / (d + HALF_LIFE)`: 1.0x base, 2.0x at 1yr, 4.0x asymptote. Synthetix-style `accRewardPerWeightedShare` accumulator. Early-exit penalty decays from 30% (day 0, max-lock) to 0. Three tiers (`FULL`, `PARTIAL`, `LEAST`) — FULL is the standard path; PARTIAL/LEAST serve rehab-mode credit backing (see `docs/REHAB_MODE.md`). Fee income via `notifyFees()` called by HouseVault during fee routing.
 - **ParlayMath** -- Pure library: multiplier (PPM), edge (BPS), payout math.
-- **AdminOracleAdapter / OptimisticOracleAdapter** -- Bootstrap vs production oracles. `bootstrapEndsAt` determines mode per ticket at purchase (immutable).
+- **AdminOracleAdapter / UmaOracleAdapter** -- Testnet admin-resolve adapter (guarded: `resolve()` reverts on Base mainnet) vs production trustless adapter wrapping UMA Optimistic Oracle V3 on Base. Per-leg adapter address snapshotted at ticket buy.
 - **AaveYieldAdapter / MockYieldAdapter** -- Route idle USDC to Aave V3. Default deploy uses MockYieldAdapter only.
 
 Key interfaces: `IOracleAdapter`, `IYieldAdapter`, `ILockVault`.

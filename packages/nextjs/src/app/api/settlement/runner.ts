@@ -3,13 +3,17 @@
  * `/api/settlement/trigger` (manual admin button). The pure pipeline lives
  * here so both entry points produce identical behavior.
  *
- * Phase A: relay Polymarket resolutions into AdminOracleAdapter.resolve()
- *          for every conditionId that has resolved and been minted on-chain.
+ * Phase A: relay Polymarket resolutions into the leg's on-chain oracle.
+ *          - AdminOracleAdapter → single-tx `resolve(legId, status, outcome)`.
+ *          - UmaOracleAdapter   → `assertOutcome(..., claim)`; separately
+ *            settle mature assertions via `settleMature(legId)` on a later
+ *            run, once UMA's liveness window has elapsed. (F-5)
  * Phase B: call ParlayEngine.settleTicket() for every active ticket whose
  *          legs are all oracle-resolvable.
  *
- * Idempotent: `tbpolymarketresolution` gates Phase A; already-settled tickets
- * are skipped in Phase B.
+ * Idempotent: `tbpolymarketresolution` gates Phase A admin writes; pending
+ * UMA assertions are tracked on-chain via `assertionByLeg`; already-settled
+ * tickets are skipped in Phase B.
  */
 
 import {
@@ -40,12 +44,20 @@ import {
   type MarketRow,
 } from "@/lib/db/client";
 import deployedContracts from "@/contracts/deployedContracts";
+import { encodeClaim, type ClaimOutcome } from "@/lib/uma/claim";
 import { TicketStatus, mapResolution } from "./run/lib";
 
 // ── Minimal ABIs ─────────────────────────────────────────────────────────
 
 const ADMIN_ORACLE_ABI = parseAbi([
   "function resolve(uint256 legId, uint8 status, bytes32 outcome)",
+  "function canResolve(uint256 legId) view returns (bool)",
+]);
+
+const UMA_ORACLE_ABI = parseAbi([
+  "function assertOutcome(uint256 legId, uint8 status, bytes32 outcome, bytes claim) returns (bytes32)",
+  "function settleMature(uint256 legId)",
+  "function assertionByLeg(uint256 legId) view returns (bytes32)",
   "function canResolve(uint256 legId) view returns (bool)",
 ]);
 
@@ -68,6 +80,7 @@ const ENGINE_ABI = parseAbi([
 
 type ChainContracts = {
   AdminOracleAdapter: { address: `0x${string}` };
+  UmaOracleAdapter?: { address: `0x${string}` };
   LegRegistry: { address: `0x${string}` };
   ParlayEngine: { address: `0x${string}` };
 };
@@ -163,6 +176,9 @@ async function resolveLegs(
     return out;
   }
 
+  const umaAddr = contracts.UmaOracleAdapter?.address.toLowerCase();
+  const adminAddr = contracts.AdminOracleAdapter.address.toLowerCase();
+
   for (const row of rows) {
     const conditionId = row.txtsourceref;
 
@@ -185,34 +201,117 @@ async function resolveLegs(
         continue;
       }
 
-      const alreadyResolved = await publicClient.readContract({
-        address: contracts.AdminOracleAdapter.address,
-        abi: ADMIN_ORACLE_ABI,
-        functionName: "canResolve",
+      // Which oracle does this leg actually point at? Snapshot at registration time.
+      const leg = (await publicClient.readContract({
+        address: contracts.LegRegistry.address,
+        abi: REGISTRY_ABI,
+        functionName: "getLeg",
         args: [legId],
-      });
+      })) as { oracleAdapter: `0x${string}` };
+      const legAdapter = leg.oracleAdapter.toLowerCase();
 
+      const { status, outcome } = mapResolution(resolution.outcome);
       let txHash: Hex | null = null;
-      if (!alreadyResolved) {
-        const { status, outcome } = mapResolution(resolution.outcome);
-        txHash = await walletClient.writeContract({
+
+      if (legAdapter === adminAddr) {
+        // Admin path — one-shot resolve.
+        const alreadyResolved = await publicClient.readContract({
           address: contracts.AdminOracleAdapter.address,
           abi: ADMIN_ORACLE_ABI,
-          functionName: "resolve",
-          args: [legId, status, outcome],
-          chain: walletClient.chain,
-          account: walletClient.account!,
+          functionName: "canResolve",
+          args: [legId],
         });
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-      }
+        if (!alreadyResolved) {
+          txHash = await walletClient.writeContract({
+            address: contracts.AdminOracleAdapter.address,
+            abi: ADMIN_ORACLE_ABI,
+            functionName: "resolve",
+            args: [legId, status, outcome],
+            chain: walletClient.chain,
+            account: walletClient.account!,
+          });
+          await publicClient.waitForTransactionReceipt({ hash: txHash });
+        }
+        await recordResolution({
+          conditionId,
+          outcome: resolution.outcome,
+          yesTxHash: txHash,
+          noTxHash: null,
+        });
+        out.resolved++;
+      } else if (umaAddr && legAdapter === umaAddr) {
+        // UMA path — two-phase: assert → wait liveness → settle.
+        const umaContract = contracts.UmaOracleAdapter!.address;
+        const finalized = await publicClient.readContract({
+          address: umaContract,
+          abi: UMA_ORACLE_ABI,
+          functionName: "canResolve",
+          args: [legId],
+        });
+        if (finalized) {
+          await recordResolution({
+            conditionId,
+            outcome: resolution.outcome,
+            yesTxHash: null,
+            noTxHash: null,
+          });
+          out.resolved++;
+          continue;
+        }
 
-      await recordResolution({
-        conditionId,
-        outcome: resolution.outcome,
-        yesTxHash: txHash,
-        noTxHash: null,
-      });
-      out.resolved++;
+        const existingAssertion = (await publicClient.readContract({
+          address: umaContract,
+          abi: UMA_ORACLE_ABI,
+          functionName: "assertionByLeg",
+          args: [legId],
+        })) as Hex;
+
+        if (existingAssertion === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+          // No assertion yet — post one.
+          const claim = encodeClaim({
+            legId,
+            conditionId: row.txtsourceref as `0x${string}`,
+            outcome: resolution.outcome === "VOIDED" ? "VOID" : (resolution.outcome as ClaimOutcome),
+            asOfTs: Math.floor(Date.now() / 1000),
+          });
+          txHash = await walletClient.writeContract({
+            address: umaContract,
+            abi: UMA_ORACLE_ABI,
+            functionName: "assertOutcome",
+            args: [legId, status, outcome, claim],
+            chain: walletClient.chain,
+            account: walletClient.account!,
+          });
+          await publicClient.waitForTransactionReceipt({ hash: txHash });
+          // Don't recordResolution yet — leg isn't finalized until liveness + settle.
+          out.skipped++; // "pending liveness" bucket
+        } else {
+          // Assertion exists — try to settle. Reverts pre-liveness; swallow + skip.
+          try {
+            txHash = await walletClient.writeContract({
+              address: umaContract,
+              abi: UMA_ORACLE_ABI,
+              functionName: "settleMature",
+              args: [legId],
+              chain: walletClient.chain,
+              account: walletClient.account!,
+            });
+            await publicClient.waitForTransactionReceipt({ hash: txHash });
+            await recordResolution({
+              conditionId,
+              outcome: resolution.outcome,
+              yesTxHash: txHash,
+              noTxHash: null,
+            });
+            out.resolved++;
+          } catch {
+            out.skipped++; // likely pre-liveness revert
+          }
+        }
+      } else {
+        // Unknown oracle adapter — skip rather than misroute.
+        out.skipped++;
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       out.errors.push(`resolve ${conditionId.slice(0, 10)}: ${msg.slice(0, 200)}`);

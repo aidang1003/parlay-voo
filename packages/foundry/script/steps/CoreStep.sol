@@ -7,7 +7,8 @@ import {HouseVault} from "../../src/core/HouseVault.sol";
 import {LegRegistry} from "../../src/core/LegRegistry.sol";
 import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
 import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
-import {OptimisticOracleAdapter} from "../../src/oracle/OptimisticOracleAdapter.sol";
+import {UmaOracleAdapter} from "../../src/oracle/UmaOracleAdapter.sol";
+import {IOptimisticOracleV3} from "../../src/interfaces/IOptimisticOracleV3.sol";
 import {HelperConfig} from "../HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -18,7 +19,7 @@ abstract contract CoreStep is Script {
         HouseVault vault;
         LegRegistry registry;
         AdminOracleAdapter adminOracle;
-        OptimisticOracleAdapter optimisticOracle;
+        UmaOracleAdapter umaOracle; // address(0) on chains without UMA (Anvil)
         ParlayEngine engine;
     }
 
@@ -41,8 +42,17 @@ abstract contract CoreStep is Script {
         d.adminOracle = new AdminOracleAdapter();
         console.log("AdminOracleAdapter:     ", address(d.adminOracle));
 
-        d.optimisticOracle = new OptimisticOracleAdapter(d.usdc, cfg.optimisticLiveness, cfg.optimisticBond);
-        console.log("OptimisticOracleAdapter:", address(d.optimisticOracle));
+        if (cfg.umaOracleV3 != address(0)) {
+            IOptimisticOracleV3 uma = IOptimisticOracleV3(cfg.umaOracleV3);
+            uint256 bond = cfg.umaBondAmount == 0 ? uma.getMinimumBond(address(d.usdc)) : cfg.umaBondAmount;
+            d.umaOracle = new UmaOracleAdapter(uma, d.usdc, cfg.umaLiveness, bond);
+            console.log("UmaOracleAdapter:       ", address(d.umaOracle));
+            console.log("  UMA OOv3:             ", cfg.umaOracleV3);
+            console.log("  liveness (s):         ", cfg.umaLiveness);
+            console.log("  bond (USDC 6dp):      ", bond);
+        } else {
+            console.log("UmaOracleAdapter:        skipped (no UMA on this chain)");
+        }
 
         uint256 bootstrapEndsAt = block.timestamp + cfg.bootstrapDays * 1 days;
         d.engine = new ParlayEngine(d.vault, d.registry, d.usdc, bootstrapEndsAt);

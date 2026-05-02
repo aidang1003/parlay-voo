@@ -335,6 +335,75 @@ export function ParlayBuilder() {
     }
   }, [mounted, selectedLegs]);
 
+  // ── Live pricing refresh ───────────────────────────────────────────────
+  // Every 30s while ≥2 legs are staged and the buy flow is idle, poll
+  // /api/quote-preview to refresh CLOB mids. Updates allLegs in place; the
+  // reconcile effect above propagates new leg references into selectedLegs,
+  // which re-triggers the multiplier useMemo. Paused once the user clicks
+  // buy (isPending / isConfirming / isSuccess) — quote-sign does its own
+  // final CLOB refetch and becomes the source of truth from that point.
+  const selectedLegsKey = useMemo(
+    () => selectedLegs.map((s) => `${s.leg.sourceRef}:${s.outcomeChoice}`).join("|"),
+    [selectedLegs],
+  );
+  const buyActive = isPending || isConfirming || isSuccess;
+
+  useEffect(() => {
+    if (selectedLegs.length < 2 || buyActive) return;
+
+    const abort = new AbortController();
+    let cancelled = false;
+
+    async function refresh() {
+      if (cancelled) return;
+      try {
+        const res = await fetch("/api/quote-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            legs: selectedLegs.map((s) => ({
+              sourceRef: s.leg.sourceRef,
+              side: s.outcomeChoice === 2 ? "no" : "yes",
+            })),
+          }),
+          signal: abort.signal,
+        });
+        if (cancelled || !res.ok) return;
+        const data = (await res.json()) as {
+          legs: Array<{ sourceRef: string; probabilityPPM: number }>;
+        };
+        const freshBySource = new Map<string, number>(
+          data.legs.map((l) => [l.sourceRef, l.probabilityPPM]),
+        );
+
+        setAllLegs((prev) => {
+          let changed = false;
+          const next = prev.map((leg) => {
+            const freshYes = freshBySource.get(leg.sourceRef);
+            if (freshYes == null) return leg;
+            const nextYesOdds = ppmToOdds(freshYes);
+            const nextNoOdds = leg.noOdds != null ? ppmToOdds(1_000_000 - freshYes) : leg.noOdds;
+            if (nextYesOdds === leg.yesOdds && nextNoOdds === leg.noOdds) return leg;
+            changed = true;
+            return { ...leg, yesOdds: nextYesOdds, noOdds: nextNoOdds };
+          });
+          return changed ? next : prev;
+        });
+      } catch {
+        // Silent — next tick retries. Abort errors land here too.
+      }
+    }
+
+    refresh();
+    const id = window.setInterval(refresh, 30_000);
+    return () => {
+      cancelled = true;
+      abort.abort();
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLegsKey, buyActive]);
+
   // ── Risk advisor state ─────────────────────────────────────────────────
   // Kelly AI Risk Advisor state + stale-data reset.
   // DISABLED: no longer called by the application. Kept for future re-enable.
@@ -803,6 +872,25 @@ export function ParlayBuilder() {
                   >
                     {s.outcomeChoice === 1 ? "YES" : "NO"}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
+                    aria-label={`Remove ${s.leg.description}`}
+                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="h-3 w-3"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
                 </div>
               ))}
             </div>

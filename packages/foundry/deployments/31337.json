@@ -1,10 +1,9 @@
 {
-  "AdminOracleAdapter": "0x9d2a52b29e509884ac172cc26f3ef8dce2840ed9",
-  "HouseVault": "0xc232129fa72304ec630c2a6ee0757edd704e6ca3",
-  "LegRegistry": "0x774d67193b331df28aecd22f644ea30bb66bdd5e",
-  "LockVaultV2": "0xae944149c7ca694a19168adefeb01521f7e834e1",
-  "MockUSDC": "0xbd836e1a0228b28227b2d69426ce270149e14041",
-  "MockYieldAdapter": "0xb4b831f5519252a0cc452a1b267917d5eea0f353",
-  "OptimisticOracleAdapter": "0x4d4b7dc9ea36595e1379c15f55efe243dd77e30a",
-  "ParlayEngine": "0x6fd9359459a2aaf748229acf03fbf02744f7f863"
+  "MockUSDC": "0x0eb2f15bb97a4a63e14f2743b78ff3b649d8747e",
+  "HouseVault": "0x113e1ce4a7be97106e1f27f3af1696677c332f77",
+  "LegRegistry": "0xcd3b99050d0f2c35a0c55c4971bc65c707bc9984",
+  "AdminOracleAdapter": "0xb7f00d78f2d44152312fe209e75c8932c8d583ae",
+  "ParlayEngine": "0xac1b5a8cfed4fb3a219cf97ec86b3131e3a73606",
+  "LockVaultV2": "0xbf6ab355824aa17190c368cc4b815e970e2ebcf2",
+  "MockYieldAdapter": "0x08c9c544cb7cbdf64e4bd4bf3765e0c3aa0ed101"
 }

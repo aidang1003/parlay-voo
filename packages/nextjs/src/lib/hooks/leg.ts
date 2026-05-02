@@ -58,8 +58,8 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
 /**
  * Queries each leg's oracle adapter for individual resolution status.
  *
- * Each leg stores its own `oracleAdapter` address (AdminOracleAdapter during
- * bootstrap, OptimisticOracleAdapter in production). Both implement
+ * Each leg stores its own `oracleAdapter` address (AdminOracleAdapter on
+ * testnet, UmaOracleAdapter on Base mainnet). Both implement
  * `IOracleAdapter`, so we reuse AdminOracleAdapter's ABI from
  * `deployedContracts.ts` — `getStatus`'s signature is interface-enforced.
  */

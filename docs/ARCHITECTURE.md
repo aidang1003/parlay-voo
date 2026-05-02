@@ -34,8 +34,8 @@ flowchart TB
         HV[HouseVault<br/>ERC-4626 vault]
         LR[LegRegistry]
         LV2[LockVaultV2<br/>continuous-duration<br/>Synthetix rewards]
-        OA[AdminOracleAdapter]
-        OO[OptimisticOracleAdapter]
+        OA[AdminOracleAdapter<br/>testnet only]
+        OO[UmaOracleAdapter<br/>UMA OOv3 wrapper]
         PM[ParlayMath<br/>pure library]
     end
 
@@ -88,12 +88,15 @@ Staking contract for VOO shares. **Continuous-duration lock curve** (no fixed 30
 Pure library mirrored exactly in TypeScript (`packages/shared/src/math.ts`). Computes multipliers, edge, payout, progressive payout, and cashout values. PPM scale (1e6) for probability, BPS (1e4) for fees.
 
 ### Oracle Adapters
-Pluggable settlement via `IOracleAdapter` interface:
-- **AdminOracleAdapter**: Owner resolves legs directly. Used during bootstrap and by the Polymarket sync route.
-- **OptimisticOracleAdapter**: Permissionless propose/challenge with bonds and liveness window. Production path.
+Pluggable settlement via `IOracleAdapter` interface. Per-leg adapter address snapshotted into the ticket at purchase:
+- **AdminOracleAdapter**: Owner resolves legs directly. `resolve()` reverts on Base mainnet (`require(block.chainid != 8453)`). Used on Anvil + Base Sepolia for dev/QA.
+- **UmaOracleAdapter**: Thin wrapper over UMA Optimistic Oracle V3 on Base (F-5). Anyone posts an assertion with a bond; disputes escalate to UMA's DVM. No `onlyOwner` function can alter outcomes. Mainnet production path.
 
-### Hybrid Settlement
-`bootstrapEndsAt` timestamp determines mode at ticket purchase time. Before = FAST (admin resolved). After = OPTIMISTIC (challenge-based). Mode is immutable per ticket.
+### Oracle selection
+`/api/quote-sign` picks the adapter at ticket-buy time:
+- Base mainnet → UMA.
+- Base Sepolia → Admin by default; flip `NEXT_PUBLIC_ORACLE_MODE=uma` to exercise UMA end-to-end.
+- Anvil → Admin (no UMA deployment).
 
 ## Crons
 

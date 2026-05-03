@@ -33,8 +33,11 @@ abstract contract CoreStep is Script {
             console.log("Deployed MockUSDC:      ", address(d.usdc));
         }
 
-        d.vault = new HouseVault(d.usdc);
+        d.vault = new HouseVault(d.usdc, cfg.corrAsymptoteBps, cfg.corrHalfSatPpm, cfg.maxLegsPerGroup);
         console.log("HouseVault:             ", address(d.vault));
+        console.log("  corr D (BPS):         ", cfg.corrAsymptoteBps);
+        console.log("  corr k (PPM):         ", cfg.corrHalfSatPpm);
+        console.log("  maxLegsPerGroup:      ", cfg.maxLegsPerGroup);
 
         d.registry = new LegRegistry();
         console.log("LegRegistry:            ", address(d.registry));
@@ -55,8 +58,9 @@ abstract contract CoreStep is Script {
         }
 
         uint256 bootstrapEndsAt = block.timestamp + cfg.bootstrapDays * 1 days;
-        d.engine = new ParlayEngine(d.vault, d.registry, d.usdc, bootstrapEndsAt);
+        d.engine = new ParlayEngine(d.vault, d.registry, d.usdc, bootstrapEndsAt, cfg.protocolFeeBps);
         console.log("ParlayEngine:           ", address(d.engine));
+        console.log("  protocolFeeBps:       ", cfg.protocolFeeBps);
 
         d.vault.setEngine(address(d.engine));
         d.registry.setEngine(address(d.engine));

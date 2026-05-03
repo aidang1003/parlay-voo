@@ -40,6 +40,13 @@ export interface Leg {
   /** No-side probability in PPM (polymarket only). */
   noProbabilityPPM?: number;
   active: boolean;
+  /** Correlation group ID. Legs sharing this id (typically same game) get a
+   *  saturating multiplier discount. 0 = uncorrelated. */
+  correlationGroupId?: number;
+  /** Mutual-exclusion group ID. At most one leg from a group can be in the
+   *  cart — the builder greys out conflicting legs and the engine reverts
+   *  on duplicate non-zero ids. 0 = no exclusion. */
+  exclusionGroupId?: number;
 }
 
 export interface Market {
@@ -80,8 +87,6 @@ export interface QuoteResponse {
   stake: string;
   multiplierX1e6: string;
   potentialPayout: string;
-  feePaid: string;
-  edgeBps: number;
   probabilities: number[];
   valid: boolean;
   reason?: string;
@@ -158,7 +163,6 @@ export interface RiskAssessResponse {
   riskTolerance: RiskProfile;
   fairMultiplier: number;
   netMultiplier: number;
-  edgeBps: number;
 }
 
 export interface AgentQuoteRequest {

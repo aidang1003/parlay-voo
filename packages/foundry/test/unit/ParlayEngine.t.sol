@@ -31,10 +31,10 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
         vm.warp(500_000);
 
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         registry = new LegRegistry();
         oracle = new AdminOracleAdapter();
-        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
 
         vault.setEngine(address(engine));
         registry.setEngine(address(engine));
@@ -281,9 +281,11 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
     }
 
     function test_buyTicket_feeCalculation() public {
+        // protocolFeeBps = 1000 (10%) per leg. 2 legs → effective fee = 1 - 0.9² = 0.19.
+        // 10 USDC × 0.19 = 1.9 USDC = 1_900_000 in 6-decimal microunits.
         uint256 ticketId = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        assertEq(t.feePaid, 200_000);
+        assertEq(t.feePaid, 1_900_000);
     }
 
     function test_buyTicket_pauseBlocksBuy() public {
@@ -298,18 +300,11 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
         engine.buyTicketSigned(q, sig);
     }
 
-    function test_setBaseFee_boundsCheck() public {
-        engine.setBaseFee(2000);
-        assertEq(engine.baseFee(), 2000);
-        vm.expectRevert("ParlayEngine: baseFee too high");
-        engine.setBaseFee(2001);
-    }
-
-    function test_setPerLegFee_boundsCheck() public {
-        engine.setPerLegFee(500);
-        assertEq(engine.perLegFee(), 500);
-        vm.expectRevert("ParlayEngine: perLegFee too high");
-        engine.setPerLegFee(501);
+    function test_setProtocolFeeBps_boundsCheck() public {
+        engine.setProtocolFeeBps(2000);
+        assertEq(engine.protocolFeeBps(), 2000);
+        vm.expectRevert(abi.encodeWithSignature("FeeTooHigh(uint256)", 10_000));
+        engine.setProtocolFeeBps(10_000);
     }
 
     function test_setMinStake_boundsCheck() public {
@@ -477,16 +472,10 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
 
     // ── Admin Setter Access Control ─────────────────────────────────────
 
-    function test_setBaseFee_nonOwner_reverts() public {
+    function test_setProtocolFeeBps_nonOwner_reverts() public {
         vm.prank(alice);
         vm.expectRevert();
-        engine.setBaseFee(200);
-    }
-
-    function test_setPerLegFee_nonOwner_reverts() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        engine.setPerLegFee(100);
+        engine.setProtocolFeeBps(200);
     }
 
     function test_setMinStake_nonOwner_reverts() public {
@@ -509,16 +498,10 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
 
     // ── Admin Setter Event Emissions ────────────────────────────────────
 
-    function test_setBaseFee_emitsEvent() public {
+    function test_setProtocolFeeBps_emitsEvent() public {
         vm.expectEmit(true, true, true, true);
-        emit ParlayEngine.BaseFeeUpdated(100, 200);
-        engine.setBaseFee(200);
-    }
-
-    function test_setPerLegFee_emitsEvent() public {
-        vm.expectEmit(true, true, true, true);
-        emit ParlayEngine.PerLegFeeUpdated(50, 100);
-        engine.setPerLegFee(100);
+        emit ParlayEngine.ProtocolFeeUpdated(1000, 2000);
+        engine.setProtocolFeeBps(2000);
     }
 
     function test_setMinStake_emitsEvent() public {
@@ -541,30 +524,19 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
 
     // ── Admin Setter Effects on Ticket Pricing ──────────────────────────
 
-    function test_setBaseFee_affectsNextTicketFee() public {
+    function test_setProtocolFeeBps_affectsNextTicketFee() public {
+        // Default fee 1000 BPS, 2 legs → fee = stake × (1 - 0.9²) = stake × 0.19.
         uint256 t1 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         uint256 fee1 = engine.getTicket(t1).feePaid;
 
-        engine.setBaseFee(200);
+        // Bump to 2000 BPS (20% per leg). 2 legs → 1 - 0.8² = 0.36.
+        engine.setProtocolFeeBps(2000);
         uint256 t2 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
         uint256 fee2 = engine.getTicket(t2).feePaid;
 
-        assertGt(fee2, fee1, "higher baseFee must increase fee");
-        assertEq(fee1, 200_000);
-        assertEq(fee2, 300_000);
-    }
-
-    function test_setPerLegFee_affectsNextTicketFee() public {
-        uint256 t1 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
-        uint256 fee1 = engine.getTicket(t1).feePaid;
-
-        engine.setPerLegFee(200);
-        uint256 t2 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
-        uint256 fee2 = engine.getTicket(t2).feePaid;
-
-        assertGt(fee2, fee1, "higher perLegFee must increase fee");
-        assertEq(fee1, 200_000);
-        assertEq(fee2, 500_000);
+        assertGt(fee2, fee1, "higher protocolFee must increase fee");
+        assertEq(fee1, 1_900_000); // 10 × 0.19 USDC
+        assertEq(fee2, 3_600_000); // 10 × 0.36 USDC
     }
 
     function test_setMinStake_enforcedOnBuy() public {
@@ -682,6 +654,107 @@ contract ParlayEngineTest is FeeRouterSetup, SignedBuy {
         // Buyer gets stake minus fee refunded. Fee is non-refundable because
         // it was routed to lockers/safety/vault at buy time.
         assertEq(usdc.balanceOf(alice), aliceBalBefore + (tBefore.stake - tBefore.feePaid));
+    }
+
+    // ── Correlation + exclusion gating ──────────────────────────────────
+    //
+    // Three legs all in the same correlation group → engine applies the
+    // saturating discount to the multiplier and reserves a smaller payout
+    // than the independent-legs case. The first ticket below tags every leg
+    // with corrGroup=42; the second leaves them ungrouped — comparing the
+    // two pins the discount magnitude.
+
+    function test_buyTicket_correlationDiscountApplied() public {
+        // Reuse legs 0/1 from _twoLegs(), but tag both with the same corr group
+        // before buying. We have to bootstrap the leg ids first by buying a
+        // throwaway ticket — getOrCreateBySourceRef happens inside the engine.
+        _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        registry.setLegCorrGroup(0, 42);
+        registry.setLegCorrGroup(1, 42);
+
+        uint256 corrTicket = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        ParlayEngine.Ticket memory tCorr = engine.getTicket(corrTicket);
+
+        // Drop the tags + buy again — same legs, same probabilities.
+        registry.setLegCorrGroup(0, 0);
+        registry.setLegCorrGroup(1, 0);
+        uint256 indepTicket = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        ParlayEngine.Ticket memory tIndep = engine.getTicket(indepTicket);
+
+        assertLt(tCorr.multiplierX1e6, tIndep.multiplierX1e6, "corr discount lowers mul");
+        assertLt(tCorr.potentialPayout, tIndep.potentialPayout, "corr discount lowers payout");
+    }
+
+    function test_buyTicket_distinctCorrGroupsNoDiscount() public {
+        // Bootstrap leg ids.
+        _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        registry.setLegCorrGroup(0, 1);
+        registry.setLegCorrGroup(1, 2);
+
+        uint256 t1 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        ParlayEngine.Ticket memory tag = engine.getTicket(t1);
+
+        registry.setLegCorrGroup(0, 0);
+        registry.setLegCorrGroup(1, 0);
+        uint256 t2 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        ParlayEngine.Ticket memory untag = engine.getTicket(t2);
+
+        assertEq(tag.multiplierX1e6, untag.multiplierX1e6, "distinct groups skip discount");
+    }
+
+    function test_buyTicket_revertsOnCorrCapExceeded() public {
+        // Bootstrap 4 legs and tag every one with the same corrGroup. The
+        // default cap is 3, so a 4-leg ticket in that group must revert.
+        ParlayEngine.SourceLeg[] memory bootstrap = new ParlayEngine.SourceLeg[](4);
+        bootstrap[0] = _yesLeg("leg:eth", 500_000);
+        bootstrap[1] = _yesLeg("leg:btc", 500_000);
+        bootstrap[2] = _yesLeg("leg:sol", 500_000);
+        bootstrap[3] = _yesLeg("leg:doge", 500_000);
+        // Buy a 2-leg ticket to register legs 0,1 (need at least 2 legs).
+        ParlayEngine.SourceLeg[] memory two = new ParlayEngine.SourceLeg[](2);
+        two[0] = bootstrap[0];
+        two[1] = bootstrap[1];
+        _buySigned(engine, alice, two, 10e6, DEADLINE);
+        // And register legs 2/3 via another 2-leg ticket.
+        two[0] = bootstrap[2];
+        two[1] = bootstrap[3];
+        _buySigned(engine, alice, two, 10e6, DEADLINE);
+
+        registry.setLegCorrGroup(0, 99);
+        registry.setLegCorrGroup(1, 99);
+        registry.setLegCorrGroup(2, 99);
+        registry.setLegCorrGroup(3, 99);
+
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, bootstrap, DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("TooManyLegsInGroup(uint256,uint256,uint256)", 99, 4, 3));
+        engine.buyTicketSigned(q, sig);
+    }
+
+    function test_buyTicket_revertsOnExclusionConflict() public {
+        // Bootstrap 2 legs sharing exclusionGroupId=5.
+        _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        registry.setLegExclusionGroup(0, 5);
+        registry.setLegExclusionGroup(1, 5);
+
+        uint256 nonce = _nextQuoteNonce++;
+        ParlayEngine.Quote memory q = _mkQuote(alice, 10e6, _twoLegs(), DEADLINE, nonce);
+        bytes memory sig = _signQuote(engine, SIGNER_PK, q);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("MutuallyExclusiveLegs(uint256,uint256)", 0, 1));
+        engine.buyTicketSigned(q, sig);
+    }
+
+    function test_setProtocolFeeBps_liveUpdate() public {
+        // Default 1000bps → 2 legs feePaid = 1.9 USDC for stake 10.
+        uint256 t1 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        assertEq(engine.getTicket(t1).feePaid, 1_900_000);
+
+        engine.setProtocolFeeBps(500); // 5% per leg → 1 - 0.95² = 0.0975
+        uint256 t2 = _buySigned(engine, alice, _twoLegs(), 10e6, DEADLINE);
+        assertEq(engine.getTicket(t2).feePaid, 975_000);
     }
 
     /// @dev Partial-void path that falls below the 2-leg parlay minimum:

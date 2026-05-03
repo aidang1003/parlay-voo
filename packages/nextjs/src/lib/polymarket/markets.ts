@@ -49,6 +49,12 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
 
 function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
   const yesId = row.intyeslegid ?? nextSyntheticId();
+  const corrId = row.txtgamegroup ? stableHash32(`game:${row.txtgamegroup}`) : 0;
+  // bigexclusiongroup is the pre-hashed group id: the sync route runs
+  // `stableHash32("negrisk:" + eventId)` once on insert. The frontend gate
+  // and the on-chain check both compare numeric equality, so we just pass
+  // the raw value through here.
+  const exclusionId = row.bigexclusiongroup ?? 0;
   const leg: Leg = {
     id: yesId,
     question: row.txtquestion,
@@ -57,12 +63,27 @@ function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
     earliestResolve: row.bigearliestresolve,
     probabilityPPM: row.intyesprobppm,
     active: true,
+    correlationGroupId: corrId,
+    exclusionGroupId: exclusionId,
   };
   if (row.txtsource === "polymarket" && row.intnoprobppm != null) {
     leg.noId = row.intnolegid ?? nextSyntheticId();
     leg.noProbabilityPPM = row.intnoprobppm;
   }
   return leg;
+}
+
+/** FNV-1a 32-bit hash of a string. Stable across runs and platforms; used to
+ *  turn a string group key (Polymarket gameGroup or negRisk eventId) into the
+ *  numeric group id the on-chain registry expects. Exported so the sync route
+ *  hashes negRisk event ids the same way `rowToLeg` would. */
+export function stableHash32(input: string): number {
+  let h = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0; // FNV prime, keep unsigned
+  }
+  return h >>> 0;
 }
 
 /** Polymarket sourceRefs are the raw conditionId: a 0x-prefixed 32-byte hex.

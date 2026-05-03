@@ -18,13 +18,43 @@ HouseVault.reservePayout(potentialPayout):
   require(totalReserved + potentialPayout <= totalAssets() * maxUtilizationBps / 10_000, "util cap");
 ```
 
+## Correlation engine — shipped
+
+```solidity
+// HouseVault.sol
+struct CorrelationConfig {
+    uint256 corrAsymptoteBps;   // D, default 8000 (80%)
+    uint256 corrHalfSatPpm;     // k × 1e6, default 1_000_000 (k = 1.0)
+    uint256 maxLegsPerGroup;    // builder-side hard cap, default 3
+}
+CorrelationConfig public corrConfig;
+```
+
+```solidity
+// LegRegistry.sol
+mapping(uint256 => uint256) public legCorrGroup;       // legId → correlationGroupId (0 = uncorrelated)
+mapping(uint256 => uint256) public legExclusionGroup;  // legId → exclusionGroupId (0 = no exclusion)
+```
+
+```solidity
+// ParlayEngine.sol
+uint256 public protocolFeeBps;  // per-leg multiplicative fee, default 1000 (10%)
+error MutuallyExclusiveLegs(uint256 legA, uint256 legB);
+error TooManyLegsInGroup(uint256 groupId, uint256 legCount, uint256 cap);
+error FeeTooHigh(uint256 bps);
+```
+
+Buy path: `_checkExclusion(legIds)` → `_aggregateGroupSizes(legIds)` (also enforces `maxLegsPerGroup`) → `ParlayMath.applyFee` → `ParlayMath.applyCorrelation` → reserve. Math mirrors `packages/shared/src/math.ts`.
+
+Defaults are env-driven via `NEXT_PUBLIC_PROTOCOL_FEE_BPS`, `NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS`, `NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM`, `NEXT_PUBLIC_MAX_LEGS_PER_GROUP` — see [../changes/CORRELATION.md](../changes/CORRELATION.md).
+
 ## Proposed Level 1 config (not yet on-chain)
 
 ```solidity
 struct RiskConfig {
     uint256 maxUtilizationBps;   // 8000
     uint256 perMarketCapBps;     // 2000   (20% of TVL in any one market)
-    uint256 perGroupCapBps;      // 3000   (30% of TVL in any correlation group)
+    uint256 perGroupCapBps;      // 3000   (30% of TVL in any correlation group, future)
     uint256 maxLegs;             // 5
     uint256 minEdgeBps;          // 100
     uint256 maxEdgeBps;          // 2000

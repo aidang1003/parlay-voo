@@ -3,10 +3,24 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { formatUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import { useModal } from "connectkit";
 import type { Leg, Market } from "@parlayvoo/shared";
-import { MAX_LEGS, MIN_LEGS, MIN_STAKE_USDC, BASE_FEE_BPS, PER_LEG_FEE_BPS } from "@parlayvoo/shared";
+import {
+  MAX_LEGS,
+  MIN_LEGS,
+  MIN_STAKE_USDC,
+  PROTOCOL_FEE_BPS,
+  CORRELATION_ASYMPTOTE_BPS,
+  CORRELATION_HALF_SAT_PPM,
+  MAX_LEGS_PER_GROUP,
+  PPM,
+  BPS,
+  applyFee,
+  applyCorrelation,
+  ceilToCentRaw,
+  computeMultiplier,
+} from "@parlayvoo/shared";
 import {
   sanitizeNumericInput,
   blockNonNumericKeys,
@@ -49,6 +63,14 @@ interface DisplayLeg {
   onChain: boolean;
   /** Raw source reference: polymarket conditionId (0x…) or "seed:<id>". */
   sourceRef: string;
+  /** Yes-side probability in PPM (used for accurate multiplier computation). */
+  yesProbabilityPPM: number;
+  /** No-side probability in PPM. */
+  noProbabilityPPM?: number;
+  /** Correlation group id (0 = uncorrelated). */
+  correlationGroupId: number;
+  /** Mutual-exclusion group id (0 = no exclusion). */
+  exclusionGroupId: number;
 }
 
 interface SelectedLeg {
@@ -164,6 +186,10 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         gameGroup: market.gameGroup ?? "",
         onChain: false,
         sourceRef: leg.sourceRef,
+        yesProbabilityPPM: leg.probabilityPPM,
+        noProbabilityPPM: leg.noProbabilityPPM,
+        correlationGroupId: leg.correlationGroupId ?? 0,
+        exclusionGroupId: leg.exclusionGroupId ?? 0,
       });
     }
   }
@@ -225,7 +251,14 @@ export function ParlayBuilder() {
   const { balance: usdcBalance } = useUSDCBalance();
   const mintHook = useMintTestUSDC();
   const { freeLiquidity, maxPayout } = useVaultStats();
-  const { baseFeeBps, perLegFeeBps, maxLegs, minStakeUSDC } = useParlayConfig();
+  const {
+    protocolFeeBps,
+    correlationAsymptoteBps,
+    correlationHalfSatPpm,
+    maxLegsPerGroup,
+    maxLegs,
+    minStakeUSDC,
+  } = useParlayConfig();
 
   // Pick the active purchase hook so every downstream state read stays in sync
   // with whichever flow the user is currently on.
@@ -430,8 +463,11 @@ export function ParlayBuilder() {
   const stakeNum = parseFloat(stake) || 0;
   const effectiveMaxLegs = maxLegs ?? MAX_LEGS;
   const effectiveMinStake = minStakeUSDC ?? MIN_STAKE_USDC;
-  const effectiveBaseFee = baseFeeBps ?? BASE_FEE_BPS;
-  const effectivePerLegFee = perLegFeeBps ?? PER_LEG_FEE_BPS;
+  const effectiveProtocolFee = protocolFeeBps ?? PROTOCOL_FEE_BPS;
+  const netLegFactor = (BPS - effectiveProtocolFee) / BPS;
+  const effectiveCorrAsymptote = correlationAsymptoteBps ?? CORRELATION_ASYMPTOTE_BPS;
+  const effectiveCorrHalfSat = correlationHalfSatPpm ?? CORRELATION_HALF_SAT_PPM;
+  const effectiveMaxLegsPerGroup = maxLegsPerGroup ?? MAX_LEGS_PER_GROUP;
 
   // Pull on-chain status for any DisplayLeg that has a real (non-synthetic)
   // legId. Synthetic ids are negative (set in markets.ts when the row hasn't
@@ -498,13 +534,99 @@ export function ParlayBuilder() {
     return games;
   }, [filteredLegs]);
 
+  // Final multiplier: applies the per-leg fee and saturating correlation
+  // discount via the same shared math the engine runs on-chain.
   const multiplier = useMemo(() => {
-    return selectedLegs.reduce((acc, s) => acc * effectiveOdds(s.leg, s.outcomeChoice), 1);
-  }, [selectedLegs]);
+    if (selectedLegs.length === 0) return 1;
+    const probs = selectedLegs.map((s) =>
+      s.outcomeChoice === 2
+        ? (s.leg.noProbabilityPPM ?? PPM - s.leg.yesProbabilityPPM)
+        : s.leg.yesProbabilityPPM,
+    );
+    if (probs.some((p) => p <= 0 || p >= PPM)) {
+      // Fall back to pure odds product when any leg has an invalid PPM.
+      return selectedLegs.reduce((acc, s) => acc * effectiveOdds(s.leg, s.outcomeChoice), 1);
+    }
+    const counts = new Map<number, number>();
+    for (const s of selectedLegs) {
+      const g = s.leg.correlationGroupId;
+      if (g !== 0) counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    const groupSizes = Array.from(counts.values());
+    const fairMul = computeMultiplier(probs);
+    const feeAdjusted = applyFee(fairMul, probs.length, effectiveProtocolFee);
+    const finalMul = applyCorrelation(
+      feeAdjusted,
+      groupSizes,
+      effectiveCorrAsymptote,
+      effectiveCorrHalfSat,
+    );
+    return Number(finalMul) / PPM;
+  }, [selectedLegs, effectiveProtocolFee, effectiveCorrAsymptote, effectiveCorrHalfSat]);
 
-  const feeBps = effectiveBaseFee + effectivePerLegFee * selectedLegs.length;
-  const feeAmount = (stakeNum * feeBps) / 10000;
-  const potentialPayout = (stakeNum - feeAmount) * multiplier;
+  const potentialPayout = stakeNum * multiplier;
+
+  // Per-leg multipliers fed to the chart climb. Distribute the (fee +
+  // correlation) discount evenly across legs so the cumulative product at
+  // the chart's last point equals the cart's final multiplier — keeps the
+  // big headline number aligned with the potential-payout calculation.
+  const climbLegMultipliers = useMemo(() => {
+    if (selectedLegs.length === 0) return [];
+    const raw = selectedLegs.map((s) => effectiveOdds(s.leg, s.outcomeChoice));
+    const rawProduct = raw.reduce((acc, m) => acc * m, 1);
+    if (!Number.isFinite(rawProduct) || rawProduct <= 0 || multiplier <= 0) return raw;
+    const scale = Math.pow(multiplier / rawProduct, 1 / raw.length);
+    return raw.map((m) => m * scale);
+  }, [selectedLegs, multiplier]);
+
+  // Payment amount the wallet will be asked to approve. Rounds the typed
+  // stake UP to the nearest $0.01 so a sub-cent rounding mismatch never
+  // makes `safeTransferFrom` revert on the engine. The on-chain ticket
+  // still consumes the exact `quote.stake` value the buy hook computes.
+  // Lossless tickets pay in credit, not USDC — no approval, no rounding.
+  const paymentAmountUsdc = useMemo(() => {
+    if (stakeNum <= 0 || useLossless) return stakeNum;
+    try {
+      const raw = parseUnits(stake || "0", 6);
+      return Number(ceilToCentRaw(raw)) / 1e6;
+    } catch {
+      return stakeNum;
+    }
+  }, [stake, stakeNum, useLossless]);
+
+  // Map leg id → disabled reason (null when selectable). The builder uses
+  // this to grey out conflicting legs without telling the user there's a
+  // correlation-related cap (CORRELATION.md: leg-limit copy stays neutral).
+  const legGate = useMemo(() => {
+    const gate = new Map<string, { reason: "conflict" | "groupCap"; conflictsWith?: string }>();
+    if (selectedLegs.length === 0) return gate;
+    const corrCounts = new Map<number, number>();
+    const exclusionOwners = new Map<number, DisplayLeg>();
+    for (const s of selectedLegs) {
+      const cg = s.leg.correlationGroupId;
+      if (cg !== 0) corrCounts.set(cg, (corrCounts.get(cg) ?? 0) + 1);
+      const eg = s.leg.exclusionGroupId;
+      if (eg !== 0) exclusionOwners.set(eg, s.leg);
+    }
+    for (const leg of allLegs) {
+      const idKey = leg.id.toString();
+      if (selectedLegs.some((s) => s.leg.id === leg.id)) continue; // already selected — don't gate self
+      if (leg.exclusionGroupId !== 0) {
+        const owner = exclusionOwners.get(leg.exclusionGroupId);
+        if (owner) {
+          gate.set(idKey, { reason: "conflict", conflictsWith: owner.description });
+          continue;
+        }
+      }
+      if (leg.correlationGroupId !== 0) {
+        const count = corrCounts.get(leg.correlationGroupId) ?? 0;
+        if (count >= effectiveMaxLegsPerGroup) {
+          gate.set(idKey, { reason: "groupCap" });
+        }
+      }
+    }
+    return gate;
+  }, [allLegs, selectedLegs, effectiveMaxLegsPerGroup]);
 
   const freeLiquidityNum = freeLiquidity !== undefined ? parseFloat(formatUnits(freeLiquidity, 6)) : 0;
   const maxPayoutNum = maxPayout !== undefined ? parseFloat(formatUnits(maxPayout, 6)) : 0;
@@ -518,10 +640,7 @@ export function ParlayBuilder() {
   // maxPayout() (5% TVL) or freeLiquidity(); capping the UI stake here
   // prevents 4-5 leg parlays from silently reverting after approve.
   const vaultCapUsdc = statsLoaded ? Math.min(maxPayoutNum, freeLiquidityNum) : 0;
-  const impliedMaxStake =
-    multiplier > 1 && feeBps < 10_000 && vaultCapUsdc > 0
-      ? vaultCapUsdc / (multiplier * (1 - feeBps / 10_000))
-      : 0;
+  const impliedMaxStake = multiplier > 1 && vaultCapUsdc > 0 ? vaultCapUsdc / multiplier : 0;
 
   const usdcBalanceNum = usdcBalance !== undefined ? parseFloat(formatUnits(usdcBalance, 6)) : 0;
   const creditNum = credit !== undefined ? parseFloat(formatUnits(credit, 6)) : 0;
@@ -801,33 +920,43 @@ export function ParlayBuilder() {
                     {legs.map((leg, legIdx) => {
                   const selected = selectedLegs.find((s) => s.leg.id === leg.id);
                   const hasNo = leg.noId !== undefined;
+                  const gateInfo = legGate.get(leg.id.toString());
+                  const gated = gateInfo !== undefined && !selected;
+                  const tooltip = gated
+                    ? gateInfo.reason === "conflict"
+                      ? `Conflicts with: ${gateInfo.conflictsWith ?? ""}`
+                      : "Leg limit reached"
+                    : undefined;
                   return (
                     <div
                       key={leg.id.toString()}
                       id={legIdx === 0 ? "ftue-market-card" : undefined}
+                      title={tooltip}
                       className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
                         selected
                           ? selected.outcomeChoice === 1
                             ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
                             : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-                          : "hover:border-white/10"
+                          : gated
+                            ? "opacity-40 grayscale"
+                            : "hover:border-white/10"
                       }`}
                       style={{ animationDelay: `${legIdx * 50}ms` }}
                     >
                       {/* Yes / Question / No — question centered, sides flanking */}
                       <div className="flex items-stretch">
                         <button
-                          disabled={vaultEmpty}
+                          disabled={vaultEmpty || gated}
                           onClick={() => toggleLeg(leg, 1)}
                           className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
                             selected?.outcomeChoice === 1
                               ? "bg-brand-green/20 text-brand-green"
                               : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
-                          }`}
+                          } ${gated ? "cursor-not-allowed" : ""}`}
                         >
                           <span>Yes</span>
                           <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                            {leg.yesOdds.toFixed(2)}x
+                            {(leg.yesOdds * netLegFactor).toFixed(2)}x
                           </span>
                         </button>
                         <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
@@ -837,17 +966,17 @@ export function ParlayBuilder() {
                         </div>
                         {hasNo && (
                           <button
-                            disabled={vaultEmpty}
+                            disabled={vaultEmpty || gated}
                             onClick={() => toggleLeg(leg, 2)}
                             className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
                               selected?.outcomeChoice === 2
                                 ? "bg-brand-amber/20 text-brand-amber"
                                 : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
-                            }`}
+                            } ${gated ? "cursor-not-allowed" : ""}`}
                           >
                             <span>No</span>
                             <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                              {(leg.noOdds ?? effectiveOdds(leg, 2)).toFixed(2)}x
+                              {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
                             </span>
                           </button>
                         )}
@@ -868,10 +997,7 @@ export function ParlayBuilder() {
         <div className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
           {/* Multiplier climb */}
           <div id="parlay-multiplier">
-            <MultiplierClimb
-              legMultipliers={selectedLegs.map((s) => effectiveOdds(s.leg, s.outcomeChoice))}
-              animated
-            />
+            <MultiplierClimb legMultipliers={climbLegMultipliers} animated />
           </div>
 
           {/* Selected legs summary with numbered badges */}
@@ -886,7 +1012,7 @@ export function ParlayBuilder() {
                     {s.leg.description}
                   </span>
                   <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
-                    {effectiveOdds(s.leg, s.outcomeChoice).toFixed(2)}x
+                    {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
                   </span>
                   <span
                     className={`ml-2 flex-shrink-0 text-xs font-bold ${
@@ -1020,7 +1146,8 @@ export function ParlayBuilder() {
             </div>
             {stakeNum > 0 && (
               <p className="mt-1 text-right text-xs text-gray-500">
-                = ${stakeNum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {useLossless ? "= " : "Payment: "}$
+                {paymentAmountUsdc.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             )}
             {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
@@ -1043,17 +1170,15 @@ export function ParlayBuilder() {
             )}
           </div>
 
-          {/* Payout breakdown */}
+          {/* Payout breakdown — single multiplier + payout. Per-leg fee and
+              correlation discount are baked into the multiplier and never
+              surfaced on their own (CORRELATION.md spec). */}
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-400">
               <span>Potential Payout</span>
               <span className="font-semibold text-white">
                 ${potentialPayout.toFixed(2)}
               </span>
-            </div>
-            <div className="flex justify-between text-gray-400">
-              <span>Fee ({(feeBps / 100).toFixed(1)}%)</span>
-              <span>${feeAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-gray-400">
               <span>Combined Odds</span>

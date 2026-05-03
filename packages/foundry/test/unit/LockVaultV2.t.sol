@@ -31,7 +31,7 @@ contract LockVaultV2Test is Test {
 
     function setUp() public {
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         lockVault = new LockVaultV2(vault);
 
         _mintBulk(alice, 50_000e6);

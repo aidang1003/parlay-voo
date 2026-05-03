@@ -42,8 +42,10 @@ const mockUseVaultStats = vi.fn(() => ({
   refetch: vi.fn(),
 }));
 const mockUseParlayConfig = vi.fn(() => ({
-  baseFeeBps: undefined as number | undefined,
-  perLegFeeBps: undefined as number | undefined,
+  protocolFeeBps: undefined as number | undefined,
+  correlationAsymptoteBps: undefined as number | undefined,
+  correlationHalfSatPpm: undefined as number | undefined,
+  maxLegsPerGroup: undefined as number | undefined,
   maxLegs: undefined as number | undefined,
   minStakeUSDC: undefined as number | undefined,
   isLoading: false,
@@ -173,8 +175,10 @@ afterEach(() => {
     refetch: vi.fn(),
   });
   mockUseParlayConfig.mockReturnValue({
-    baseFeeBps: undefined as number | undefined,
-    perLegFeeBps: undefined as number | undefined,
+    protocolFeeBps: undefined as number | undefined,
+    correlationAsymptoteBps: undefined as number | undefined,
+    correlationHalfSatPpm: undefined as number | undefined,
+    maxLegsPerGroup: undefined as number | undefined,
     maxLegs: undefined as number | undefined,
     minStakeUSDC: undefined as number | undefined,
     isLoading: false,
@@ -605,8 +609,10 @@ describe("ParlayBuilder", () => {
 
     it("enforces max legs limit", async () => {
       mockUseParlayConfig.mockReturnValue({
-        baseFeeBps: undefined,
-        perLegFeeBps: undefined,
+        protocolFeeBps: undefined,
+        correlationAsymptoteBps: undefined,
+        correlationHalfSatPpm: undefined,
+        maxLegsPerGroup: undefined,
         maxLegs: 2,
         minStakeUSDC: undefined,
         isLoading: false,
@@ -624,10 +630,12 @@ describe("ParlayBuilder", () => {
     });
   });
 
-  // --- Fee display ---
+  // --- Cart display ---
+  // Per CORRELATION.md the cart only surfaces the final multiplier and
+  // payout — no fee row, no correlation row.
 
-  describe("fee calculation", () => {
-    it("displays correct fee for 2-leg parlay", async () => {
+  describe("cart display", () => {
+    it("does not surface a separate fee row", async () => {
       setupConnectedUser();
       render(<ParlayBuilder />);
       await waitFor(() => {
@@ -635,22 +643,8 @@ describe("ParlayBuilder", () => {
       });
       await selectLegs(2);
       setStakeInput("100");
-      // baseFee=100bps + 2*50bps = 200bps = 2%
-      expect(screen.getByText("Fee (2.0%)")).toBeInTheDocument();
-      expect(screen.getByText("$2.00")).toBeInTheDocument();
-    });
-
-    it("displays correct fee for 3-leg parlay", async () => {
-      setupConnectedUser();
-      render(<ParlayBuilder />);
-      await waitFor(() => {
-        expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
-      });
-      await selectLegs(3);
-      setStakeInput("100");
-      // baseFee=100bps + 3*50bps = 250bps = 2.5%
-      expect(screen.getByText("Fee (2.5%)")).toBeInTheDocument();
-      expect(screen.getByText("$2.50")).toBeInTheDocument();
+      expect(screen.queryByText(/^Fee \(/)).not.toBeInTheDocument();
+      expect(screen.getByText("Combined Odds")).toBeInTheDocument();
     });
   });
 });

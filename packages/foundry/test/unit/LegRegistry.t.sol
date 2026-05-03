@@ -93,4 +93,87 @@ contract LegRegistryTest is Test {
         vm.expectRevert();
         registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
     }
+
+    // ── Correlation + exclusion tagging ──────────────────────────────────
+
+    function test_legCorrGroup_defaultsToZero() public {
+        registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
+        assertEq(registry.legCorrGroup(0), 0);
+    }
+
+    function test_legExclusionGroup_defaultsToZero() public {
+        registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
+        assertEq(registry.legExclusionGroup(0), 0);
+    }
+
+    function test_setLegCorrGroup_setsAndEmits() public {
+        registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
+        vm.expectEmit(true, true, true, true);
+        emit LegRegistry.LegCorrGroupSet(0, 0, 42);
+        registry.setLegCorrGroup(0, 42);
+        assertEq(registry.legCorrGroup(0), 42);
+    }
+
+    function test_setLegExclusionGroup_setsAndEmits() public {
+        registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
+        vm.expectEmit(true, true, true, true);
+        emit LegRegistry.LegExclusionGroupSet(0, 0, 7);
+        registry.setLegExclusionGroup(0, 7);
+        assertEq(registry.legExclusionGroup(0), 7);
+    }
+
+    function test_setLegCorrGroup_invalidLegId_reverts() public {
+        vm.expectRevert("LegRegistry: invalid legId");
+        registry.setLegCorrGroup(99, 1);
+    }
+
+    function test_setLegExclusionGroup_invalidLegId_reverts() public {
+        vm.expectRevert("LegRegistry: invalid legId");
+        registry.setLegExclusionGroup(99, 1);
+    }
+
+    function test_setLegCorrGroup_onlyOwner() public {
+        registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
+        vm.prank(makeAddr("random"));
+        vm.expectRevert();
+        registry.setLegCorrGroup(0, 1);
+    }
+
+    function test_setLegExclusionGroup_onlyOwner() public {
+        registry.createLeg("Q", "s", 2000, 3000, oracle, 500_000);
+        vm.prank(makeAddr("random"));
+        vm.expectRevert();
+        registry.setLegExclusionGroup(0, 1);
+    }
+
+    function test_getLegCorrGroups_batchRead() public {
+        registry.createLeg("a", "src-a", 2000, 3000, oracle, 500_000);
+        registry.createLeg("b", "src-b", 2000, 3000, oracle, 500_000);
+        registry.createLeg("c", "src-c", 2000, 3000, oracle, 500_000);
+        registry.setLegCorrGroup(0, 100);
+        registry.setLegCorrGroup(2, 100);
+
+        uint256[] memory ids = new uint256[](3);
+        ids[0] = 0;
+        ids[1] = 1;
+        ids[2] = 2;
+        uint256[] memory groups = registry.getLegCorrGroups(ids);
+        assertEq(groups[0], 100);
+        assertEq(groups[1], 0);
+        assertEq(groups[2], 100);
+    }
+
+    function test_getLegExclusionGroups_batchRead() public {
+        registry.createLeg("a", "src-a", 2000, 3000, oracle, 500_000);
+        registry.createLeg("b", "src-b", 2000, 3000, oracle, 500_000);
+        registry.setLegExclusionGroup(0, 7);
+        registry.setLegExclusionGroup(1, 7);
+
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = 0;
+        ids[1] = 1;
+        uint256[] memory groups = registry.getLegExclusionGroups(ids);
+        assertEq(groups[0], 7);
+        assertEq(groups[1], 7);
+    }
 }

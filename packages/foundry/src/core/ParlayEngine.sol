@@ -115,8 +115,10 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     IERC20 public usdc;
 
     uint256 public bootstrapEndsAt;
-    uint256 public baseFee = 100; // bps
-    uint256 public perLegFee = 50; // bps
+    /// @notice Per-leg multiplicative fee in BPS (1000 = 10%). Applied to the
+    ///         multiplier as (1 − f) per leg, before correlation discount.
+    ///         Initialised via constructor from HelperConfig (.env-driven).
+    uint256 public protocolFeeBps;
     uint256 public minStake = 1e6; // 1 USDC
     uint256 public maxLegs = 5;
     uint256 public cashoutPenaltyBps = 1500; // 15% base penalty
@@ -166,8 +168,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     event FeesRouted(uint256 indexed ticketId, uint256 feeToLockers, uint256 feeToSafety, uint256 feeToVault);
     event EarlyCashout(uint256 indexed ticketId, address indexed owner, uint256 cashoutValue, uint256 penaltyBps);
     event CashoutPenaltyUpdated(uint256 oldBps, uint256 newBps);
-    event BaseFeeUpdated(uint256 oldFee, uint256 newFee);
-    event PerLegFeeUpdated(uint256 oldFee, uint256 newFee);
+    event ProtocolFeeUpdated(uint256 oldBps, uint256 newBps);
     event MinStakeUpdated(uint256 oldStake, uint256 newStake);
     event MaxLegsUpdated(uint256 oldMaxLegs, uint256 newMaxLegs);
     event TrustedQuoteSignerUpdated(address indexed oldSigner, address indexed newSigner);
@@ -177,17 +178,27 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     );
     event LosslessTicketWon(uint256 indexed ticketId, address indexed winner, uint256 payout);
 
+    // ── Errors ───────────────────────────────────────────────────────────
+
+    error MutuallyExclusiveLegs(uint256 legA, uint256 legB);
+    error TooManyLegsInGroup(uint256 groupId, uint256 legCount, uint256 cap);
+    error FeeTooHigh(uint256 bps);
+
     // ── Constructor ──────────────────────────────────────────────────────
 
-    constructor(HouseVault _vault, LegRegistry _registry, IERC20 _usdc, uint256 _bootstrapEndsAt)
-        ERC721("ParlayCity Ticket", "PCKT")
-        Ownable(msg.sender)
-        EIP712("ParlayVoo", "1")
-    {
+    constructor(
+        HouseVault _vault,
+        LegRegistry _registry,
+        IERC20 _usdc,
+        uint256 _bootstrapEndsAt,
+        uint256 _protocolFeeBps
+    ) ERC721("ParlayCity Ticket", "PCKT") Ownable(msg.sender) EIP712("ParlayVoo", "1") {
+        if (_protocolFeeBps >= 10_000) revert FeeTooHigh(_protocolFeeBps);
         vault = _vault;
         registry = _registry;
         usdc = _usdc;
         bootstrapEndsAt = _bootstrapEndsAt;
+        protocolFeeBps = _protocolFeeBps;
     }
 
     // ── Admin ────────────────────────────────────────────────────────────
@@ -200,16 +211,12 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         _unpause();
     }
 
-    function setBaseFee(uint256 _bps) external onlyOwner {
-        require(_bps <= 2000, "ParlayEngine: baseFee too high");
-        emit BaseFeeUpdated(baseFee, _bps);
-        baseFee = _bps;
-    }
-
-    function setPerLegFee(uint256 _bps) external onlyOwner {
-        require(_bps <= 500, "ParlayEngine: perLegFee too high");
-        emit PerLegFeeUpdated(perLegFee, _bps);
-        perLegFee = _bps;
+    /// @notice Update the per-leg protocol fee. Reverts if the new fee
+    ///         consumes the entire multiplier (`>= BPS`).
+    function setProtocolFeeBps(uint256 _bps) external onlyOwner {
+        if (_bps >= 10_000) revert FeeTooHigh(_bps);
+        emit ProtocolFeeUpdated(protocolFeeBps, _bps);
+        protocolFeeBps = _bps;
     }
 
     function setMinStake(uint256 _minStake) external onlyOwner {
@@ -354,8 +361,10 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         require(quote.legs.length <= maxLegs, "ParlayEngine: too many legs");
         require(quote.stake >= minStake, "ParlayEngine: stake too low");
 
-        (uint256[] memory legIdsMem, bytes32[] memory outcomesMem, uint256 multiplierX1e6) = _resolveQuoteLegs(quote);
-        (uint256 feePaid, uint256 potentialPayout) = _priceQuote(quote.stake, quote.legs.length, multiplierX1e6);
+        (uint256[] memory legIdsMem, bytes32[] memory outcomesMem, uint256 fairMulX1e6) = _resolveQuoteLegs(quote);
+        _checkExclusion(legIdsMem);
+        (uint256 feePaid, uint256 potentialPayout, uint256 multiplierX1e6) =
+            _priceQuote(quote.stake, quote.legs.length, fairMulX1e6, _aggregateGroupSizes(legIdsMem));
 
         require(potentialPayout <= vault.maxPayout(), "ParlayEngine: exceeds vault max payout");
         require(potentialPayout <= vault.freeLiquidity(), "ParlayEngine: insufficient vault liquidity");
@@ -412,8 +421,11 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         require(quote.legs.length <= maxLegs, "ParlayEngine: too many legs");
         require(quote.stake >= minStake, "ParlayEngine: stake too low");
 
-        (uint256[] memory legIdsMem, bytes32[] memory outcomesMem, uint256 multiplierX1e6) = _resolveQuoteLegs(quote);
-        // Lossless: no fee deduction, full stake used as effective stake.
+        (uint256[] memory legIdsMem, bytes32[] memory outcomesMem, uint256 fairMulX1e6) = _resolveQuoteLegs(quote);
+        _checkExclusion(legIdsMem);
+        // Lossless: no fee deduction. Correlation discount still applies so
+        // the vault doesn't reserve a payout that ignores SGP correlation.
+        uint256 multiplierX1e6 = _losslessMultiplier(fairMulX1e6, _aggregateGroupSizes(legIdsMem));
         uint256 potentialPayout = ParlayMath.computePayout(quote.stake, multiplierX1e6);
 
         require(potentialPayout <= vault.maxPayout(), "ParlayEngine: exceeds vault max payout");
@@ -461,12 +473,12 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     }
 
     /// @dev Resolve-or-create every leg referenced by a quote and return the
-    ///      parallel legIds / outcomes arrays plus the computed multiplier.
-    ///      Factored out of _buyTicketSigned to keep that function under the
-    ///      stack-slot budget.
+    ///      parallel legIds / outcomes arrays plus the *fair* multiplier
+    ///      (no fee, no correlation applied). Factored out of _buyTicketSigned
+    ///      to keep that function under the stack-slot budget.
     function _resolveQuoteLegs(Quote calldata quote)
         internal
-        returns (uint256[] memory legIds, bytes32[] memory outcomes, uint256 multiplierX1e6)
+        returns (uint256[] memory legIds, bytes32[] memory outcomes, uint256 fairMulX1e6)
     {
         uint256 n = quote.legs.length;
         legIds = new uint256[](n);
@@ -491,18 +503,97 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             probsPPM[i] = (sl.outcome == bytes32(uint256(2))) ? (1_000_000 - sl.probabilityPPM) : sl.probabilityPPM;
         }
 
-        multiplierX1e6 = ParlayMath.computeMultiplier(probsPPM);
+        fairMulX1e6 = ParlayMath.computeMultiplier(probsPPM);
     }
 
-    /// @dev Compute fee + potentialPayout from a stake + leg count + multiplier.
-    function _priceQuote(uint256 stake, uint256 legCount, uint256 multiplierX1e6)
+    /// @dev Build per-correlation-group sizes from a parlay's legIds, also
+    ///      enforcing the per-group cap. Reverts with `TooManyLegsInGroup`
+    ///      when any non-zero group exceeds `maxLegsPerGroup`.
+    function _aggregateGroupSizes(uint256[] memory legIds) internal view returns (uint256[] memory sizes) {
+        uint256[] memory corrGroups = registry.getLegCorrGroups(legIds);
+        uint256 n = corrGroups.length;
+        uint256[] memory tempIds = new uint256[](n);
+        uint256[] memory tempSizes = new uint256[](n);
+        uint256 unique;
+
+        for (uint256 i = 0; i < n; i++) {
+            uint256 g = corrGroups[i];
+            if (g == 0) continue;
+            bool found;
+            for (uint256 j = 0; j < unique; j++) {
+                if (tempIds[j] == g) {
+                    tempSizes[j]++;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                tempIds[unique] = g;
+                tempSizes[unique] = 1;
+                unique++;
+            }
+        }
+
+        (,, uint256 cap) = _corrConfig();
+        for (uint256 i = 0; i < unique; i++) {
+            if (tempSizes[i] > cap) {
+                revert TooManyLegsInGroup(tempIds[i], tempSizes[i], cap);
+            }
+        }
+
+        sizes = new uint256[](unique);
+        for (uint256 i = 0; i < unique; i++) {
+            sizes[i] = tempSizes[i];
+        }
+    }
+
+    /// @dev Revert if any pair of legs share a non-zero exclusionGroupId.
+    function _checkExclusion(uint256[] memory legIds) internal view {
+        uint256[] memory groups = registry.getLegExclusionGroups(legIds);
+        uint256 n = groups.length;
+        for (uint256 i = 0; i < n; i++) {
+            uint256 g = groups[i];
+            if (g == 0) continue;
+            for (uint256 j = i + 1; j < n; j++) {
+                if (groups[j] == g) revert MutuallyExclusiveLegs(legIds[i], legIds[j]);
+            }
+        }
+    }
+
+    /// @dev Snapshot HouseVault.corrConfig as a tuple. Auto-getter returns the
+    ///      tuple `(corrAsymptoteBps, corrHalfSatPpm, maxLegsPerGroup)`.
+    function _corrConfig() internal view returns (uint256 asymptoteBps, uint256 halfSatPpm, uint256 maxLegsPerGroup) {
+        (asymptoteBps, halfSatPpm, maxLegsPerGroup) = vault.corrConfig();
+    }
+
+    /// @dev Apply correlation discount only — used by the lossless path.
+    function _losslessMultiplier(uint256 fairMulX1e6, uint256[] memory groupSizes) internal view returns (uint256) {
+        (uint256 d, uint256 k,) = _corrConfig();
+        return ParlayMath.applyCorrelation(fairMulX1e6, groupSizes, d, k);
+    }
+
+    /// @dev Compute fee + potentialPayout + final multiplier from a stake,
+    ///      leg count, fair multiplier, and per-group sizes. The final
+    ///      multiplier folds in `(1 − f)^n` (per-leg fee) and the saturating
+    ///      correlation discount; `feePaid` carves out the fee portion of
+    ///      stake (used for the 90/5/5 routing) so the implicit reservation
+    ///      backing equals `stake − feePaid`.
+    function _priceQuote(uint256 stake, uint256 legCount, uint256 fairMulX1e6, uint256[] memory groupSizes)
         internal
         view
-        returns (uint256 feePaid, uint256 potentialPayout)
+        returns (uint256 feePaid, uint256 potentialPayout, uint256 multiplierX1e6)
     {
-        uint256 totalEdgeBps = ParlayMath.computeEdge(legCount, baseFee, perLegFee);
-        feePaid = (stake * totalEdgeBps) / 10_000;
-        potentialPayout = ParlayMath.computePayout(stake - feePaid, multiplierX1e6);
+        uint256 fee = protocolFeeBps;
+        (uint256 corrAsymptote, uint256 halfSat,) = _corrConfig();
+        uint256 feeAdjusted = ParlayMath.applyFee(fairMulX1e6, legCount, fee);
+        multiplierX1e6 = ParlayMath.applyCorrelation(feeAdjusted, groupSizes, corrAsymptote, halfSat);
+        potentialPayout = ParlayMath.computePayout(stake, multiplierX1e6);
+
+        // feePaid = stake × (1 − (1−f)^n). Iterative loop matches applyFee
+        // exactly, so the implicit `effectiveStake = stake − feePaid` equals
+        // `stake × (1−f)^n` and stays in the vault as the bet's backing.
+        uint256 effectiveStake = ParlayMath.applyFee(stake, legCount, fee);
+        feePaid = stake - effectiveStake;
     }
 
     /// @dev Apply the 90/5/5 fee split. No-op when feePaid == 0.

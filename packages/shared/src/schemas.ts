@@ -43,8 +43,6 @@ export const QuoteResponseSchema = z.object({
   stake: z.string(),
   multiplierX1e6: z.string(),
   potentialPayout: z.string(),
-  feePaid: z.string(),
-  edgeBps: z.number(),
   probabilities: z.array(z.number()),
   valid: z.boolean(),
   reason: z.string().optional(),

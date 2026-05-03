@@ -132,6 +132,8 @@ async function fetchEvents(
         apiPayload: buildApiPayload(event, mkt),
         volume24hr: eventVolume24hr,
         gameGroup,
+        negRisk: event.negRisk === true,
+        eventId: event.id,
       });
     }
   }

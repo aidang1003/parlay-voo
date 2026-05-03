@@ -33,22 +33,13 @@ contract ParlayMathFuzzTest is Test {
         assertEq(payout, (stake * multiplier) / 1e6);
     }
 
-    /// @notice Edge computation is always additive and deterministic.
-    function testFuzz_computeEdge_additive(uint256 numLegs, uint256 baseBps, uint256 perLegBps) public pure {
-        numLegs = bound(numLegs, 0, 10);
-        baseBps = bound(baseBps, 0, 5000);
-        perLegBps = bound(perLegBps, 0, 1000);
-
-        uint256 edge = ParlayMath.computeEdge(numLegs, baseBps, perLegBps);
-        assertEq(edge, baseBps + numLegs * perLegBps);
-    }
-
-    /// @notice ApplyEdge always produces result <= input (edge reduces the multiplier).
-    function testFuzz_applyEdge_reduces(uint256 multiplier, uint256 edgeBps) public pure {
+    /// @notice applyFee always produces result <= input — fee never inflates.
+    function testFuzz_applyFee_reduces(uint256 multiplier, uint256 numLegs, uint256 feeBps) public pure {
         multiplier = bound(multiplier, 1_000_000, 1_000_000_000);
-        edgeBps = bound(edgeBps, 0, 9999);
+        numLegs = bound(numLegs, 0, 10);
+        feeBps = bound(feeBps, 0, 9999);
 
-        uint256 net = ParlayMath.applyEdge(multiplier, edgeBps);
+        uint256 net = ParlayMath.applyFee(multiplier, numLegs, feeBps);
         assertLe(net, multiplier);
     }
 
@@ -118,19 +109,19 @@ contract ParlayMathFuzzTest is Test {
         assertGe(mult, 1_000_000);
     }
 
-    /// @notice applyEdge with full range and precise verification.
-    function testFuzz_applyEdge_fullRange(uint256 multiplier, uint256 edgeBps) public pure {
+    /// @notice applyFee with full range — fee=0 returns input unchanged,
+    ///         numLegs=0 returns input unchanged, and any positive fee with
+    ///         positive numLegs strictly reduces the multiplier.
+    function testFuzz_applyFee_fullRange(uint256 multiplier, uint256 numLegs, uint256 feeBps) public pure {
         multiplier = bound(multiplier, 1_000_000, 1_000_000_000);
-        edgeBps = bound(edgeBps, 0, 9999);
+        numLegs = bound(numLegs, 0, 10);
+        feeBps = bound(feeBps, 0, 9999);
 
-        uint256 net = ParlayMath.applyEdge(multiplier, edgeBps);
+        uint256 net = ParlayMath.applyFee(multiplier, numLegs, feeBps);
         assertLe(net, multiplier);
 
-        if (edgeBps == 0) {
+        if (feeBps == 0 || numLegs == 0) {
             assertEq(net, multiplier);
-        }
-        if (edgeBps > 0) {
-            assertLt(net, multiplier);
         }
     }
 

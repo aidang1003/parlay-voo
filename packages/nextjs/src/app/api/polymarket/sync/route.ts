@@ -7,7 +7,7 @@ import {
   type PolymarketOrderBook,
 } from "@parlayvoo/shared";
 import { PolymarketClient } from "@/lib/polymarket/client";
-import { midToPpm } from "@/lib/polymarket/markets";
+import { midToPpm, stableHash32 } from "@/lib/polymarket/markets";
 import { upsertMarket } from "@/lib/db/client";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
@@ -114,6 +114,14 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     nowSec,
   });
 
+  // Polymarket negRisk events guarantee mutual exclusion at the protocol
+  // level: every child market shares an event id and at most one resolves
+  // YES. Hash the event id into a numeric group so the builder gate +
+  // on-chain `MutuallyExclusiveLegs` check have a stable key to compare.
+  // Non-negRisk markets fall through with 0 (no exclusion).
+  const exclusionGroupId =
+    entry.negRisk && entry.eventId ? stableHash32(`negrisk:${entry.eventId}`) : 0;
+
   await upsertMarket({
     sourceRef: entry.conditionId,
     source: "polymarket",
@@ -129,6 +137,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     apiPayload: entry.apiPayload ?? null,
     curationScore,
     gameGroup: entry.gameGroup ?? null,
+    exclusionGroupId,
   });
 }
 

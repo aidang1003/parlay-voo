@@ -1,8 +1,9 @@
 import {
   PPM,
   BPS,
-  BASE_FEE_BPS,
-  PER_LEG_FEE_BPS,
+  PROTOCOL_FEE_BPS,
+  CORRELATION_ASYMPTOTE_BPS,
+  CORRELATION_HALF_SAT_PPM,
   USDC_DECIMALS,
   MIN_LEGS,
   MAX_LEGS,
@@ -37,23 +38,59 @@ export function computeMultiplier(probsPPM: number[]): bigint {
 }
 
 /**
- * Compute the house edge in BPS for a given number of legs.
- * edge = baseBps + (numLegs * perLegBps)
+ * Apply per-leg multiplicative fee. Iteratively multiplies by (BPS - feeBps) / BPS
+ * once per leg. Matches ParlayMath.applyFee (Solidity) bit-for-bit.
+ *   result = mul × ((BPS - f) / BPS)^numLegs
+ * Reverts when feeBps >= BPS.
  */
-export function computeEdge(
-  numLegs: number,
-  baseBps: number = BASE_FEE_BPS,
-  perLegBps: number = PER_LEG_FEE_BPS
-): number {
-  return baseBps + numLegs * perLegBps;
+export function applyFee(mulX1e6: bigint, numLegs: number, feeBps: number): bigint {
+  if (feeBps >= BPS) {
+    throw new Error("applyFee: fee >= 100%");
+  }
+  const factor = BigInt(BPS - feeBps);
+  const denom = BigInt(BPS);
+  let m = mulX1e6;
+  for (let i = 0; i < numLegs; i++) {
+    m = (m * factor) / denom;
+  }
+  return m;
 }
 
 /**
- * Apply house edge to the fair multiplier.
- * netMultiplier = fairMultiplier * (BPS - edgeBps) / BPS
+ * Saturating discount in BPS for a single correlation group of size n.
+ *   discount = D × (n - 1) × PPM / ((n - 1) × PPM + halfSatPpm)
+ * Returns 0 for n < 2.
  */
-export function applyEdge(fairMultiplierX1e6: bigint, edgeBps: number): bigint {
-  return (fairMultiplierX1e6 * BigInt(BPS - edgeBps)) / BigInt(BPS);
+export function correlationDiscountBps(
+  n: number,
+  asymptoteBps: number = CORRELATION_ASYMPTOTE_BPS,
+  halfSatPpm: number = CORRELATION_HALF_SAT_PPM,
+): bigint {
+  if (n < 2) return 0n;
+  const ppm = BigInt(PPM);
+  const nm1 = BigInt(n - 1);
+  return (BigInt(asymptoteBps) * nm1 * ppm) / (nm1 * ppm + BigInt(halfSatPpm));
+}
+
+/**
+ * Compose a multiplier with per-group saturating discounts.
+ *   mul × ∏ (BPS - discount_g) / BPS over all groups with n_g ≥ 2.
+ * Groups with size < 2 are skipped (no discount).
+ */
+export function applyCorrelation(
+  mulX1e6: bigint,
+  groupSizes: number[],
+  asymptoteBps: number = CORRELATION_ASYMPTOTE_BPS,
+  halfSatPpm: number = CORRELATION_HALF_SAT_PPM,
+): bigint {
+  let m = mulX1e6;
+  const bps = BigInt(BPS);
+  for (const n of groupSizes) {
+    if (n < 2) continue;
+    const discount = correlationDiscountBps(n, asymptoteBps, halfSatPpm);
+    m = (m * (bps - discount)) / bps;
+  }
+  return m;
 }
 
 /**
@@ -65,14 +102,37 @@ export function computePayout(stake: bigint, netMultiplierX1e6: bigint): bigint 
 }
 
 /**
+ * Round a USDC microunit amount UP to the nearest $0.01 grain.
+ * 6-decimal USDC ⇒ one cent = 10_000 microunits.
+ *
+ * Used for the USDC approval the buy flow sets before `buyTicketSigned`:
+ * the approval needs slack so a sub-cent rounding mismatch between the
+ * UI's displayed stake and the parsed bigint can never make the engine's
+ * `safeTransferFrom` revert. The ticket itself still consumes the exact
+ * raw stake the quote was signed for.
+ */
+const CENT_USDC_RAW = 10_000n;
+export function ceilToCentRaw(amountRaw: bigint): bigint {
+  if (amountRaw <= 0n) return amountRaw;
+  const remainder = amountRaw % CENT_USDC_RAW;
+  if (remainder === 0n) return amountRaw;
+  return amountRaw + (CENT_USDC_RAW - remainder);
+}
+
+/**
  * Full quote computation. Takes leg probabilities (PPM) and raw stake (USDC with decimals).
- * Returns a complete QuoteResponse.
+ * Returns a complete QuoteResponse. Optional `groupSizes` lets callers fold in
+ * per-correlation-group sizes; defaults to none (independent legs).
  */
 export function computeQuote(
   legProbsPPM: number[],
   stakeRaw: bigint,
   legIds: number[] = [],
-  outcomes: string[] = []
+  outcomes: string[] = [],
+  groupSizes: number[] = [],
+  feeBps: number = PROTOCOL_FEE_BPS,
+  asymptoteBps: number = CORRELATION_ASYMPTOTE_BPS,
+  halfSatPpm: number = CORRELATION_HALF_SAT_PPM,
 ): QuoteResponse {
   const numLegs = legProbsPPM.length;
 
@@ -92,10 +152,9 @@ export function computeQuote(
   }
 
   const fairMultiplier = computeMultiplier(legProbsPPM);
-  const edgeBps = computeEdge(numLegs);
-  const netMultiplier = applyEdge(fairMultiplier, edgeBps);
+  const feeAdjusted = applyFee(fairMultiplier, numLegs, feeBps);
+  const netMultiplier = applyCorrelation(feeAdjusted, groupSizes, asymptoteBps, halfSatPpm);
   const potentialPayout = computePayout(stakeRaw, netMultiplier);
-  const feePaid = computePayout(stakeRaw, fairMultiplier) - potentialPayout;
 
   return {
     legIds,
@@ -103,8 +162,6 @@ export function computeQuote(
     stake: stakeRaw.toString(),
     multiplierX1e6: netMultiplier.toString(),
     potentialPayout: potentialPayout.toString(),
-    feePaid: feePaid.toString(),
-    edgeBps,
     probabilities: legProbsPPM,
     valid: true,
   };
@@ -232,8 +289,6 @@ function invalidQuote(
     stake: stakeRaw.toString(),
     multiplierX1e6: "0",
     potentialPayout: "0",
-    feePaid: "0",
-    edgeBps: 0,
     probabilities,
     valid: false,
     reason,

@@ -31,10 +31,10 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         vm.warp(500_000);
 
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         registry = new LegRegistry();
         oracle = new AdminOracleAdapter();
-        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
 
         vault.setEngine(address(engine));
         registry.setEngine(address(engine));
@@ -93,9 +93,11 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
     function test_cashoutEarly_basic() public {
         uint256 ticketId = _buy3Leg();
 
+        // 3 legs at 1000bps fee → effective fee = 1 - 0.9³ = 0.271, so feePaid =
+        // 10 × 0.271 = 2.71 USDC. effectiveStake = stake × 0.9³ = 7.29 USDC.
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        assertEq(t.feePaid, 250_000);
-        assertEq(t.stake - t.feePaid, 9_750_000);
+        assertEq(t.feePaid, 2_710_000);
+        assertEq(t.stake - t.feePaid, 7_290_000);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
@@ -105,7 +107,9 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
-        uint256 expectedCashout = 17_550_000;
+        // wonMult = 1/0.5 = 2x. fairValue = 7.29 × 2 = 14.58 USDC. penalty bps =
+        // 1500 × 2/3 = 1000 (10%). cashout = 14.58 × 0.9 = 13.122 USDC.
+        uint256 expectedCashout = 13_122_000;
         assertEq(usdc.balanceOf(alice), aliceBefore + expectedCashout, "alice received cashout");
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
@@ -124,7 +128,10 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
-        uint256 expectedCashout = 74_100_000;
+        // effectiveStake = 7.29 USDC. wonMult = 1/0.5 × 1/0.25 = 8x. fairValue =
+        // 7.29 × 8 = 58.32 USDC. penalty = 1500 × 1/3 = 500 (5%). cashout =
+        // 58.32 × 0.95 = 55.404 USDC.
+        uint256 expectedCashout = 55_404_000;
         assertEq(usdc.balanceOf(alice), aliceBefore + expectedCashout, "alice received higher cashout");
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
@@ -137,7 +144,8 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         uint256 ticketId = _buy5Leg();
 
         ParlayEngine.Ticket memory t = engine.getTicket(ticketId);
-        assertEq(t.feePaid, 350_000);
+        // 5 legs at 1000bps → 1 - 0.9⁵ = 0.40951 → 10 × 0.40951 = 4.0951 USDC.
+        assertEq(t.feePaid, 4_095_100);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
         oracle.resolve(1, LegStatus.Won, keccak256("yes"));
@@ -163,7 +171,7 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
 
         vm.prank(alice);
         vm.expectRevert("ParlayEngine: below min cashout");
-        engine.cashoutEarly(ticketId, 17_550_001);
+        engine.cashoutEarly(ticketId, 13_122_001);
     }
 
     // ── 5. Leg lost reverts ──────────────────────────────────────────────
@@ -237,7 +245,9 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         uint256 potentialPayout = t.potentialPayout;
 
         assertEq(vault.totalReserved(), potentialPayout);
-        assertEq(vault.totalAssets(), vaultAssetsBefore + 10e6 - 237500);
+        // fee = 2_710_000. routed = lockers (90%) + safety (5%) = 2_574_500.
+        // vault gains stake - routed = 10_000_000 - 2_574_500 = 7_425_500.
+        assertEq(vault.totalAssets(), vaultAssetsBefore + 10e6 - 2_574_500);
 
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
@@ -246,9 +256,9 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
 
         uint256 cashoutPaid = usdc.balanceOf(alice) - (aliceBalBefore - 10e6);
         assertEq(vault.totalReserved(), 0, "all reserves released");
-        assertEq(vault.totalAssets(), vaultAssetsBefore + 10e6 - 237500 - cashoutPaid, "vault assets correct");
+        assertEq(vault.totalAssets(), vaultAssetsBefore + 10e6 - 2_574_500 - cashoutPaid, "vault assets correct");
         assertTrue(cashoutPaid < potentialPayout, "cashout less than potential payout");
-        assertEq(cashoutPaid, 17_550_000, "cashout matches expected value");
+        assertEq(cashoutPaid, 13_122_000, "cashout matches expected value");
     }
 
     // ── 11. Voided leg treated as unresolved ─────────────────────────────
@@ -263,7 +273,8 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         engine.cashoutEarly(ticketId, 0);
 
         uint256 received = usdc.balanceOf(alice) - aliceBefore;
-        assertEq(received, 17_550_000, "voided leg treated as unresolved");
+        // Same calc as test_cashoutEarly_basic — voided leg counts as unresolved.
+        assertEq(received, 13_122_000, "voided leg treated as unresolved");
 
         ParlayEngine.Ticket memory tAfter = engine.getTicket(ticketId);
         assertEq(uint8(tAfter.status), uint8(ParlayEngine.TicketStatus.Claimed));
@@ -284,9 +295,10 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);
 
-        // penaltyBps = 2000 * 2 / 3 = 1333 (13.33%)
-        // cashoutValue = 19_500_000 * 8667 / 10_000 = 16_900_650
-        assertEq(usdc.balanceOf(alice), aliceBefore + 16_900_650, "updated penalty applied");
+        // penaltyBps = 2000 × 2/3 = 1333 (13.33%)
+        // fairValue = effectiveStake (7.29 USDC) × wonMult (2x) = 14_580_000
+        // cashout   = 14_580_000 × 8667 / 10_000 = 12_636_486 (truncated)
+        assertEq(usdc.balanceOf(alice), aliceBefore + 12_636_486, "updated penalty applied");
 
         vm.expectRevert("ParlayEngine: penalty too high");
         engine.setCashoutPenalty(5001);
@@ -303,7 +315,7 @@ contract EarlyCashoutTest is FeeRouterSetup, SignedBuy {
         oracle.resolve(0, LegStatus.Won, keccak256("yes"));
 
         vm.expectEmit(true, true, false, true);
-        emit ParlayEngine.EarlyCashout(ticketId, alice, 17_550_000, 1000);
+        emit ParlayEngine.EarlyCashout(ticketId, alice, 13_122_000, 1000);
 
         vm.prank(alice);
         engine.cashoutEarly(ticketId, 0);

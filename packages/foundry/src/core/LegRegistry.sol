@@ -40,12 +40,24 @@ contract LegRegistry is Ownable {
     ///         on read).
     mapping(bytes32 => uint256) private _legIdBySourceRefPlusOne;
 
+    /// @notice legId → correlationGroupId. 0 = uncorrelated. Legs sharing a
+    ///         non-zero correlationGroupId get a saturating discount on the
+    ///         multiplier when they appear together in a parlay.
+    mapping(uint256 => uint256) public legCorrGroup;
+
+    /// @notice legId → exclusionGroupId. 0 = no exclusion. Two legs sharing a
+    ///         non-zero exclusionGroupId cannot co-exist on the same ticket
+    ///         (e.g. "Team A wins title" + "Team B wins title").
+    mapping(uint256 => uint256) public legExclusionGroup;
+
     // ── Events ───────────────────────────────────────────────────────────
 
     event LegCreated(uint256 indexed legId, string question, uint256 cutoffTime, uint256 probabilityPPM);
     event ProbabilityUpdated(uint256 indexed legId, uint256 oldPPM, uint256 newPPM);
     event LegDeactivated(uint256 indexed legId);
     event EngineUpdated(address indexed oldEngine, address indexed newEngine);
+    event LegCorrGroupSet(uint256 indexed legId, uint256 oldGroupId, uint256 newGroupId);
+    event LegExclusionGroupSet(uint256 indexed legId, uint256 oldGroupId, uint256 newGroupId);
 
     // ── Constructor ──────────────────────────────────────────────────────
 
@@ -171,5 +183,39 @@ contract LegRegistry is Ownable {
         uint256 plus = _legIdBySourceRefPlusOne[keccak256(bytes(sourceRef))];
         if (plus == 0) return (0, false);
         return (plus - 1, true);
+    }
+
+    // ── Correlation + exclusion tagging ──────────────────────────────────
+
+    /// @notice Set the correlation group id for a leg. 0 = uncorrelated.
+    function setLegCorrGroup(uint256 legId, uint256 groupId) external onlyOwner {
+        require(legId < _legCount, "LegRegistry: invalid legId");
+        uint256 oldGroup = legCorrGroup[legId];
+        legCorrGroup[legId] = groupId;
+        emit LegCorrGroupSet(legId, oldGroup, groupId);
+    }
+
+    /// @notice Set the mutual-exclusion group id for a leg. 0 = no exclusion.
+    function setLegExclusionGroup(uint256 legId, uint256 groupId) external onlyOwner {
+        require(legId < _legCount, "LegRegistry: invalid legId");
+        uint256 oldGroup = legExclusionGroup[legId];
+        legExclusionGroup[legId] = groupId;
+        emit LegExclusionGroupSet(legId, oldGroup, groupId);
+    }
+
+    /// @notice Batch read: correlation group ids for the supplied leg ids.
+    function getLegCorrGroups(uint256[] calldata legIds) external view returns (uint256[] memory groups) {
+        groups = new uint256[](legIds.length);
+        for (uint256 i = 0; i < legIds.length; i++) {
+            groups[i] = legCorrGroup[legIds[i]];
+        }
+    }
+
+    /// @notice Batch read: exclusion group ids for the supplied leg ids.
+    function getLegExclusionGroups(uint256[] calldata legIds) external view returns (uint256[] memory groups) {
+        groups = new uint256[](legIds.length);
+        for (uint256 i = 0; i < legIds.length; i++) {
+            groups[i] = legExclusionGroup[legIds[i]];
+        }
     }
 }

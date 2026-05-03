@@ -36,10 +36,10 @@ contract SignedQuoteTest is FeeRouterSetup {
         signer = vm.addr(signerPk);
 
         usdc = new MockUSDC();
-        vault = new HouseVault(IERC20(address(usdc)));
+        vault = new HouseVault(IERC20(address(usdc)), 8000, 1_000_000, 3);
         registry = new LegRegistry();
         oracle = new AdminOracleAdapter();
-        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS);
+        engine = new ParlayEngine(vault, registry, IERC20(address(usdc)), BOOTSTRAP_ENDS, 1000);
 
         vault.setEngine(address(engine));
         registry.setEngine(address(engine));

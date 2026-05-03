@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectKitButton } from "connectkit";
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, LogOut } from "lucide-react";
+import { useAccount, useDisconnect } from "wagmi";
 import { useFTUE } from "./FTUESpotlight";
 import { HeaderPositionPill } from "./HeaderPositionPill";
 
@@ -18,6 +19,8 @@ const NAV_LINKS = [
 export function Header() {
   const pathname = usePathname();
   const { restart } = useFTUE();
+  const { isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/5 bg-bg/80 backdrop-blur-xl">
@@ -80,6 +83,16 @@ export function Header() {
           <div id="ftue-connect-wallet">
             <ConnectKitButton />
           </div>
+          {isConnected && (
+            <button
+              onClick={() => disconnect()}
+              className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-neon-red/10 hover:text-neon-red"
+              title="Disconnect wallet"
+              aria-label="Disconnect wallet"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
           <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-yellow-400">
             Testnet
           </span>

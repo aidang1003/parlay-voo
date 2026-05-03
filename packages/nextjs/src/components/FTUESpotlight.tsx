@@ -15,50 +15,27 @@ interface FTUEStep {
   position?: "top" | "bottom" | "left" | "right";
 }
 
-const PHASE_1_STEPS: FTUEStep[] = [
+const STEPS: FTUEStep[] = [
   {
     targetId: "ftue-builder",
-    title: "Build Your Parlay",
-    description: "Pick 2-5 prediction legs and choose Yes or No on each. Your odds multiply together!",
+    title: "Place a Bet",
+    description: "Pick 2-5 prediction legs from the markets and choose Yes or No on each. Your odds multiply together for a bigger payout.",
     position: "top",
   },
   {
     targetId: "ftue-vault-link",
-    title: "Become the House",
-    description: "Deposit USDC into the vault to earn yield from fees and losing bets.",
+    title: "Be the House",
+    description: "Head to the Vault page to deposit USDC. You earn yield from fees and from every bet that crashes.",
     position: "bottom",
   },
 ];
 
-const PHASE_2_STEPS: FTUEStep[] = [
-  {
-    targetId: "parlay-panel",
-    title: "Your Parlay Ticket",
-    description: "Selected legs appear here. Watch your multiplier grow as you add legs.",
-    position: "left",
-  },
-  {
-    targetId: "parlay-multiplier",
-    title: "Multiplier Climb",
-    description: "This is your rocket! Watch it climb as legs resolve in your favor.",
-    position: "left",
-  },
-  {
-    targetId: "stake-input",
-    title: "Set Your Stake",
-    description: "Enter how much USDC to wager. Your potential payout = stake x multiplier.",
-    position: "left",
-  },
-];
-
 const STORAGE_KEY = "ftue:completed";
-const PHASE2_STORAGE_KEY = "ftue:phase2_completed";
 
 // ── Shared Context ─────────────────────────────────────────────────────
 
 interface FTUEState {
   active: boolean;
-  phase: 0 | 1 | 2;
   stepIndex: number;
   steps: FTUEStep[];
   currentStep: FTUEStep | null;
@@ -85,7 +62,7 @@ export function useFTUE(): FTUEState {
 
 function useFTUEInternal(): FTUEState {
   const pathname = usePathname();
-  const [phase, setPhase] = useState<0 | 1 | 2>(0); // 0 = inactive
+  const [running, setRunning] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
@@ -95,53 +72,35 @@ function useFTUEInternal(): FTUEState {
   // ever reaches /parlay.
   useEffect(() => {
     if (pathname !== FTUE_ROUTE) {
-      setPhase(0);
+      setRunning(false);
       setStepIndex(0);
       setHydrated(true);
       return;
     }
     try {
-      const p1Done = sessionStorage.getItem(STORAGE_KEY) === "true";
-      const p2Done = sessionStorage.getItem(PHASE2_STORAGE_KEY) === "true";
-      if (!p1Done) {
-        setPhase(1);
-        setStepIndex(0);
-      } else if (!p2Done) {
-        setPhase(2);
-        setStepIndex(0);
-      } else {
-        setPhase(0);
-        setStepIndex(0);
-      }
+      const done = sessionStorage.getItem(STORAGE_KEY) === "true";
+      setRunning(!done);
+      setStepIndex(0);
     } catch {
       // sessionStorage unavailable
     }
     setHydrated(true);
   }, [pathname]);
 
-  const steps = phase === 1 ? PHASE_1_STEPS : phase === 2 ? PHASE_2_STEPS : [];
-
   const next = useCallback(() => {
     setStepIndex((prev) => {
-      if (prev >= steps.length - 1) {
+      if (prev >= STEPS.length - 1) {
         try {
-          if (phase === 1) {
-            sessionStorage.setItem(STORAGE_KEY, "true");
-            setPhase(2);
-            return 0;
-          } else {
-            sessionStorage.setItem(PHASE2_STORAGE_KEY, "true");
-            setPhase(0);
-            return 0;
-          }
+          sessionStorage.setItem(STORAGE_KEY, "true");
         } catch {
-          setPhase(0);
-          return 0;
+          // sessionStorage unavailable
         }
+        setRunning(false);
+        return 0;
       }
       return prev + 1;
     });
-  }, [steps.length, phase]);
+  }, []);
 
   const prev = useCallback(() => {
     setStepIndex((p) => Math.max(0, p - 1));
@@ -150,34 +109,32 @@ function useFTUEInternal(): FTUEState {
   const skip = useCallback(() => {
     try {
       sessionStorage.setItem(STORAGE_KEY, "true");
-      sessionStorage.setItem(PHASE2_STORAGE_KEY, "true");
     } catch {
       // sessionStorage unavailable
     }
-    setPhase(0);
+    setRunning(false);
     setStepIndex(0);
   }, []);
 
   const restart = useCallback(() => {
     try {
       sessionStorage.removeItem(STORAGE_KEY);
-      sessionStorage.removeItem(PHASE2_STORAGE_KEY);
     } catch {
       // sessionStorage unavailable
     }
-    // Only activate phase 1 if we're on the FTUE route. Otherwise just clear
-    // storage — the pathname effect will start phase 1 once the user lands
+    // Only start running if we're on the FTUE route. Otherwise just clear
+    // storage — the pathname effect will start the tour once the user lands
     // on /parlay.
     if (pathname === FTUE_ROUTE) {
-      setPhase(1);
+      setRunning(true);
       setStepIndex(0);
     }
   }, [pathname]);
 
-  const active = hydrated && phase > 0 && steps.length > 0;
-  const currentStep = active ? steps[stepIndex] : null;
+  const active = hydrated && running;
+  const currentStep = active ? STEPS[stepIndex] : null;
 
-  return { active, phase, stepIndex, steps, currentStep, next, prev, skip, restart };
+  return { active, stepIndex, steps: STEPS, currentStep, next, prev, skip, restart };
 }
 
 // ── Spotlight Component ────────────────────────────────────────────────

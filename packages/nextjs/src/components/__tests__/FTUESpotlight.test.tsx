@@ -42,31 +42,29 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("FTUESpotlight", () => {
-  it("renders tooltip on first visit (phase 1)", async () => {
+  it("renders tooltip on first visit", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.getByTestId("ftue-tooltip")).toBeInTheDocument();
-    expect(screen.getByText("Build Your Parlay")).toBeInTheDocument();
+    expect(screen.getByText("Place a Bet")).toBeInTheDocument();
   });
 
-  it("does not render when both phases are completed", async () => {
+  it("does not render when the tour is completed", async () => {
     sessionStore["ftue:completed"] = "true";
-    sessionStore["ftue:phase2_completed"] = "true";
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.queryByTestId("ftue-tooltip")).not.toBeInTheDocument();
   });
 
-  it("skip button completes both phases", async () => {
+  it("skip button completes the tour", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.getByTestId("ftue-tooltip")).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByText("Skip")); });
     expect(screen.queryByTestId("ftue-tooltip")).not.toBeInTheDocument();
     expect(sessionStorage.setItem).toHaveBeenCalledWith("ftue:completed", "true");
-    expect(sessionStorage.setItem).toHaveBeenCalledWith("ftue:phase2_completed", "true");
   });
 
   it("renders progress dots", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
-    // Phase 1 has 2 steps after dropping the wallet step (now owned by /onboarding).
+    // Two-step tour: Place a Bet, Be the House.
     const tooltip = screen.getByTestId("ftue-tooltip");
     const dots = tooltip.querySelectorAll(".rounded-full");
     // Filter to just the small progress dots (h-1.5 w-1.5)

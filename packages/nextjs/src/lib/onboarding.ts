@@ -3,7 +3,7 @@
 export const COMPLETED_KEY = "onboarding:completed";
 export const COMPLETED_COOKIE = "onboarding_completed";
 
-const FTUE_KEYS = ["ftue:completed", "ftue:phase2_completed"];
+const FTUE_KEYS = ["ftue:completed"];
 
 export function getCompleted(): boolean {
   if (typeof window === "undefined") return false;

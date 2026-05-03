@@ -1,17 +1,15 @@
 "use client";
 
-import {useRouter} from "next/navigation";
 import {useOnboardingProgress} from "@/lib/hooks";
-import {setCompleted} from "@/lib/onboarding";
 import {ClaimEthStep} from "./_onboard/ClaimEthStep";
 import {ClaimUsdcStep} from "./_onboard/ClaimUsdcStep";
 import {ConnectWalletStep} from "./_onboard/ConnectWalletStep";
 import {EnterAppCTA} from "./_onboard/EnterAppCTA";
 import {InstallWalletStep} from "./_onboard/InstallWalletStep";
+import {SkipOnboardingTile} from "./_onboard/SkipOnboardingTile";
 import {SwitchNetworkStep} from "./_onboard/SwitchNetworkStep";
 
 export default function OnboardingPage() {
-  const router = useRouter();
   const progress = useOnboardingProgress();
 
   // Compute the first incomplete step so its action button gets visual emphasis.
@@ -24,18 +22,9 @@ export default function OnboardingPage() {
   ];
   const firstIncomplete = flags.findIndex((f) => !f);
 
-  const skip = () => {
-    setCompleted();
-    router.push("/parlay");
-  };
-
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      {progress.completed ? (
-        <EnterAppCTA />
-      ) : (
-        <Hero />
-      )}
+      {progress.completed ? <EnterAppCTA /> : <Hero />}
 
       <div className="space-y-3">
         <InstallWalletStep
@@ -63,12 +52,22 @@ export default function OnboardingPage() {
         />
       </div>
 
-      <div className="text-center text-xs text-gray-500">
-        Already set up?{" "}
-        <button onClick={skip} className="underline transition-colors hover:text-gray-300">
-          Skip onboarding
-        </button>
-      </div>
+      {!progress.completed && (
+        <>
+          <OrDivider />
+          <SkipOnboardingTile />
+        </>
+      )}
+    </div>
+  );
+}
+
+function OrDivider() {
+  return (
+    <div className="flex items-center gap-4 py-1">
+      <div className="h-px flex-1 bg-white/10" />
+      <span className="text-xs font-semibold uppercase tracking-widest text-gray-500">or</span>
+      <div className="h-px flex-1 bg-white/10" />
     </div>
   );
 }

@@ -3,31 +3,54 @@ pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @notice Owner-managed registry of betting legs. Each leg references an oracle adapter and a probability estimate.
+/// @title LegRegistry
+/// @notice Owner-managed registry of betting legs (individual outcomes that
+///         can be combined into parlays). Each leg references an oracle adapter
+///         and carries its own probability estimate.
 contract LegRegistry is Ownable {
+    // ── Types ────────────────────────────────────────────────────────────
+
     struct Leg {
         string question;
         string sourceRef;
         uint256 cutoffTime;
         uint256 earliestResolve;
         address oracleAdapter;
-        uint256 probabilityPPM;
+        uint256 probabilityPPM; // probability * 1e6
         bool active;
     }
+
+    // ── State ────────────────────────────────────────────────────────────
 
     mapping(uint256 => Leg) private _legs;
     uint256 private _legCount;
 
+    /// @notice Engine address authorized to create legs just-in-time via
+    ///         `getOrCreateBySourceRef`. Owner-settable after deploy so that
+    ///         LegRegistry can be deployed before ParlayEngine in the wiring.
     address public engine;
 
-    /// @notice keccak256(sourceRef) → legId+1. Stored offset by 1 so the (valid) legId 0 isn't ambiguous with "not created".
+    /// @notice Dedupe index so multiple tickets referencing the same underlying
+    ///         market (e.g. the same Polymarket conditionId) resolve to a
+    ///         single on-chain Leg row and therefore share oracle resolution.
+    ///         Keyed by keccak256(sourceRef); 0 means "not yet created" (and
+    ///         legId 0 is a valid id, so callers must check existence by
+    ///         re-reading `_legs[id].cutoffTime != 0` or equivalent — we
+    ///         sidestep that ambiguity by storing legId + 1 and subtracting
+    ///         on read).
     mapping(bytes32 => uint256) private _legIdBySourceRefPlusOne;
 
-    /// @notice legId → correlationGroupId. 0 = uncorrelated.
+    /// @notice legId → correlationGroupId. 0 = uncorrelated. Legs sharing a
+    ///         non-zero correlationGroupId get a saturating discount on the
+    ///         multiplier when they appear together in a parlay.
     mapping(uint256 => uint256) public legCorrGroup;
 
-    /// @notice legId → exclusionGroupId. 0 = no exclusion.
+    /// @notice legId → exclusionGroupId. 0 = no exclusion. Two legs sharing a
+    ///         non-zero exclusionGroupId cannot co-exist on the same ticket
+    ///         (e.g. "Team A wins title" + "Team B wins title").
     mapping(uint256 => uint256) public legExclusionGroup;
+
+    // ── Events ───────────────────────────────────────────────────────────
 
     event LegCreated(uint256 indexed legId, string question, uint256 cutoffTime, uint256 probabilityPPM);
     event ProbabilityUpdated(uint256 indexed legId, uint256 oldPPM, uint256 newPPM);
@@ -36,18 +59,26 @@ contract LegRegistry is Ownable {
     event LegCorrGroupSet(uint256 indexed legId, uint256 oldGroupId, uint256 newGroupId);
     event LegExclusionGroupSet(uint256 indexed legId, uint256 oldGroupId, uint256 newGroupId);
 
+    // ── Constructor ──────────────────────────────────────────────────────
+
     constructor() Ownable(msg.sender) {}
+
+    // ── Access ───────────────────────────────────────────────────────────
 
     modifier onlyEngine() {
         require(msg.sender == engine, "LegRegistry: only engine");
         _;
     }
 
+    /// @notice Owner-set authorized engine for JIT leg creation.
     function setEngine(address _engine) external onlyOwner {
         emit EngineUpdated(engine, _engine);
         engine = _engine;
     }
 
+    // ── Admin ────────────────────────────────────────────────────────────
+
+    /// @notice Create a new betting leg.
     function createLeg(
         string calldata question,
         string calldata sourceRef,
@@ -76,7 +107,15 @@ contract LegRegistry is Ownable {
         emit LegCreated(legId, question, cutoffTime, probabilityPPM);
     }
 
-    /// @notice Resolve-or-create a leg by sourceRef. If already registered, returns existing legId and ignores passed metadata.
+    /// @notice Resolve-or-create a leg by its stable sourceRef. Called by the
+    ///         engine at ticket-buy time so tickets referencing the same
+    ///         underlying market share a single Leg row (and therefore one
+    ///         oracle resolution). If the sourceRef was already registered
+    ///         the existing legId is returned and the passed metadata is
+    ///         ignored — the original leg's cutoff / oracle / probability
+    ///         stand. Only the engine may call this; the engine is expected
+    ///         to have already verified a trusted signed quote before
+    ///         reaching here, so metadata validation is minimal.
     function getOrCreateBySourceRef(
         string calldata question,
         string calldata sourceRef,
@@ -111,6 +150,7 @@ contract LegRegistry is Ownable {
         emit LegCreated(legId, question, cutoffTime, probabilityPPM);
     }
 
+    /// @notice Update the implied probability of a leg.
     function updateProbability(uint256 legId, uint256 newPPM) external onlyOwner {
         require(legId < _legCount, "LegRegistry: invalid legId");
         require(newPPM > 0 && newPPM <= 1e6, "LegRegistry: invalid probability");
@@ -119,11 +159,14 @@ contract LegRegistry is Ownable {
         emit ProbabilityUpdated(legId, oldPPM, newPPM);
     }
 
+    /// @notice Deactivate a leg so it can no longer be included in new parlays.
     function deactivateLeg(uint256 legId) external onlyOwner {
         require(legId < _legCount, "LegRegistry: invalid legId");
         _legs[legId].active = false;
         emit LegDeactivated(legId);
     }
+
+    // ── Views ────────────────────────────────────────────────────────────
 
     function getLeg(uint256 legId) external view returns (Leg memory) {
         require(legId < _legCount, "LegRegistry: invalid legId");
@@ -134,14 +177,17 @@ contract LegRegistry is Ownable {
         return _legCount;
     }
 
-    /// @notice (legId, true) if registered, (0, false) otherwise.
+    /// @notice Look up a legId by sourceRef. Returns (legId, true) if the
+    ///         sourceRef has been registered, (0, false) otherwise.
     function legIdBySourceRef(string calldata sourceRef) external view returns (uint256 legId, bool exists) {
         uint256 plus = _legIdBySourceRefPlusOne[keccak256(bytes(sourceRef))];
         if (plus == 0) return (0, false);
         return (plus - 1, true);
     }
 
-    /// @notice 0 = uncorrelated.
+    // ── Correlation + exclusion tagging ──────────────────────────────────
+
+    /// @notice Set the correlation group id for a leg. 0 = uncorrelated.
     function setLegCorrGroup(uint256 legId, uint256 groupId) external onlyOwner {
         require(legId < _legCount, "LegRegistry: invalid legId");
         uint256 oldGroup = legCorrGroup[legId];
@@ -149,7 +195,7 @@ contract LegRegistry is Ownable {
         emit LegCorrGroupSet(legId, oldGroup, groupId);
     }
 
-    /// @notice 0 = no exclusion.
+    /// @notice Set the mutual-exclusion group id for a leg. 0 = no exclusion.
     function setLegExclusionGroup(uint256 legId, uint256 groupId) external onlyOwner {
         require(legId < _legCount, "LegRegistry: invalid legId");
         uint256 oldGroup = legExclusionGroup[legId];
@@ -157,6 +203,7 @@ contract LegRegistry is Ownable {
         emit LegExclusionGroupSet(legId, oldGroup, groupId);
     }
 
+    /// @notice Batch read: correlation group ids for the supplied leg ids.
     function getLegCorrGroups(uint256[] calldata legIds) external view returns (uint256[] memory groups) {
         groups = new uint256[](legIds.length);
         for (uint256 i = 0; i < legIds.length; i++) {
@@ -164,6 +211,7 @@ contract LegRegistry is Ownable {
         }
     }
 
+    /// @notice Batch read: exclusion group ids for the supplied leg ids.
     function getLegExclusionGroups(uint256[] calldata legIds) external view returns (uint256[] memory groups) {
         groups = new uint256[](legIds.length);
         for (uint256 i = 0; i < legIds.length; i++) {

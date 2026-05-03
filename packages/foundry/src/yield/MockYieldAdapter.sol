@@ -7,7 +7,9 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {IYieldAdapter} from "../interfaces/IYieldAdapter.sol";
 
-/// @notice Local Anvil testing. Yield via `simulateYield()`.
+/// @title MockYieldAdapter
+/// @notice For local Anvil testing. Stores USDC in internal balance with
+///         simulated yield via `simulateYield()`.
 contract MockYieldAdapter is IYieldAdapter, Ownable {
     using SafeERC20 for IERC20;
 
@@ -57,7 +59,9 @@ contract MockYieldAdapter is IYieldAdapter, Ownable {
         }
     }
 
+    /// @notice Simulate yield accrual. Owner mints USDC and calls this.
     function simulateYield(uint256 amount) external onlyOwner {
+        // Caller must transfer USDC to this contract before calling
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         simulatedYield += amount;
     }

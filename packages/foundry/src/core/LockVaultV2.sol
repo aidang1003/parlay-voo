@@ -9,30 +9,46 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {HouseVault} from "./HouseVault.sol";
 import {ILockVault} from "../interfaces/ILockVault.sol";
 
-/// @notice Continuous-duration VOO lock. feeShareBps = 10_000 + MAX_BOOST * d / (d + HALF_LIFE). Base 1x at MIN, 2x at 1y, 4x asymptote.
+/// @title LockVaultV2
+/// @notice Continuous-duration successor to LockVault. Fee share is an
+///         asymptotic function of committed duration:
+///
+///             feeShareBps = 10_000 + MAX_BOOST * d / (d + HALF_LIFE)
+///
+///         Base 1.0x at d=MIN, asymptote 4.0x as d→∞, exactly 2.0x at 1 year.
+///         No hard duration cap — diminishing returns do the shaping.
+///
+///         Curve parameters are immutable constants. Tuning requires a new
+///         deployment; LPs can trust the math is locked from deploy.
 contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
     using SafeERC20 for IERC20;
 
+    // ── Structs ──────────────────────────────────────────────────────────
+
     struct LockPosition {
         address owner;
-        uint256 shares;
-        uint256 duration;
+        uint256 shares;        // VOO shares locked
+        uint256 duration;      // total committed duration in seconds, from lockedAt
         uint256 lockedAt;
-        uint256 unlockAt;      // type(uint256).max for PARTIAL — principal never unlocks
-        uint256 feeShareBps;   // FULL only; 0 for rehab tiers
-        uint256 rewardDebt;
-        ILockVault.Tier tier;
+        uint256 unlockAt;      // PARTIAL positions use type(uint256).max — principal never unlocks
+        uint256 feeShareBps;   // 10_000 = 1.0x base, 40_000 = 4.0x asymptote (FULL only; 0 for rehab tiers)
+        uint256 rewardDebt;    // accRewardPerWeightedShare snapshot at entry/update
+        ILockVault.Tier tier;  // FULL | PARTIAL | LEAST
     }
+
+    // ── Constants ────────────────────────────────────────────────────────
 
     uint256 private constant PRECISION = 1e18;
     uint256 private constant BPS_BASE = 10_000;
 
-    uint256 public constant MIN_LOCK = 1e6;
+    uint256 public constant MIN_LOCK = 1e6;                 // 1 VOO
     uint256 public constant MIN_LOCK_DURATION = 7 days;
-    uint256 public constant HALF_LIFE_SECS = 730 days;
-    uint256 public constant MAX_BOOST_BPS = 30_000;
-    uint256 public constant MAX_PENALTY_BPS = 3_000;
-    uint256 public constant MIN_GRADUATE_DURATION = 730 days;
+    uint256 public constant HALF_LIFE_SECS = 730 days;      // 2 years — controls curve knee
+    uint256 public constant MAX_BOOST_BPS = 30_000;         // asymptote adds +3.0x → 4.0x total
+    uint256 public constant MAX_PENALTY_BPS = 3_000;        // 30% asymptote on day-0 max-lock exit
+    uint256 public constant MIN_GRADUATE_DURATION = 730 days; // 24mo floor for PARTIAL → FULL
+
+    // ── State ────────────────────────────────────────────────────────────
 
     HouseVault public immutable vault;
     IERC20 public immutable voo;
@@ -48,6 +64,8 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
     uint256 public undistributedFees;
 
     mapping(address => uint256) public pendingRewards;
+
+    // ── Events ───────────────────────────────────────────────────────────
 
     event Locked(
         uint256 indexed positionId,
@@ -94,15 +112,21 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         uint256 promoCredit
     );
 
+    // ── Modifiers ────────────────────────────────────────────────────────
+
     modifier onlyVault() {
         require(msg.sender == address(vault), "LockVaultV2: caller is not vault");
         _;
     }
 
+    // ── Constructor ──────────────────────────────────────────────────────
+
     constructor(HouseVault _vault) Ownable(msg.sender) {
         vault = _vault;
         voo = IERC20(address(_vault));
     }
+
+    // ── Admin ────────────────────────────────────────────────────────────
 
     function setFeeDistributor(address _distributor) external onlyOwner {
         require(_distributor != address(0), "LockVaultV2: zero address");
@@ -110,27 +134,36 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit FeeDistributorSet(_distributor);
     }
 
-    /// @notice 10_000 + 30_000 * d / (d + 730 days).
+    // ── Pure Math ────────────────────────────────────────────────────────
+
+    /// @notice Fee-share multiplier (BPS) for a given lock duration.
+    ///         feeShareBps = 10_000 + 30_000 * d / (d + 730 days).
     function feeShareForDuration(uint256 duration) public pure returns (uint256) {
         require(duration >= MIN_LOCK_DURATION, "LockVaultV2: duration below minimum");
         uint256 boost = (MAX_BOOST_BPS * duration) / (duration + HALF_LIFE_SECS);
         return BPS_BASE + boost;
     }
 
+    /// @notice Penalty (BPS) on an early-exit given remaining lock time.
+    ///         Same asymptotic shape, applied to `remaining` instead of `duration`.
     function penaltyBpsForRemaining(uint256 remaining) public pure returns (uint256) {
         if (remaining == 0) return 0;
         return (MAX_PENALTY_BPS * remaining) / (remaining + HALF_LIFE_SECS);
     }
 
+    // ── Core ─────────────────────────────────────────────────────────────
+
+    /// @notice Lock VOO shares for a caller-chosen duration.
     function lock(uint256 shares, uint256 duration) external nonReentrant returns (uint256 positionId) {
         require(shares >= MIN_LOCK, "LockVaultV2: lock below minimum");
-        uint256 fsBps = feeShareForDuration(duration);
+        uint256 fsBps = feeShareForDuration(duration); // reverts on duration < MIN
 
         voo.safeTransferFrom(msg.sender, address(this), shares);
 
         uint256 weighted = (shares * fsBps) / BPS_BASE;
 
-        // sweep to existing lockers before adding the new one — prevents new locker from claiming pre-join fees
+        // Sweep undistributed fees to EXISTING lockers before adding the new one
+        // so the new locker does not receive fees that accrued before they joined.
         if (undistributedFees > 0 && totalWeightedShares > 0) {
             uint256 fees = undistributedFees;
             undistributedFees = 0;
@@ -153,7 +186,8 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
             tier: ILockVault.Tier.FULL
         });
 
-        // first-locker bootstrap: fees stranded while totalWeightedShares was 0 go to the first locker
+        // First-locker bootstrap: fees that accrued while totalWeightedShares was 0
+        // are assigned to the first locker — otherwise those fees are stranded.
         if (undistributedFees > 0) {
             uint256 fees = undistributedFees;
             undistributedFees = 0;
@@ -164,7 +198,10 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit Locked(positionId, msg.sender, shares, duration, fsBps, block.timestamp + duration);
     }
 
-    /// @notice Extend a position; settles pending rewards at old weight first to prevent retroactive credit.
+    /// @notice Extend an existing position by `additionalDuration`. Weight is
+    ///         recomputed from the new total committed duration. Pending
+    ///         rewards are settled at the old weight before the new one takes
+    ///         effect — guarantees no retroactive credit from the bump.
     function extend(uint256 positionId, uint256 additionalDuration) external nonReentrant {
         require(additionalDuration > 0, "LockVaultV2: zero extension");
         LockPosition storage pos = positions[positionId];
@@ -191,7 +228,10 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit Extended(positionId, additionalDuration, newDuration, newFsBps, pos.unlockAt);
     }
 
-    /// @notice Unlock after maturity. FULL=owner-only return; LEAST=permissionless burn-to-LP; PARTIAL=unreachable.
+    /// @notice Unlock shares after maturity.
+    ///         FULL: owner-only, full share balance returned.
+    ///         LEAST: permissionless, principal burned back to LPs.
+    ///         PARTIAL: unreachable (unlockAt = type(uint256).max).
     function unlock(uint256 positionId) external nonReentrant {
         LockPosition storage pos = positions[positionId];
         require(pos.shares > 0, "LockVaultV2: empty position");
@@ -208,15 +248,19 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
             voo.safeTransfer(msg.sender, shares);
             emit Unlocked(positionId, msg.sender, shares);
         } else if (tier == ILockVault.Tier.LEAST) {
+            // Permissionless — any caller can retire an expired LEAST lock.
+            // Principal is burned from LockVault's VOO balance back to LPs.
             _removePosition(positionId);
             vault.burnFromLockVault(shares);
             emit LeastPrincipalBurned(positionId, owner, shares);
         } else {
-            // PARTIAL: unreachable via normal flow (unlockAt == max)
+            // PARTIAL — defensive; unreachable via normal flow.
             revert("LockVaultV2: PARTIAL cannot unlock");
         }
     }
 
+    /// @notice Early withdrawal before maturity. Penalty decays to ~0 near
+    ///         maturity and scales with remaining commitment at day 0.
     function earlyWithdraw(uint256 positionId) external nonReentrant {
         LockPosition storage pos = positions[positionId];
         require(pos.owner == msg.sender, "LockVaultV2: not owner");
@@ -238,7 +282,10 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit EarlyWithdraw(positionId, msg.sender, returned, penaltyShares);
     }
 
-    /// @notice HouseVault-only. Rehab tiers earn no fees on principal. PARTIAL locks forever; LEAST burns at expiry.
+    /// @notice Record a rehab lock on behalf of `user`. Only callable by
+    ///         HouseVault. Zero fee-share weight (rehab tiers don't earn fees
+    ///         on principal). PARTIAL locks principal forever; LEAST locks
+    ///         principal until expiry then burns it back to LPs.
     function rehabLock(
         address user,
         uint256 shares,
@@ -274,7 +321,11 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit RehabLocked(positionId, user, tier, shares, duration, unlockAt);
     }
 
-    /// @notice One-way PARTIAL→FULL promotion (re-lock ≥ MIN_GRADUATE_DURATION); grants FULL weight + a fresh-loss-sized promo credit.
+    /// @notice Promote a PARTIAL rehab position to FULL by re-locking for at
+    ///         least MIN_GRADUATE_DURATION. Grants the FULL-tier fee-share
+    ///         weight (earnings on principal from here on) plus a one-shot
+    ///         promo credit sized like a fresh loss (principal × projectedApr).
+    ///         One-way: there is no FULL → PARTIAL path.
     function graduate(uint256 positionId, uint256 newDuration) external nonReentrant {
         LockPosition storage pos = positions[positionId];
         require(pos.owner == msg.sender, "LockVaultV2: not owner");
@@ -285,7 +336,9 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         uint256 newFsBps = feeShareForDuration(newDuration);
         uint256 newWeighted = (pos.shares * newFsBps) / BPS_BASE;
 
-        // mirrors lock()'s ordering: sweep to existing FULLs before adding the graduate's weight
+        // Sweep fees accrued while weight was zero to existing FULL lockers
+        // before adding the graduate's weight — mirrors lock()'s ordering so
+        // the freshly graduated position does not claim fees earned before it.
         if (undistributedFees > 0 && totalWeightedShares > 0) {
             uint256 fees = undistributedFees;
             undistributedFees = 0;
@@ -294,7 +347,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         }
 
         totalWeightedShares += newWeighted;
-        // totalLockedShares unchanged — shares stay locked, tier transitions
+        // totalLockedShares unchanged (shares stay locked, tier transitions).
 
         pos.tier = ILockVault.Tier.FULL;
         pos.duration = newDuration;
@@ -303,7 +356,8 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         pos.feeShareBps = newFsBps;
         pos.rewardDebt = (newWeighted * accRewardPerWeightedShare) / PRECISION;
 
-        // first-locker bootstrap: stranded fees go to the graduate
+        // First-locker bootstrap path — if totalWeightedShares was 0 before
+        // this graduation, assign any stranded fees to the graduate.
         if (undistributedFees > 0) {
             uint256 fees = undistributedFees;
             undistributedFees = 0;
@@ -311,6 +365,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
             emit FeesDistributed(fees, accRewardPerWeightedShare);
         }
 
+        // Size the promo credit off the current USDC-value of the locked shares.
         uint256 principal = vault.convertToAssets(pos.shares);
         uint256 promoCredit = vault.creditFor(principal);
         if (promoCredit > 0) {
@@ -320,6 +375,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit Graduated(positionId, pos.owner, newDuration, newFsBps, pos.unlockAt, promoCredit);
     }
 
+    /// @notice Settle accrued rewards on an active position without unlocking.
     function settleRewards(uint256 positionId) external nonReentrant {
         LockPosition storage pos = positions[positionId];
         require(pos.owner == msg.sender, "LockVaultV2: not owner");
@@ -330,6 +386,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit Harvested(positionId, msg.sender, reward);
     }
 
+    /// @notice Called by the fee distributor (HouseVault) after pushing USDC.
     function notifyFees(uint256 amount) external override nonReentrant {
         require(msg.sender == feeDistributor, "LockVaultV2: caller is not fee distributor");
         require(amount > 0, "LockVaultV2: zero amount");
@@ -348,6 +405,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit FeesDistributed(distributable, accRewardPerWeightedShare);
     }
 
+    /// @notice Claim accumulated USDC rewards.
     function claimFees() external nonReentrant {
         uint256 amount = pendingRewards[msg.sender];
         require(amount > 0, "LockVaultV2: nothing to claim");
@@ -359,6 +417,7 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         emit RewardsClaimed(msg.sender, amount);
     }
 
+    /// @notice Sweep accumulated penalty shares (balance above totalLockedShares).
     function sweepPenaltyShares(address receiver) external onlyOwner nonReentrant {
         require(receiver != address(0), "LockVaultV2: zero receiver");
         uint256 balance = voo.balanceOf(address(this));
@@ -367,6 +426,8 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         voo.safeTransfer(receiver, penaltyShares);
         emit PenaltySharesSwept(receiver, penaltyShares);
     }
+
+    // ── Views ────────────────────────────────────────────────────────────
 
     function getPosition(uint256 positionId) external view returns (LockPosition memory) {
         return positions[positionId];
@@ -379,11 +440,14 @@ contract LockVaultV2 is Ownable, ReentrancyGuard, ILockVault {
         return ((weighted * accRewardPerWeightedShare) / PRECISION) - pos.rewardDebt;
     }
 
+    /// @notice Current early-exit penalty (BPS) for a live position.
     function currentPenaltyBps(uint256 positionId) external view returns (uint256) {
         LockPosition memory pos = positions[positionId];
         if (pos.shares == 0 || block.timestamp >= pos.unlockAt) return 0;
         return penaltyBpsForRemaining(pos.unlockAt - block.timestamp);
     }
+
+    // ── Internal ─────────────────────────────────────────────────────────
 
     function _settleRewards(uint256 positionId) internal {
         LockPosition storage pos = positions[positionId];

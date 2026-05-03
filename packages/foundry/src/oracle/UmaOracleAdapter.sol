@@ -11,29 +11,47 @@ import {
     IOptimisticOracleV3CallbackRecipient
 } from "../interfaces/IOptimisticOracleV3.sol";
 
-/// @notice UMA OOv3-backed trustless oracle: anyone asserts (with bond), undisputed settles after liveness, disputes escalate to DVM.
-/// @dev F-5: no owner path mutates finalized outcome state. Only the UMA callback (gated on msg.sender == uma) writes `_finalStatus`/`_finalOutcome`/`_isFinalized`.
+/// @title UmaOracleAdapter
+/// @notice Trustless oracle adapter backed by UMA Optimistic Oracle V3. Anyone can
+///         assert a leg outcome by posting a bond; undisputed assertions settle
+///         truthful after the liveness window; disputes escalate to UMA's DVM.
+///
+/// @dev No `onlyOwner` function can mutate finalized outcome state. The only writer
+///      to `_finalStatus` / `_finalOutcome` / `_isFinalized` is the UMA callback,
+///      gated by `msg.sender == address(uma)`. This is the F-5 property that
+///      removes the admin backdoor from the mainnet oracle path.
 contract UmaOracleAdapter is IOracleAdapter, IOptimisticOracleV3CallbackRecipient, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    // ── Immutable UMA wiring ─────────────────────────────────────────────
 
     IOptimisticOracleV3 public immutable uma;
     IERC20 public immutable bondToken;
     bytes32 public immutable identifier;
     uint256 public immutable minBond;
 
+    // ── Tunable ──────────────────────────────────────────────────────────
+
     uint64 public liveness;
     uint256 public bondAmount;
+
+    // ── Leg ↔ assertion ─────────────────────────────────────────────────
 
     mapping(uint256 legId => bytes32 assertionId) public assertionByLeg;
     mapping(bytes32 assertionId => uint256 legId) public legByAssertion;
 
-    // only UMA callback writes the finalized state below
+    // ── Finalized outcome state (only UMA callback writes these) ────────
+
     mapping(uint256 legId => LegStatus) private _finalStatus;
     mapping(uint256 legId => bytes32) private _finalOutcome;
     mapping(uint256 legId => bool) private _isFinalized;
 
+    // ── Pending (per-assertion) state ───────────────────────────────────
+
     mapping(bytes32 assertionId => LegStatus) private _pendingStatus;
     mapping(bytes32 assertionId => bytes32) private _pendingOutcome;
+
+    // ── Events ───────────────────────────────────────────────────────────
 
     event AssertionCreated(
         uint256 indexed legId,
@@ -48,12 +66,16 @@ contract UmaOracleAdapter is IOracleAdapter, IOptimisticOracleV3CallbackRecipien
     event LivenessSet(uint64 liveness);
     event BondAmountSet(uint256 bondAmount);
 
+    // ── Errors ───────────────────────────────────────────────────────────
+
     error UmaOracle__AlreadyFinalized();
     error UmaOracle__PendingAssertion();
     error UmaOracle__InvalidStatus();
     error UmaOracle__NotUma();
     error UmaOracle__BondBelowMin();
     error UmaOracle__UnknownAssertion();
+
+    // ── Constructor ──────────────────────────────────────────────────────
 
     constructor(IOptimisticOracleV3 _uma, IERC20 _bondToken, uint64 _liveness, uint256 _bondAmount)
         Ownable(msg.sender)
@@ -68,7 +90,7 @@ contract UmaOracleAdapter is IOracleAdapter, IOptimisticOracleV3CallbackRecipien
         bondAmount = _bondAmount;
     }
 
-    // owner can tune liveness/bondAmount but cannot mutate outcomes (see F-5 above)
+    // ── Admin (config only — cannot alter outcomes) ──────────────────────
 
     function setLiveness(uint64 _liveness) external onlyOwner {
         liveness = _liveness;
@@ -81,7 +103,15 @@ contract UmaOracleAdapter is IOracleAdapter, IOptimisticOracleV3CallbackRecipien
         emit BondAmountSet(_bondAmount);
     }
 
-    /// @notice Permissionless. Caller posts bondAmount; refunded on truthful settlement, slashed on dispute.
+    // ── Assert ───────────────────────────────────────────────────────────
+
+    /// @notice Assert an outcome for a leg. Permissionless — anyone can call by
+    ///         posting `bondAmount` of `bondToken`. The bond is refunded on a
+    ///         truthful settlement (minus UMA's final fee), or slashed on dispute.
+    /// @param legId      ParlayVoo leg id (registered in LegRegistry).
+    /// @param status     Proposed LegStatus. Must not be `Unresolved`.
+    /// @param outcome    Proposed outcome hash (same semantics as AdminOracleAdapter).
+    /// @param claim      UTF-8 human-readable claim. Built off-chain; forwarded to UMA.
     function assertOutcome(uint256 legId, LegStatus status, bytes32 outcome, bytes calldata claim)
         external
         nonReentrant
@@ -115,12 +145,17 @@ contract UmaOracleAdapter is IOracleAdapter, IOptimisticOracleV3CallbackRecipien
         emit AssertionCreated(legId, assertionId, status, outcome, msg.sender);
     }
 
-    /// @notice Permissionless. Underlying UMA revert propagates pre-liveness or pre-dispute-resolution.
+    /// @notice Convenience wrapper: settle an assertion that has passed liveness.
+    ///         Callable by anyone; reverts pre-liveness or pre-dispute-resolution
+    ///         (the underlying UMA revert propagates).
+    /// @param legId ParlayVoo leg id with a pending assertion.
     function settleMature(uint256 legId) external {
         bytes32 assertionId = assertionByLeg[legId];
         if (assertionId == bytes32(0)) revert UmaOracle__UnknownAssertion();
         uma.settleAssertion(assertionId);
     }
+
+    // ── UMA callbacks ────────────────────────────────────────────────────
 
     /// @inheritdoc IOptimisticOracleV3CallbackRecipient
     function assertionResolvedCallback(bytes32 assertionId, bool assertedTruthfully) external {
@@ -147,6 +182,8 @@ contract UmaOracleAdapter is IOracleAdapter, IOptimisticOracleV3CallbackRecipien
     function assertionDisputedCallback(bytes32 assertionId) external {
         emit AssertionDisputed(legByAssertion[assertionId], assertionId);
     }
+
+    // ── IOracleAdapter ───────────────────────────────────────────────────
 
     /// @inheritdoc IOracleAdapter
     function getStatus(uint256 legId) external view override returns (LegStatus status, bytes32 outcome) {

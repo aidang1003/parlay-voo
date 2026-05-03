@@ -21,9 +21,7 @@ contract DeployOnboardingFaucet is Script, CodeConstants {
     uint256 internal constant SEPOLIA_SEED = 0.1 ether;
 
     function run() external returns (OnboardingFaucet faucet) {
-        uint256 pk = block.chainid == LOCAL_CHAIN_ID
-            ? vm.envOr("QUOTE_SIGNER_PRIVATE_KEY", vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY))
-            : vm.envOr("QUOTE_SIGNER_PRIVATE_KEY", vm.envUint("DEPLOYER_PRIVATE_KEY"));
+        uint256 pk = block.chainid == LOCAL_CHAIN_ID ? ANVIL_ACCOUNT_0_KEY : vm.envUint("QUOTE_SIGNER_PRIVATE_KEY");
 
         address signer = vm.addr(pk);
         address usdc = _readMockUsdcFromBroadcast();
@@ -48,8 +46,7 @@ contract DeployOnboardingFaucet is Script, CodeConstants {
     }
 
     function _readMockUsdcFromBroadcast() internal view returns (address) {
-        string memory path =
-            string.concat("broadcast/Deploy.s.sol/", vm.toString(block.chainid), "/run-latest.json");
+        string memory path = string.concat("broadcast/Deploy.s.sol/", vm.toString(block.chainid), "/run-latest.json");
         string memory json = vm.readFile(path);
         bytes32 target = keccak256(bytes("MockUSDC"));
         for (uint256 i = 0; i < 256; i++) {

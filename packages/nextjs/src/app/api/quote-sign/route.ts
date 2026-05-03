@@ -11,21 +11,8 @@ import {
   type SupportedChainId,
 } from "@parlayvoo/shared";
 
-/**
- * POST /api/quote-sign
- *
- * Produces an EIP-712 signed Quote that ParlayEngine.buyTicketSigned() will
- * accept. The server is the trusted price oracle: for polymarket legs it
- * refetches the CLOB mid at sign time and uses that PPM (falling back to the
- * DB-stored PPM if the refetch fails). For seed legs it uses the DB PPM.
- *
- * Request body:
- *   {
- *     buyer:   "0x..."                   (required)
- *     stake:   string decimal USDC wei   (required, 6 decimals — passed through)
- *     legs: [{ sourceRef: string, side: "yes" | "no" }]
- *   }
- */
+// POST /api/quote-sign — produces EIP-712 signed Quote for ParlayEngine.buyTicketSigned().
+// Body: { buyer: 0x…, stake: usdc-wei, legs: [{sourceRef, side: "yes"|"no"}] }
 
 interface QuoteBody {
   buyer: string;
@@ -98,9 +85,7 @@ export async function POST(req: Request) {
   }));
 
   const nonce = BigInt("0x" + crypto.randomUUID().replace(/-/g, "")) & ((1n << 128n) - 1n);
-  // 10 min: the buy flow is approve-then-buy, so a tight TTL (e.g. 60s) expires
-  // during the approve's block confirmation on testnet and the engine reverts
-  // "quote expired". Nonce still bounds replay, so widening TTL is safe.
+  // 10 min: tight TTL expires during approve-confirm on testnet; nonce bounds replay
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
   const quote = {

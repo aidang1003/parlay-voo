@@ -631,8 +631,8 @@ describe("ParlayBuilder", () => {
   });
 
   // --- Cart display ---
-  // Per CORRELATION.md the cart only surfaces the final multiplier and
-  // payout — no fee row, no correlation row.
+  // Per docs/changes/B_SLOG_SPRINT.md the cart only surfaces the final
+  // multiplier and payout — no fee row, no correlation row.
 
   describe("cart display", () => {
     it("does not surface a separate fee row", async () => {

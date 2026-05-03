@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
@@ -39,37 +39,24 @@ import {
 } from "@/lib/hooks";
 import { MultiplierClimb } from "./MultiplierClimb";
 
-// ── Types ────────────────────────────────────────────────────────────────
-
-/** Display-ready leg combining API data with UI state. One DisplayLeg now
- *  represents an entire market (both yes/no sides collapsed). For seed markets
- *  noId is undefined so the UI hides the No button. */
+/** One DisplayLeg = an entire market (yes/no collapsed). noId undefined for single-sided seed markets. */
 interface DisplayLeg {
-  /** Yes-side on-chain leg id (used when outcomeChoice === 1). */
   id: bigint;
-  /** No-side on-chain leg id (used when outcomeChoice === 2). Absent for
-   *  single-sided seed markets. */
   noId?: bigint;
   description: string;
-  yesOdds: number; // decimal multiplier for yes side
-  noOdds?: number; // decimal multiplier for no side (poly only)
+  yesOdds: number;
+  noOdds?: number;
   resolved: boolean;
   outcome: number;
   expiresAt: number;
   category: string;
   marketTitle: string;
   gameGroup: string;
-  /** Whether this leg has an on-chain counterpart (can be bought). */
   onChain: boolean;
-  /** Raw source reference: polymarket conditionId (0x…) or "seed:<id>". */
   sourceRef: string;
-  /** Yes-side probability in PPM (used for accurate multiplier computation). */
   yesProbabilityPPM: number;
-  /** No-side probability in PPM. */
   noProbabilityPPM?: number;
-  /** Correlation group id (0 = uncorrelated). */
   correlationGroupId: number;
-  /** Mutual-exclusion group id (0 = no exclusion). */
   exclusionGroupId: number;
 }
 
@@ -78,33 +65,11 @@ interface SelectedLeg {
   outcomeChoice: number; // 1 = yes, 2 = no
 }
 
-/** Serializable form for sessionStorage (bigint is not JSON-safe). */
+/** bigint-as-string for sessionStorage round-trip. */
 interface StoredSelection {
-  legId: string; // BigInt.toString()
+  legId: string;
   outcomeChoice: number;
 }
-
-// Kelly AI Risk Advisor — calls /api/premium/agent-quote to return Kelly-sized
-// stake suggestions, EV/edge metrics, and an optional 0G AI insight.
-// DISABLED: no longer called by the application. Kept here so we can re-enable
-// the feature later without rebuilding the typings/validator from scratch.
-/*
-interface RiskAdviceData {
-  action: string;
-  suggestedStake: string;
-  kellyFraction: number;
-  winProbability: number;
-  expectedValue: number;
-  confidence: number;
-  fairMultiplier: number;
-  netMultiplier: number;
-  edgeBps: number;
-  riskTolerance: string;
-  reasoning: string;
-  warnings: string[];
-  aiInsight?: { analysis: string; model: string; provider: string; verified: boolean };
-}
-*/
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -145,17 +110,12 @@ const SESSION_KEYS = {
   category: "parlay:category",
 } as const;
 
-// ── Pure helpers ─────────────────────────────────────────────────────────
-
-/** PPM to decimal odds. */
 function ppmToOdds(ppm: number): number {
   if (ppm <= 0) return 1;
   return 1_000_000 / ppm;
 }
 
-/** Pick the odds for the selected side. Falls back to complement if the no-side
- *  odds weren't supplied (single-sided seed markets clicked as "no" shouldn't
- *  happen because the No button is hidden, but we guard anyway). */
+/** Falls back to yes-side complement if noOdds is missing — defensive for single-sided seed markets. */
 function effectiveOdds(leg: DisplayLeg, outcome: number): number {
   if (outcome === 2) {
     if (leg.noOdds !== undefined) return leg.noOdds;
@@ -165,9 +125,6 @@ function effectiveOdds(leg: DisplayLeg, outcome: number): number {
   return leg.yesOdds;
 }
 
-/** Transform API markets into DisplayLeg array — one leg per market. Both
- *  yes/no sides get collapsed into a single card; the noId/noOdds fields
- *  carry the second side when present. */
 function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
   const legs: DisplayLeg[] = [];
   for (const market of markets) {
@@ -196,7 +153,6 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
   return legs;
 }
 
-/** Restore SelectedLeg[] from serialized form. */
 function restoreSelections(stored: StoredSelection[], allLegs: DisplayLeg[]): SelectedLeg[] {
   const legMap = new Map(allLegs.map((l) => [l.id.toString(), l]));
   const result: SelectedLeg[] = [];
@@ -208,36 +164,6 @@ function restoreSelections(stored: StoredSelection[], allLegs: DisplayLeg[]): Se
   }
   return result;
 }
-
-// Risk advisor response validator. DISABLED along with the Kelly AI Risk
-// Advisor feature — no longer called by the application.
-/*
-function isValidRiskResponse(data: unknown): data is RiskAdviceData {
-  if (!data || typeof data !== "object") return false;
-  const d = data as Record<string, unknown>;
-  const baseValid =
-    typeof d.action === "string" &&
-    typeof d.suggestedStake === "string" &&
-    /^\d+(?:\.\d*)?$/.test(d.suggestedStake) &&
-    typeof d.kellyFraction === "number" &&
-    typeof d.winProbability === "number" &&
-    typeof d.expectedValue === "number" &&
-    typeof d.confidence === "number" &&
-    typeof d.fairMultiplier === "number" &&
-    typeof d.netMultiplier === "number" &&
-    typeof d.edgeBps === "number" &&
-    typeof d.riskTolerance === "string" &&
-    typeof d.reasoning === "string" &&
-    Array.isArray(d.warnings) &&
-    d.warnings.every((w: unknown) => typeof w === "string");
-  if (!baseValid) return false;
-  if (d.aiInsight !== undefined && d.aiInsight !== null) {
-    const ai = d.aiInsight as Record<string, unknown>;
-    if (typeof ai.analysis !== "string" || typeof ai.model !== "string" || typeof ai.provider !== "string") return false;
-  }
-  return true;
-}
-*/
 
 // ── Component ────────────────────────────────────────────────────────────
 
@@ -260,8 +186,6 @@ export function ParlayBuilder() {
     minStakeUSDC,
   } = useParlayConfig();
 
-  // Pick the active purchase hook so every downstream state read stays in sync
-  // with whichever flow the user is currently on.
   const { buyTicket, resetSuccess, isPending, isConfirming, isSuccess, error, lastTicketId } =
     useLossless
       ? {
@@ -298,7 +222,7 @@ export function ParlayBuilder() {
     let storedSelections: StoredSelection[] | null = null;
     try {
       const raw = sessionStorage.getItem(SESSION_KEYS.legs);
-      if (raw) storedSelections = JSON.parse(raw);
+      if (raw) storedSelections = JSON.parse(raw) as StoredSelection[];
     } catch {
       // parse error or sessionStorage unavailable
     }
@@ -370,13 +294,7 @@ export function ParlayBuilder() {
     }
   }, [mounted, selectedLegs]);
 
-  // ── Live pricing refresh ───────────────────────────────────────────────
-  // Every 30s while ≥2 legs are staged and the buy flow is idle, poll
-  // /api/quote-preview to refresh CLOB mids. Updates allLegs in place; the
-  // reconcile effect above propagates new leg references into selectedLegs,
-  // which re-triggers the multiplier useMemo. Paused once the user clicks
-  // buy (isPending / isConfirming / isSuccess) — quote-sign does its own
-  // final CLOB refetch and becomes the source of truth from that point.
+  // 30s CLOB-mid poll, paused once buy flow starts (quote-sign's final refetch becomes source of truth).
   const selectedLegsKey = useMemo(
     () => selectedLegs.map((s) => `${s.leg.sourceRef}:${s.outcomeChoice}`).join("|"),
     [selectedLegs],
@@ -439,25 +357,6 @@ export function ParlayBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLegsKey, buyActive]);
 
-  // ── Risk advisor state ─────────────────────────────────────────────────
-  // Kelly AI Risk Advisor state + stale-data reset.
-  // DISABLED: no longer called by the application. Kept for future re-enable.
-  /*
-  const [riskAdvice, setRiskAdvice] = useState<RiskAdviceData | null>(null);
-  const [riskLoading, setRiskLoading] = useState(false);
-  const [riskError, setRiskError] = useState<string | null>(null);
-  const riskFetchIdRef = useRef(0);
-  const [aiInsightExpanded, setAiInsightExpanded] = useState(false);
-
-  useEffect(() => {
-    setRiskAdvice(null);
-    setRiskError(null);
-    setRiskLoading(false);
-    setAiInsightExpanded(false);
-    riskFetchIdRef.current++;
-  }, [selectedLegs, stake]);
-  */
-
   // ── Derived values ─────────────────────────────────────────────────────
 
   const stakeNum = parseFloat(stake) || 0;
@@ -469,9 +368,7 @@ export function ParlayBuilder() {
   const effectiveCorrHalfSat = correlationHalfSatPpm ?? CORRELATION_HALF_SAT_PPM;
   const effectiveMaxLegsPerGroup = maxLegsPerGroup ?? MAX_LEGS_PER_GROUP;
 
-  // Pull on-chain status for any DisplayLeg that has a real (non-synthetic)
-  // legId. Synthetic ids are negative (set in markets.ts when the row hasn't
-  // been JIT-registered yet) and have no oracle to query — skip them.
+  // skip synthetic (negative) ids — markets.ts uses them for not-yet-JIT-registered rows
   const onChainLegIds = useMemo(
     () => allLegs.map((l) => l.id).filter((id) => id >= 0n),
     [allLegs],
@@ -479,8 +376,7 @@ export function ParlayBuilder() {
   const builderLegMap = useLegDescriptions(onChainLegIds);
   const builderLegStatuses = useLegStatuses(onChainLegIds, builderLegMap, 30_000);
 
-  // Drop legs the oracle has already resolved (status 1/2/3). Buying them
-  // would revert at quote-sign time; nothing the user can do with them.
+  // drop oracle-resolved legs; buying them would revert at quote-sign
   const liveLegs = useMemo(() => {
     if (builderLegStatuses.size === 0) return allLegs;
     return allLegs.filter((l) => {
@@ -534,8 +430,6 @@ export function ParlayBuilder() {
     return games;
   }, [filteredLegs]);
 
-  // Final multiplier: applies the per-leg fee and saturating correlation
-  // discount via the same shared math the engine runs on-chain.
   const multiplier = useMemo(() => {
     if (selectedLegs.length === 0) return 1;
     const probs = selectedLegs.map((s) =>
@@ -566,10 +460,7 @@ export function ParlayBuilder() {
 
   const potentialPayout = stakeNum * multiplier;
 
-  // Per-leg multipliers fed to the chart climb. Distribute the (fee +
-  // correlation) discount evenly across legs so the cumulative product at
-  // the chart's last point equals the cart's final multiplier — keeps the
-  // big headline number aligned with the potential-payout calculation.
+  // distribute fee+correlation discount evenly so the chart's last point matches the headline multiplier
   const climbLegMultipliers = useMemo(() => {
     if (selectedLegs.length === 0) return [];
     const raw = selectedLegs.map((s) => effectiveOdds(s.leg, s.outcomeChoice));
@@ -579,11 +470,7 @@ export function ParlayBuilder() {
     return raw.map((m) => m * scale);
   }, [selectedLegs, multiplier]);
 
-  // Payment amount the wallet will be asked to approve. Rounds the typed
-  // stake UP to the nearest $0.01 so a sub-cent rounding mismatch never
-  // makes `safeTransferFrom` revert on the engine. The on-chain ticket
-  // still consumes the exact `quote.stake` value the buy hook computes.
-  // Lossless tickets pay in credit, not USDC — no approval, no rounding.
+  // round approval up to next $0.01 so sub-cent drift can't starve safeTransferFrom; lossless skips
   const paymentAmountUsdc = useMemo(() => {
     if (stakeNum <= 0 || useLossless) return stakeNum;
     try {
@@ -594,9 +481,7 @@ export function ParlayBuilder() {
     }
   }, [stake, stakeNum, useLossless]);
 
-  // Map leg id → disabled reason (null when selectable). The builder uses
-  // this to grey out conflicting legs without telling the user there's a
-  // correlation-related cap (CORRELATION.md: leg-limit copy stays neutral).
+  // legId → disabled reason; copy stays neutral per docs/changes/B_SLOG_SPRINT.md
   const legGate = useMemo(() => {
     const gate = new Map<string, { reason: "conflict" | "groupCap"; conflictsWith?: string }>();
     if (selectedLegs.length === 0) return gate;
@@ -635,10 +520,7 @@ export function ParlayBuilder() {
   const insufficientLiquidity =
     potentialPayout > 0 && freeLiquidity !== undefined && potentialPayout > freeLiquidityNum;
 
-  // Largest stake that keeps potentialPayout under both vault caps for the
-  // current leg selection. The on-chain buy reverts when payout exceeds
-  // maxPayout() (5% TVL) or freeLiquidity(); capping the UI stake here
-  // prevents 4-5 leg parlays from silently reverting after approve.
+  // cap stake to avoid post-approve revert on maxPayout() / freeLiquidity()
   const vaultCapUsdc = statsLoaded ? Math.min(maxPayoutNum, freeLiquidityNum) : 0;
   const impliedMaxStake = multiplier > 1 && vaultCapUsdc > 0 ? vaultCapUsdc / multiplier : 0;
 
@@ -699,88 +581,6 @@ export function ParlayBuilder() {
       setStake("");
     }
   };
-
-  // Kelly AI Risk Advisor fetch + 600ms debounced auto-trigger.
-  // Posts the current parlay to /api/premium/agent-quote and renders Kelly
-  // sizing, EV/edge, and optional 0G AI insight in the builder.
-  // DISABLED: no longer called by the application. Retained so we can turn
-  // the feature back on later without re-deriving the fetch/validation logic.
-  /*
-  const fetchRiskAdvice = useCallback(async () => {
-    const localFetchId = ++riskFetchIdRef.current;
-    setRiskLoading(true);
-    setRiskAdvice(null);
-    setRiskError(null);
-
-    try {
-      const res = await fetch("/api/premium/agent-quote", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-402-payment": process.env.NEXT_PUBLIC_X402_PAYMENT ?? "demo-token",
-        },
-        body: JSON.stringify({
-          legIds: selectedLegs.map((s) => Number(s.leg.id)),
-          outcomes: selectedLegs.map((s) => (s.outcomeChoice === 1 ? "Yes" : "No")),
-          stake,
-          bankroll:
-            usdcBalance !== undefined && usdcBalance > 0n
-              ? formatUnits(usdcBalance, 6)
-              : "100",
-          riskTolerance: "moderate",
-        }),
-      });
-
-      if (localFetchId !== riskFetchIdRef.current) return;
-
-      if (!res.ok) {
-        setRiskError(`Risk analysis unavailable (${res.status})`);
-        setRiskLoading(false);
-        return;
-      }
-
-      const raw: unknown = await res.json();
-      if (localFetchId !== riskFetchIdRef.current) return;
-
-      const envelope = raw as Record<string, unknown>;
-      const riskObj = envelope.risk;
-      if (!riskObj || typeof riskObj !== "object") {
-        setRiskError("Invalid response from risk advisor");
-        setRiskLoading(false);
-        return;
-      }
-
-      const merged = { ...(riskObj as Record<string, unknown>), ...(envelope.aiInsight ? { aiInsight: envelope.aiInsight } : {}) };
-
-      if (!isValidRiskResponse(merged)) {
-        setRiskError("Invalid response from risk advisor");
-        setRiskLoading(false);
-        return;
-      }
-
-      setRiskAdvice(merged);
-    } catch {
-      if (localFetchId === riskFetchIdRef.current) {
-        setRiskError("Failed to connect to risk advisor");
-      }
-    }
-
-    if (localFetchId === riskFetchIdRef.current) setRiskLoading(false);
-  }, [selectedLegs, stake, usdcBalance]);
-
-  const fetchRiskAdviceRef = useRef(fetchRiskAdvice);
-  fetchRiskAdviceRef.current = fetchRiskAdvice;
-
-  useEffect(() => {
-    if (selectedLegs.length < MIN_LEGS || !(parseFloat(stake) > 0)) return;
-    setRiskLoading(true);
-    const timer = setTimeout(() => {
-      fetchRiskAdviceRef.current();
-    }, 600);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLegs, stake]);
-  */
 
   // ── Derived display ────────────────────────────────────────────────────
 
@@ -1175,9 +975,7 @@ export function ParlayBuilder() {
             )}
           </div>
 
-          {/* Payout breakdown — single multiplier + payout. Per-leg fee and
-              correlation discount are baked into the multiplier and never
-              surfaced on their own (CORRELATION.md spec). */}
+          {/* fee + correlation baked into multiplier per docs/changes/B_SLOG_SPRINT.md */}
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-400">
               <span>Potential Payout</span>
@@ -1192,13 +990,6 @@ export function ParlayBuilder() {
               </span>
             </div>
           </div>
-
-          {/* Kelly AI Risk Advisor UI — rendered the risk-advisor card
-              (action badge, Kelly/EV/edge stats, reasoning, suggested stake,
-              and collapsible 0G AI insight) whenever the parlay had enough
-              legs and a positive stake. DISABLED: no longer rendered by the
-              application. The corresponding state and fetch logic above is
-              commented out but preserved so this UI can be re-enabled later. */}
 
           {/* Buy button */}
           <button

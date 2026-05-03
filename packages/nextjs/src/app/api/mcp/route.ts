@@ -8,7 +8,6 @@ import {
   getProtocolConfig,
 } from "@/lib/mcp/tools";
 
-// MCP tool definitions for tools/list response
 const TOOL_DEFINITIONS = [
   {
     name: "list_markets",
@@ -88,7 +87,6 @@ const TOOL_DEFINITIONS = [
   },
 ];
 
-// Tool name -> executor mapping
 const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
   list_markets: (args) => listMarkets(args as { category?: string }),
   get_quote: (args) =>
@@ -100,10 +98,7 @@ const TOOL_EXECUTORS: Record<string, (args: Record<string, unknown>) => Promise<
   get_protocol_config: () => getProtocolConfig(),
 };
 
-/**
- * MCP JSON-RPC endpoint for external AI agents.
- * Supports: tools/list, tools/call
- */
+// MCP JSON-RPC: tools/list, tools/call
 export async function POST(req: Request) {
   let body: { jsonrpc?: string; id?: unknown; method?: string; params?: Record<string, unknown> };
   try {
@@ -181,7 +176,6 @@ export async function POST(req: Request) {
   );
 }
 
-// GET for discoverability
 export async function GET() {
   return NextResponse.json({
     name: "parlayvoo-mcp",

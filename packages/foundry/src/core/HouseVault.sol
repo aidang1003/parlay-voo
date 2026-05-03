@@ -76,7 +76,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     ///         earmarked, not LP-owned, until it gets minted into shares.
     uint256 public totalRehabClaimable;
 
-    /// @notice Correlation pricing knobs. See docs/changes/CORRELATION.md.
+    /// @notice Correlation pricing knobs. See docs/changes/B_SLOG_SPRINT.md.
     /// @param corrAsymptoteBps  Asymptotic ceiling on per-group discount (BPS).
     /// @param corrHalfSatPpm    Half-saturation point: at (n-1)·PPM == k_ppm,
     ///                          discount equals exactly D/2.

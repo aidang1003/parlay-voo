@@ -16,21 +16,7 @@ export const dynamic = "force-dynamic";
 
 const SPORT_TAGS = ["nba", "nfl", "mlb", "nhl"] as const;
 
-/**
- * GET /api/polymarket/sync
- *
- * Upserts markets from three sources, deduped by conditionId:
- *   1. CURATED — hand-picked markets
- *   2. Featured — top global events by 24h volume
- *   3. Per-sport — NBA/NFL/MLB/NHL tag queries, so sport inventory isn't
- *      gated on cracking the global volume leaderboard
- *
- * Re-runs are idempotent: existing rows get probability / cutoff / curation
- * score / api payload refreshed; leg ids, question, category, earliestResolve,
- * blnactive, and game group are preserved on conflict so a sync can never
- * clobber registration metadata or rename a market the catalog has already
- * advertised.
- */
+// Idempotent: refreshes prices/cutoff/score; preserves leg ids/question/category/earliestResolve on conflict.
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -90,8 +76,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
   }
   const earliestResolve = cutoffSec + 48 * 3600;
 
-  // Prefer Gamma-provided prices (one HTTP round-trip per batch, tighter than
-  // per-token orderbook mid which often clamps against our thin-book bounds).
+  // Gamma prices avoid thin-book clamping from per-token orderbook mid
   let yesMid: number | undefined = entry.yesPrice;
   let noMid: number | undefined = entry.noPrice;
 
@@ -114,11 +99,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     nowSec,
   });
 
-  // Polymarket negRisk events guarantee mutual exclusion at the protocol
-  // level: every child market shares an event id and at most one resolves
-  // YES. Hash the event id into a numeric group so the builder gate +
-  // on-chain `MutuallyExclusiveLegs` check have a stable key to compare.
-  // Non-negRisk markets fall through with 0 (no exclusion).
+  // negRisk events: at most one child resolves YES — hash eventId into a stable exclusion group
   const exclusionGroupId =
     entry.negRisk && entry.eventId ? stableHash32(`negrisk:${entry.eventId}`) : 0;
 
@@ -141,7 +122,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
   });
 }
 
-// Curation score formula + rationale: docs/POLYMARKET.md § Curation score
+// formula: docs/POLYMARKET.md § Curation score
 const URGENCY_WINDOW_HOURS = 168;
 
 function computeCurationScore(args: {
@@ -171,8 +152,7 @@ function computeCurationScore(args: {
 }
 
 function bookMid(book: PolymarketOrderBook): number {
-  // Polymarket's `/book` doesn't document its sort order, so don't trust [0]
-  // to be top of book — take max of bids and min of asks.
+  // /book sort order is undocumented — take max(bids) / min(asks)
   const bidPrices = book.bids
     .map((b) => Number(b.price))
     .filter((p) => Number.isFinite(p) && p > 0);

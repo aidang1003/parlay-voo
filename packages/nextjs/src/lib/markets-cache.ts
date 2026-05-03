@@ -1,5 +1,5 @@
 // Shared in-flight + TTL cache for /api/markets so feed/list components don't
-// fan out one DB-backed fetch per row. See docs/changes/B_THE_SLOG.md (U-2).
+// fan out one DB-backed fetch per row. See docs/changes/B_SLOG_SPRINT.md.
 
 export interface MarketLegLite {
   id: number;

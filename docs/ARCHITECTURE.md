@@ -2,7 +2,7 @@
 
 ## Overview
 
-ParlayVoo (protocol name: ParlayCity) is an onchain parlay betting platform on Base. Users build 2-5 leg parlays, LPs provide house liquidity via a vault, and settlement uses a hybrid model (fast admin resolution for bootstrap, optimistic challenge-based resolution thereafter). Curated Polymarket conditions feed real binary markets into the app; a unified cron relays resolutions and settles tickets.
+ParlayVoo (protocol name: ParlayCity) is an onchain parlay betting platform on Base. Users build 2-5 leg parlays, LPs provide house liquidity via a vault, and settlement uses a hybrid model: `AdminOracleAdapter` for fast resolution on testnets, `UmaOracleAdapter` (UMA Optimistic Oracle V3) on mainnet so no `onlyOwner` function can mutate outcome state. Curated Polymarket conditions feed real binary markets into the app; two daily crons relay resolutions and settle tickets. Idle vault USDC is deployable to a yield adapter (Aave on mainnet; mock on testnets).
 
 ## System Diagram
 
@@ -13,30 +13,31 @@ flowchart TB
         POLY[Polymarket<br/>gamma-api]
     end
 
-    subgraph "Crons"
+    subgraph "Crons (Vercel)"
         PSYNC[Polymarket Sync<br/>/api/polymarket/sync<br/>daily 08:00 UTC]
-        SET[Settlement Cron<br/>/api/settlement/run]
+        SET[Settlement Cron<br/>/api/settlement/run<br/>daily 20:00 UTC]
     end
 
     subgraph "Frontend -- Next.js 14 (Vercel)"
-        UI[Onboarding (/) -> Parlay (/parlay) / Vault / Tickets / Ticket Detail / About]
+        UI[Onboarding (/) -> Parlay (/parlay)<br/>/vault · /tickets · /ticket/[id]<br/>/about · /agents · /rehab/claim<br/>/admin/debug · /admin/tickets]
         CHAT[AI Chat Panel<br/>Vercel AI SDK + Claude]
-        API[API Routes<br/>/api/markets · /api/quote-sign<br/>/api/mcp · /api/premium/agent-quote]
+        API[API Routes<br/>see Data + API Surface table]
     end
 
     subgraph "Neon Postgres"
-        LM[tblegmapping]
+        LM[tblegmapping<br/>+ jsonb payload<br/>+ curation score]
         PR[tbpolymarketresolution]
     end
 
-    subgraph "Base Sepolia -- Contracts"
-        PE[ParlayEngine<br/>ERC-721 tickets]
+    subgraph "Base -- Contracts"
+        PE[ParlayEngine<br/>ERC-721 tickets<br/>JIT signed quotes]
         HV[HouseVault<br/>ERC-4626 vault]
-        LR[LegRegistry]
+        LR[LegRegistry<br/>getOrCreateBySourceRef]
         LV2[LockVaultV2<br/>continuous-duration<br/>Synthetix rewards]
         OA[AdminOracleAdapter<br/>testnet only]
-        OO[UmaOracleAdapter<br/>UMA OOv3 wrapper]
+        OO[UmaOracleAdapter<br/>UMA OOv3 wrapper<br/>mainnet]
         PM[ParlayMath<br/>pure library]
+        YA[YieldAdapter<br/>Aave (mainnet) /<br/>Mock (testnet)]
         OF[OnboardingFaucet<br/>peripheral · testnet drip<br/>(separate deploy)]
     end
 
@@ -46,26 +47,29 @@ flowchart TB
 
     %% Cron + agent flows
     POLY --> PSYNC
-    PSYNC --> LM
+    PSYNC -->|upsert volatile fields| LM
     PSYNC --> PR
-    PSYNC -->|createLeg| LR
     PSYNC -->|resolve YES/NO/VOIDED| OA
     BDL --> API
     SET -->|settleTicket| PE
     SET -->|canResolve| OA
+    SET -->|assert / settle| OO
 
     %% Human flows
     HU -->|wagmi/viem| UI
     UI --> API
-    HU -->|buyTicket / cashoutEarly| PE
+    API -->|JIT createLeg| LR
+    HU -->|buyTicketSigned / cashoutEarly| PE
     HU -->|deposit / withdraw| HV
     HU -->|lock / unlock| LV2
     HU -->|natural language| CHAT
     CHAT -->|tool calls| API
 
     %% Contract internals
+    PE -->|getOrCreateBySourceRef| LR
     PE -->|reserve / release / pay| HV
     PE --> PM
+    HV -->|deployIdle / recall| YA
     HV -->|notifyFees| LV2
     LR --> OA
     LR --> OO
@@ -77,10 +81,10 @@ flowchart TB
 ERC4626-like vault holding USDC. LPs deposit to earn the house edge. Tracks reserved exposure for active tickets. Pull-based payouts. Fee routing: 90% to LockVaultV2 lockers, 5% to safety buffer, 5% stays in vault (via `routeFees`).
 
 ### LegRegistry
-Registry of betting legs (questions). Each leg has a probability, cutoff time, oracle adapter reference, and optional `sourceRef` for external data provenance (e.g., `polymarket:0xabc...:yes`). Legs are created by admin or the Polymarket sync route.
+Registry of betting legs (questions). Each leg has a probability, cutoff time, oracle adapter reference, and a `sourceRef` for external data provenance (the raw Polymarket conditionId, or a `seed:` ref). Legs are created **just-in-time** at ticket-buy time via `getOrCreateBySourceRef` — the Polymarket sync only writes the off-chain catalog (`tblegmapping`); the on-chain leg ID is materialized when a user actually includes it in a parlay. Each leg also carries optional `correlationGroupId` and `exclusionGroupId` (set by admin or by the sync for negRisk events).
 
 ### ParlayEngine
-Core engine that mints ERC-721 ticket NFTs. Validates parlay construction, computes multipliers/fees via ParlayMath library, manages settlement lifecycle. JIT-signed EIP-712 quotes gate every purchase (deterministic pricing, math-parity invariant).
+Core engine that mints ERC-721 ticket NFTs. Validates parlay construction, computes multipliers/fees via ParlayMath library, manages settlement lifecycle. JIT-signed EIP-712 quotes gate every purchase (deterministic pricing, math-parity invariant). Reverts on duplicate `exclusionGroupId` to prevent stacking mutually exclusive legs even if the UI gate misses.
 
 ### LockVaultV2
 Staking contract for VOO shares. **Continuous-duration lock curve** (no fixed 30/60/90 tiers): fee share `= 10_000 + MAX_BOOST * d / (d + HALF_LIFE)`, base 1.0x at 7-day min, asymptote 4.0x as `d → ∞`, exactly 2.0x at 1 year. `MAX_PENALTY_BPS = 30%` on day-0 max-lock exit, decaying with elapsed time. Three tiers (`FULL`, `PARTIAL`, `LEAST`) serve rehab mode — FULL is the normal LP path; PARTIAL / LEAST are credit-backing positions. Synthetix-style `accRewardPerWeightedShare` accumulator distributes 90% of protocol fees, weighted by committed duration and shares.
@@ -99,28 +103,30 @@ Pluggable settlement via `IOracleAdapter` interface. Per-leg adapter address sna
 - Base Sepolia → Admin by default; flip `NEXT_PUBLIC_ORACLE_MODE=uma` to exercise UMA end-to-end.
 - Anvil → Admin (no UMA deployment).
 
+### Yield Adapter
+HouseVault holds USDC; idle balance can be deployed via `setYieldAdapter()` to any `IYieldAdapter` implementation. `MockYieldAdapter` is the testnet/CI default (returns USDC unchanged). `AaveYieldAdapter` is the production adapter — wraps Aave V3 supply/withdraw on Base mainnet. Permissionless `recallFromAdapter()` exists so depositors can force liquidity back into the vault if the adapter ever stalls.
+
+### OnboardingFaucet (peripheral, testnet only)
+Stand-alone testnet drip: one-shot ETH per address + 24h MockUSDC drip. Lives in `peripheral/`, deployed by its own `script/DeployOnboardingFaucet.s.sol`, **not** part of `Deploy.s.sol`. Owned + funded by `QUOTE_SIGNER_PRIVATE_KEY` so the cold deployer key stays offline. The frontend's onboarding page calls it; if the contract isn't deployed for the current chain, the USDC step gracefully degrades to the existing `useMintTestUSDC` direct mint.
+
 ## Crons
 
 Crons handle protocol infrastructure. Humans make all betting decisions.
 
 ### Polymarket Sync (`/api/polymarket/sync`)
 
-Daily Vercel cron at 08:00 UTC. Two phases, one route:
+Daily Vercel cron at 08:00 UTC. Two phases, one route — both off-chain only:
 
-- **Phase A — discovery + registration.** Walks `packages/shared/src/polymarket/curated.ts`. For each new entry, fetches current odds from Polymarket, registers a leg on `LegRegistry`, records the `conditionId → legId` mapping in Neon Postgres (`tblegmapping`).
-- **Phase B — resolution relay.** Walks active `tblegmapping` rows past cutoff. For each, polls Polymarket for a resolved outcome. When it lands, calls `AdminOracleAdapter.resolve()` for both YES and NO legs and writes a resolution row.
+- **Phase A — catalog refresh.** Discovers new featured markets via the Gamma API, then upserts each into `tblegmapping` keyed on the raw conditionId. The upsert preserves registration metadata (leg ids materialized post-buy, gameGroup, category) and only refreshes the volatile fields (yes/no probabilities, volume, cutoff, raw payload, curation score, exclusion group). The on-chain `createLeg` call is **not** here — legs are JIT-created when a user includes them in a parlay (`LegRegistry.getOrCreateBySourceRef`).
+- **Phase B — resolution relay.** Walks active `tblegmapping` rows past cutoff. For each, polls Polymarket for a resolved outcome. When it lands, calls `AdminOracleAdapter.resolve()` (testnets) or `UmaOracleAdapter.assertOutcome` (mainnet) and writes a resolution row.
 
-Odds are **frozen at registration time** — deterministic pricing is required by the math-parity invariant. Full detail: [POLYMARKET.md](POLYMARKET.md).
+Odds are **frozen at sign time** — deterministic pricing is required by the math-parity invariant. Each ticket carries its own snapshotted probabilities. Full detail: [POLYMARKET.md](POLYMARKET.md).
 
 ### Settlement Cron (`/api/settlement/run`)
 
-Iterates `ticketCount`; for each active ticket whose legs all return `canResolve=true`, calls `ParlayEngine.settleTicket()` to finalize payouts and release vault reserves. Idempotent — already-settled tickets are skipped.
+Daily Vercel cron at 20:00 UTC. Iterates `ticketCount`; for each active ticket whose legs all return `canResolve=true`, calls `ParlayEngine.settleTicket()` to finalize payouts and release vault reserves. Idempotent — already-settled tickets are skipped. Per-leg path branches on the snapshotted `oracleAdapter`: Admin legs settle one-shot; UMA legs are two-phase (assert → wait liveness → settle).
 
-```
-Poll ticketCount  -->  canResolve for each leg  -->  settleTicket()
-```
-
-Signed with `DEPLOYER_PRIVATE_KEY`.
+Signed with `DEPLOYER_PRIVATE_KEY`. Manual trigger via `/api/settlement/trigger` exists for ops.
 
 ## MCP Server & AI Chat
 
@@ -152,19 +158,27 @@ All offchain services run as Next.js serverless routes under `packages/nextjs/sr
 | Route | Purpose |
 |---|---|
 | `/api/markets` | Merged catalog: seed markets + curated Polymarket |
+| `/api/markets/categories` | Distinct categories + counts (for UI tabs) |
+| `/api/quote` | Unsigned quote for the cart (multiplier preview) |
+| `/api/quote-preview` | Server-side preview that mirrors on-chain math (test parity) |
 | `/api/quote-sign` | EIP-712 signed JIT quote for `buyTicketSigned` |
 | `/api/mcp` | JSON-RPC endpoint exposing the 6 MCP tools |
 | `/api/chat` | AI chat panel (streaming + tool calls) |
 | `/api/premium/agent-quote` | Combined quote + risk for autonomous agents |
-| `/api/polymarket/sync` | Daily cron — discovery + resolution relay |
-| `/api/settlement/run` | Cron — settle tickets whose legs are all resolved |
+| `/api/agent-stats` | Aggregate agent activity (cached 60s) |
+| `/api/polymarket/sync` | Daily cron — catalog refresh + resolution relay |
+| `/api/settlement/run` | Daily cron — settle tickets whose legs are all resolved |
+| `/api/settlement/trigger` | Manual trigger — same body as `/api/settlement/run` |
 | `/api/db/init` | One-shot — apply Neon schema + backfill seed legs |
+| `/api/admin/db-init` | Testnet-gated proxy that calls `/api/db/init` from `/admin/debug` |
+| `/api/admin/sync` | Testnet-gated proxy that calls `/api/polymarket/sync` from `/admin/debug` |
+| `/api/admin/resolve-leg` | Testnet-gated — signs `AdminOracleAdapter.resolve()` for the debug page |
 
-Live NBA markets are fetched inline from BallDontLie (`packages/nextjs/src/lib/bdl.ts`, 5-min cache). Seed markets live in `packages/shared/src/seed.ts`. Curated Polymarket entries live in `packages/shared/src/polymarket/curated.ts`.
+Admin routes 404 off testnet (`useIsTestnet()` gate; chains 31337 / 84532 only). Live NBA markets are fetched inline from BallDontLie (`packages/nextjs/src/lib/bdl.ts`, 5-min cache). Seed markets live in `packages/shared/src/seed.ts`. Curated Polymarket entries live in `packages/shared/src/polymarket/curated.ts`.
 
 ## Protocol Parameters
 
-Pricing knobs are configured via `.env` as non-sensitive `NEXT_PUBLIC_*` variables. They drive both the off-chain quote engine and the on-chain pricing math, with hardcoded fallbacks in `packages/shared/src/constants.ts` so CI and fresh clones work without an `.env`. The deploy script (`HelperConfig.s.sol`) reads the same names via `vm.envOr(...)` and constructor-injects them; contracts retain `onlyOwner` setters for live tuning. See [changes/CORRELATION.md](changes/CORRELATION.md) for the math.
+Pricing knobs are configured via `.env` as non-sensitive `NEXT_PUBLIC_*` variables. They drive both the off-chain quote engine and the on-chain pricing math, with hardcoded fallbacks in `packages/shared/src/constants.ts` so CI and fresh clones work without an `.env`. The deploy script (`HelperConfig.s.sol`) reads the same names via `vm.envOr(...)` and constructor-injects them; contracts retain `onlyOwner` setters for live tuning. See [changes/B_SLOG_SPRINT.md](changes/B_SLOG_SPRINT.md) for the *why*; the math itself is documented in [`RISK_MODEL.md`](RISK_MODEL.md).
 
 | Variable | Default | Meaning |
 |---|---|---|

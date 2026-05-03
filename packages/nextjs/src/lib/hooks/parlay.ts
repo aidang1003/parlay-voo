@@ -5,6 +5,7 @@ import { useAccount, useReadContracts } from "wagmi";
 import { parseUnits, parseEventLogs } from "viem";
 import { ceilToCentRaw } from "@parlayvoo/shared";
 import { BUILDER_SUFFIX } from "../builder-code";
+import { fetchSignedQuote, toQuoteArg } from "../quote/sign-fetch";
 import { useDeployedContract } from "./useDeployedContract";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 
@@ -76,43 +77,9 @@ export function useBuyTicket() {
     try {
       const stakeAmount = parseUnits(stakeUsdc.toString(), 6);
 
-      // Fetch a fresh EIP-712 signed Quote from our backend. Short TTL (60s)
-      // bounds price staleness; the engine verifies sig+nonce+deadline+buyer.
-      const quoteRes = await fetch("/api/quote-sign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          buyer: address,
-          stake: stakeAmount.toString(),
-          legs,
-        }),
-      });
-      if (!quoteRes.ok) {
-        const msg = await quoteRes.text();
-        throw new Error(`Quote sign failed: ${msg}`);
-      }
-      const { quote, signature } = (await quoteRes.json()) as {
-        quote: {
-          buyer: `0x${string}`;
-          stake: string;
-          legs: Array<{
-            sourceRef: string;
-            outcome: `0x${string}`;
-            probabilityPPM: string;
-            cutoffTime: string;
-            earliestResolve: string;
-            oracleAdapter: `0x${string}`;
-          }>;
-          deadline: string;
-          nonce: string;
-        };
-        signature: `0x${string}`;
-      };
+      const { quote, signature } = await fetchSignedQuote(address, stakeAmount, legs);
 
-      // Round the approval up to the next $0.01 so a sub-cent drift between
-      // the UI display and the parsed bigint can never starve the engine's
-      // safeTransferFrom of allowance. The ticket itself still consumes the
-      // exact `quote.stake` value the backend signed.
+      // round approval up so sub-cent drift can't starve engine's safeTransferFrom
       const approveAmount = ceilToCentRaw(stakeAmount);
       const approveHash = await writeContractAsync({
         address: usdc.address,
@@ -129,26 +96,11 @@ export function useBuyTicket() {
       setIsPending(false);
       setIsConfirming(true);
 
-      const quoteArg = {
-        buyer: quote.buyer,
-        stake: BigInt(quote.stake),
-        legs: quote.legs.map((l) => ({
-          sourceRef: l.sourceRef,
-          outcome: l.outcome,
-          probabilityPPM: BigInt(l.probabilityPPM),
-          cutoffTime: BigInt(l.cutoffTime),
-          earliestResolve: BigInt(l.earliestResolve),
-          oracleAdapter: l.oracleAdapter,
-        })),
-        deadline: BigInt(quote.deadline),
-        nonce: BigInt(quote.nonce),
-      };
-
       const buyHash = await writeContractAsync({
         address: engine.address,
         abi: engine.abi,
         functionName: "buyTicketSigned",
-        args: [quoteArg, signature],
+        args: [toQuoteArg(quote), signature],
         dataSuffix: BUILDER_SUFFIX,
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
@@ -157,9 +109,7 @@ export function useBuyTicket() {
         throw new Error("Transaction reverted on-chain");
       }
 
-      // Parse TicketPurchased event from receipt to get the actual ticket ID.
-      // Cast the decoded args because the generated ABI is not `as const`, so
-      // viem cannot infer per-event arg types from a widened `Abi`.
+      // cast decoded args — generated ABI isn't `as const`, viem can't infer event types
       const purchaseEvents = parseEventLogs({
         abi: engine.abi,
         logs: receipt.logs,
@@ -192,12 +142,7 @@ export function useBuyTicket() {
   };
 }
 
-/**
- * Lossless parlay purchase: spends promo credit instead of USDC. No approval,
- * no token transfer — the engine charges credit via HouseVault.spendCredit and
- * reserves the payout against vault liquidity. Wins mint a PARTIAL lock; losses
- * simply burn the credit.
- */
+/** Spends promo credit, no USDC. Wins mint PARTIAL lock; losses burn credit. */
 export function useBuyLosslessParlay() {
   const publicClient = useContractClient();
   const { address } = useAccount();
@@ -229,60 +174,16 @@ export function useBuyLosslessParlay() {
     try {
       const stakeAmount = parseUnits(stakeUsdc.toString(), 6);
 
-      const quoteRes = await fetch("/api/quote-sign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          buyer: address,
-          stake: stakeAmount.toString(),
-          legs,
-        }),
-      });
-      if (!quoteRes.ok) {
-        const msg = await quoteRes.text();
-        throw new Error(`Quote sign failed: ${msg}`);
-      }
-      const { quote, signature } = (await quoteRes.json()) as {
-        quote: {
-          buyer: `0x${string}`;
-          stake: string;
-          legs: Array<{
-            sourceRef: string;
-            outcome: `0x${string}`;
-            probabilityPPM: string;
-            cutoffTime: string;
-            earliestResolve: string;
-            oracleAdapter: `0x${string}`;
-          }>;
-          deadline: string;
-          nonce: string;
-        };
-        signature: `0x${string}`;
-      };
+      const { quote, signature } = await fetchSignedQuote(address, stakeAmount, legs);
 
       setIsPending(false);
       setIsConfirming(true);
-
-      const quoteArg = {
-        buyer: quote.buyer,
-        stake: BigInt(quote.stake),
-        legs: quote.legs.map((l) => ({
-          sourceRef: l.sourceRef,
-          outcome: l.outcome,
-          probabilityPPM: BigInt(l.probabilityPPM),
-          cutoffTime: BigInt(l.cutoffTime),
-          earliestResolve: BigInt(l.earliestResolve),
-          oracleAdapter: l.oracleAdapter,
-        })),
-        deadline: BigInt(quote.deadline),
-        nonce: BigInt(quote.nonce),
-      };
 
       const buyHash = await writeContractAsync({
         address: engine.address,
         abi: engine.abi,
         functionName: "buyLosslessParlay",
-        args: [quoteArg, signature],
+        args: [toQuoteArg(quote), signature],
         dataSuffix: BUILDER_SUFFIX,
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });

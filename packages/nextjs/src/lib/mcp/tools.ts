@@ -22,6 +22,7 @@ import type { RiskProfile, Market, Leg } from "@parlayvoo/shared";
 import deployedContracts from "../../contracts/deployedContracts";
 import { fetchMarketsFromDb, parsePolySourceRef } from "../polymarket/markets";
 import { getRegisteredActiveMarkets } from "../db/client";
+import { RISK_CAPS } from "../risk";
 
 const chainId = Number(
   process.env.NEXT_PUBLIC_CHAIN_ID ?? String(BASE_SEPOLIA_CHAIN_ID),
@@ -31,7 +32,6 @@ const rpcUrl = getRpcUrl(chainId);
 
 const client = createPublicClient({ chain, transport: http(rpcUrl) });
 
-// Addresses + ABIs pinned by NEXT_PUBLIC_CHAIN_ID, falling back to first available chain.
 const chainContracts =
   (deployedContracts[chainId as keyof typeof deployedContracts] ??
     Object.values(deployedContracts)[0]) as Record<string, { address: `0x${string}`; abi: Abi }>;
@@ -48,9 +48,7 @@ const addr = {
   usdc: chainContracts.MockUSDC?.address ?? ZERO_ADDRESS,
 };
 
-// Seed legs are static, keyed by catalog ID 1..21. Polymarket legs are merged
-// in on demand via refreshLegMap() — they're keyed by their on-chain leg ID,
-// which is disjoint from the seed catalog range.
+// seed legs (1..21) are static; polymarket legs merge in via refreshLegMap()
 export const LEG_MAP = new Map<number, Leg & { category: string }>();
 for (const m of SEED_MARKETS) {
   for (const leg of m.legs) {
@@ -58,9 +56,7 @@ for (const m of SEED_MARKETS) {
   }
 }
 
-/** Refresh LEG_MAP with Polymarket legs from the DB. Clears stale polymarket
- *  entries before repopulating so deactivated markets disappear. Seed legs
- *  (IDs < SEED_CATALOG_MAX) are immutable and never removed. */
+/** Re-merges polymarket entries; seed IDs (≤ SEED_CATALOG_MAX) are immutable. */
 const SEED_CATALOG_MAX = 21;
 export async function refreshLegMap(): Promise<void> {
   for (const id of LEG_MAP.keys()) {
@@ -72,7 +68,6 @@ export async function refreshLegMap(): Promise<void> {
       if (row.txtsource !== "polymarket") continue;
       const parsed = parsePolySourceRef(row.txtsourceref);
       if (!parsed) continue;
-      // Each market row is a flat pair: emit a LEG_MAP entry per registered side.
       if (row.intyeslegid != null) {
         LEG_MAP.set(row.intyeslegid, {
           id: row.intyeslegid,
@@ -99,16 +94,10 @@ export async function refreshLegMap(): Promise<void> {
       }
     }
   } catch (e) {
-    // DB unreachable shouldn't break seed-only quoting. Log and fall back.
+    // DB unreachable falls back to seed-only quoting
     console.warn("[refreshLegMap] polymarket DB read failed:", e instanceof Error ? e.message : e);
   }
 }
-
-const RISK_CAPS: Record<RiskProfile, { maxKelly: number; maxLegs: number; minWinProb: number }> = {
-  conservative: { maxKelly: 0.05, maxLegs: 3, minWinProb: 0.15 },
-  moderate: { maxKelly: 0.15, maxLegs: 4, minWinProb: 0.05 },
-  aggressive: { maxKelly: 1.0, maxLegs: 5, minWinProb: 0.0 },
-};
 
 export async function listMarkets(input: { category?: string }): Promise<{
   markets: Array<{
@@ -426,9 +415,7 @@ export async function assessRisk(input: {
     warnings.push(`Win probability ${(winProbability * 100).toFixed(2)}% is below moderate minimum of ${(caps.minWinProb * 100).toFixed(0)}%`);
   }
 
-  // Loose category-overlap heuristic — surfaces a soft signal when multiple
-  // legs share a category (independent of the on-chain correlationGroupId,
-  // which is the authoritative source).
+  // soft signal only — on-chain correlationGroupId is authoritative
   const catCounts: Record<string, number> = {};
   for (const cat of categories) {
     catCounts[cat] = (catCounts[cat] || 0) + 1;

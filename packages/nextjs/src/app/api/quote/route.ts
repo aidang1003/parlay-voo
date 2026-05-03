@@ -2,24 +2,23 @@ import { NextResponse } from "next/server";
 import { getQuote, LEG_MAP, refreshLegMap } from "@/lib/mcp/tools";
 import { parsePolySourceRef } from "@/lib/polymarket/markets";
 
-/**
- * POST /api/quote -- compute a parlay quote from leg IDs + stake.
- *
- * Security invariant: reject any parlay that contains both YES and NO of the
- * same Polymarket condition. Such a parlay is risk-free (one side always wins)
- * which would let a user drain house edge for free.
- */
+// Rejects YES+NO of the same condition — that parlay is risk-free and would drain house edge.
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { legIds, stake } = body as { legIds: number[]; stake: number };
+    const body = (await req.json()) as { legIds?: unknown; stake?: unknown };
+    const { legIds: legIdsRaw, stake } = body;
 
-    if (!Array.isArray(legIds) || typeof stake !== "number") {
+    if (
+      !Array.isArray(legIdsRaw) ||
+      !legIdsRaw.every((id): id is number => typeof id === "number") ||
+      typeof stake !== "number"
+    ) {
       return NextResponse.json(
         { error: "legIds (number[]) and stake (number) are required" },
         { status: 400 },
       );
     }
+    const legIds: number[] = legIdsRaw;
 
     const guardError = await checkComplementaryLegs(legIds);
     if (guardError) {

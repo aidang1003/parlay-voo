@@ -65,7 +65,7 @@ contract HelperConfig is CodeConstants, Script {
         /// Deployer / broadcast signing key. Read from env for real chains,
         /// falls back to the Anvil default key locally.
         uint256 deployerKey;
-        /// Per-leg multiplicative protocol fee (BPS). See CORRELATION.md.
+        /// Per-leg multiplicative protocol fee (BPS). See docs/changes/B_SLOG_SPRINT.md.
         uint256 protocolFeeBps;
         /// Correlation asymptote `D` (BPS).
         uint256 corrAsymptoteBps;

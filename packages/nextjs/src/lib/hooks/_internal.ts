@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useChainId, usePublicClient, useWriteContract } from "wagmi";
 import type { Abi } from "viem";
-import { CHAINS, type SupportedChainId } from "@parlayvoo/shared";
 import type { SupportedDeployedChainId } from "../../contracts/deployedContracts";
+import { BUILDER_SUFFIX } from "../builder-code";
 
 /**
  * Resolves the chain this app reads AND writes against: `NEXT_PUBLIC_CHAIN_ID`
@@ -40,23 +40,84 @@ export function usePinnedWriteContract() {
   return { ...wagmi, writeContractAsync, chainId };
 }
 
-/**
- * Throws a readable error when a `useDeployedContract` lookup returned
- * `undefined` (contract missing on the pinned chain). Mirrors the guard
- * pattern in `useMintTestUSDC`.
- */
-export function assertDeployed<T extends { address: `0x${string}`; abi: Abi }>(
-  contract: T | undefined,
-  label: string,
-  chainId: number,
-): T {
-  if (!contract) {
-    const name = CHAINS[chainId as SupportedChainId]?.name ?? `chain ${chainId}`;
-    throw new Error(`${label} is not deployed on ${name}`);
-  }
-  return contract;
-}
-
 /** Stable empty ABI for `useReadContract`/`useReadContracts` while a contract
  *  lookup is pending. Wagmi requires an `abi` value even when `enabled: false`. */
 export const EMPTY_ABI: Abi = [];
+
+export interface WriteTxState {
+  hash: `0x${string}` | undefined;
+  isPending: boolean;
+  isConfirming: boolean;
+  isSuccess: boolean;
+  error: Error | null;
+}
+
+export interface RunWriteTxArgs {
+  address: `0x${string}`;
+  abi: Abi;
+  functionName: string;
+  args?: readonly unknown[];
+  /** Override the human label baked into thrown errors. Defaults to `functionName`. */
+  label?: string;
+}
+
+/** Shared state machine for "send a write, wait for receipt, expose flags".
+ *  Replaces the ~30-line copy-pasted pattern in settle/claim/cashout/etc.
+ *  Returns `true` on success, `false` on revert or thrown error (error is set
+ *  on `state.error`). Caller is responsible for guarding pre-conditions
+ *  (contract loaded, user connected) before calling `run`. */
+export function useWriteTx(): WriteTxState & { run: (args: RunWriteTxArgs) => Promise<boolean>; reset: () => void } {
+  const publicClient = useContractClient();
+  const { writeContractAsync } = usePinnedWriteContract();
+  const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
+  const [isPending, setIsPending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const run = useCallback(
+    async ({ address, abi, functionName, args, label }: RunWriteTxArgs): Promise<boolean> => {
+      if (!publicClient) return false;
+      setIsPending(true);
+      setIsConfirming(false);
+      setIsSuccess(false);
+      setError(null);
+      setHash(undefined);
+      try {
+        const txHash = await writeContractAsync({
+          address,
+          abi,
+          functionName,
+          args: args as never,
+          dataSuffix: BUILDER_SUFFIX,
+        });
+        setHash(txHash);
+        setIsPending(false);
+        setIsConfirming(true);
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        if (receipt.status === "reverted") {
+          throw new Error(`${label ?? functionName} reverted on-chain`);
+        }
+        setIsConfirming(false);
+        setIsSuccess(true);
+        return true;
+      } catch (err) {
+        console.error(`${label ?? functionName} failed:`, err);
+        setError(err instanceof Error ? err : new Error(String(err)));
+        return false;
+      } finally {
+        setIsPending(false);
+        setIsConfirming(false);
+      }
+    },
+    [publicClient, writeContractAsync],
+  );
+
+  const reset = useCallback(() => {
+    setIsSuccess(false);
+    setError(null);
+    setHash(undefined);
+  }, []);
+
+  return { hash, isPending, isConfirming, isSuccess, error, run, reset };
+}

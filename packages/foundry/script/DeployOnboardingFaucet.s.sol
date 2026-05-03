@@ -9,7 +9,7 @@ import {CodeConstants} from "./HelperConfig.s.sol";
 /// @notice Standalone deploy for the testnet onboarding faucet. Excluded from Deploy.s.sol —
 ///         the faucet is operationally distinct from the protocol so a redeploy of the protocol
 ///         does not reset the per-address `claimed` map. Funded + owned by QUOTE_SIGNER (hot key)
-///         so the cold deployer key can stay offline. See docs/changes/ONBOARDING.md.
+///         so the cold deployer key can stay offline. See docs/changes/B_SLOG_SPRINT.md.
 ///
 /// Usage:
 ///   pnpm deploy:faucet:local

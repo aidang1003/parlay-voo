@@ -3,9 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import type { Log } from "viem";
-import { BUILDER_SUFFIX } from "../builder-code";
 import { useDeployedContract } from "./useDeployedContract";
-import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
+import { EMPTY_ABI, useContractClient, useWriteTx } from "./_internal";
 
 export interface OnChainTicket {
   buyer: `0x${string}`;
@@ -380,157 +379,49 @@ export function useTicketActivity({ limit = 100 }: { limit?: number } = {}) {
 }
 
 export function useSettleTicket() {
-  const publicClient = useContractClient();
   const engine = useDeployedContract("ParlayEngine");
-  const { writeContractAsync } = usePinnedWriteContract();
-  const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
-  const [isPending, setIsPending] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const settle = async (ticketId: bigint): Promise<boolean> => {
-    if (!publicClient || !engine) return false;
-
-    setIsPending(true);
-    setIsConfirming(false);
-    setIsSuccess(false);
-    setError(null);
-    setHash(undefined);
-
-    try {
-      const txHash = await writeContractAsync({
-        address: engine.address,
-        abi: engine.abi,
-        functionName: "settleTicket",
-        args: [ticketId],
-        dataSuffix: BUILDER_SUFFIX,
-      });
-      setHash(txHash);
-
-      setIsPending(false);
-      setIsConfirming(true);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status === "reverted") {
-        throw new Error("Settle transaction reverted on-chain");
-      }
-
-      setIsConfirming(false);
-      setIsSuccess(true);
-      return true;
-    } catch (err) {
-      console.error("Settle ticket failed:", err);
-      setError(err instanceof Error ? err : new Error(String(err)));
-      return false;
-    } finally {
-      setIsPending(false);
-      setIsConfirming(false);
-    }
+  const tx = useWriteTx();
+  const settle = (ticketId: bigint): Promise<boolean> => {
+    if (!engine) return Promise.resolve(false);
+    return tx.run({
+      address: engine.address,
+      abi: engine.abi,
+      functionName: "settleTicket",
+      args: [ticketId],
+      label: "Settle ticket",
+    });
   };
-
-  return { settle, hash, isPending, isConfirming, isSuccess, error };
+  return { settle, hash: tx.hash, isPending: tx.isPending, isConfirming: tx.isConfirming, isSuccess: tx.isSuccess, error: tx.error };
 }
 
 export function useClaimPayout() {
-  const publicClient = useContractClient();
   const engine = useDeployedContract("ParlayEngine");
-  const { writeContractAsync } = usePinnedWriteContract();
-  const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
-  const [isPending, setIsPending] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const claim = async (ticketId: bigint): Promise<boolean> => {
-    if (!publicClient || !engine) return false;
-
-    setIsPending(true);
-    setIsConfirming(false);
-    setIsSuccess(false);
-    setError(null);
-    setHash(undefined);
-
-    try {
-      const txHash = await writeContractAsync({
-        address: engine.address,
-        abi: engine.abi,
-        functionName: "claimPayout",
-        args: [ticketId],
-        dataSuffix: BUILDER_SUFFIX,
-      });
-      setHash(txHash);
-
-      setIsPending(false);
-      setIsConfirming(true);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status === "reverted") {
-        throw new Error("Claim payout transaction reverted on-chain");
-      }
-
-      setIsConfirming(false);
-      setIsSuccess(true);
-      return true;
-    } catch (err) {
-      console.error("Claim payout failed:", err);
-      setError(err instanceof Error ? err : new Error(String(err)));
-      return false;
-    } finally {
-      setIsPending(false);
-      setIsConfirming(false);
-    }
+  const tx = useWriteTx();
+  const claim = (ticketId: bigint): Promise<boolean> => {
+    if (!engine) return Promise.resolve(false);
+    return tx.run({
+      address: engine.address,
+      abi: engine.abi,
+      functionName: "claimPayout",
+      args: [ticketId],
+      label: "Claim payout",
+    });
   };
-
-  return { claim, hash, isPending, isConfirming, isSuccess, error };
+  return { claim, hash: tx.hash, isPending: tx.isPending, isConfirming: tx.isConfirming, isSuccess: tx.isSuccess, error: tx.error };
 }
 
 export function useCashoutEarly() {
-  const publicClient = useContractClient();
   const engine = useDeployedContract("ParlayEngine");
-  const { writeContractAsync } = usePinnedWriteContract();
-  const [hash, setHash] = useState<`0x${string}` | undefined>(undefined);
-  const [isPending, setIsPending] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const cashoutEarly = async (ticketId: bigint, minOut: bigint = 0n): Promise<boolean> => {
-    if (!publicClient || !engine) return false;
-
-    setIsPending(true);
-    setIsConfirming(false);
-    setIsSuccess(false);
-    setError(null);
-    setHash(undefined);
-
-    try {
-      const txHash = await writeContractAsync({
-        address: engine.address,
-        abi: engine.abi,
-        functionName: "cashoutEarly",
-        args: [ticketId, minOut],
-        dataSuffix: BUILDER_SUFFIX,
-      });
-      setHash(txHash);
-
-      setIsPending(false);
-      setIsConfirming(true);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status === "reverted") {
-        throw new Error("Early cashout reverted on-chain");
-      }
-
-      setIsConfirming(false);
-      setIsSuccess(true);
-      return true;
-    } catch (err) {
-      console.error("Early cashout failed:", err);
-      setError(err instanceof Error ? err : new Error(String(err)));
-      return false;
-    } finally {
-      setIsPending(false);
-      setIsConfirming(false);
-    }
+  const tx = useWriteTx();
+  const cashoutEarly = (ticketId: bigint, minOut: bigint = 0n): Promise<boolean> => {
+    if (!engine) return Promise.resolve(false);
+    return tx.run({
+      address: engine.address,
+      abi: engine.abi,
+      functionName: "cashoutEarly",
+      args: [ticketId, minOut],
+      label: "Early cashout",
+    });
   };
-
-  return { cashoutEarly, hash, isPending, isConfirming, isSuccess, error };
+  return { cashoutEarly, hash: tx.hash, isPending: tx.isPending, isConfirming: tx.isConfirming, isSuccess: tx.isSuccess, error: tx.error };
 }

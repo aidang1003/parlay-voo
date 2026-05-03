@@ -1,23 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildLegs, LegBuildError, type LegInput } from "@/lib/quote/build-legs";
 
-/**
- * POST /api/quote-preview
- *
- * Returns live pricing for a draft ticket WITHOUT producing an EIP-712
- * signature. Called every ~30s by the parlay builder while legs are staged
- * but the buy flow hasn't started — lets the UI reflect the current CLOB mid
- * instead of whatever PPM was cached when the market loaded.
- *
- * Request body:
- *   { legs: [{ sourceRef: string, side: "yes" | "no" }] }
- *
- * Response body:
- *   { legs: [{ sourceRef, side, probabilityPPM, cutoffTime, earliestResolve }] }
- *
- * Errors out with LegBuildError.status if any leg is unknown or missing the
- * requested side (same semantics as /api/quote-sign).
- */
+// POST /api/quote-preview — live pricing for a draft ticket, no signature. Builder polls this ~30s.
 interface PreviewBody {
   legs: LegInput[];
 }

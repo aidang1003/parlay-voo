@@ -6,8 +6,6 @@ import { usePathname } from "next/navigation";
 
 const FTUE_ROUTE = "/parlay";
 
-// ── FTUE Hook ──────────────────────────────────────────────────────────
-
 interface FTUEStep {
   targetId: string;
   title: string;
@@ -31,8 +29,6 @@ const STEPS: FTUEStep[] = [
 ];
 
 const STORAGE_KEY = "ftue:completed";
-
-// ── Shared Context ─────────────────────────────────────────────────────
 
 interface FTUEState {
   active: boolean;
@@ -66,10 +62,7 @@ function useFTUEInternal(): FTUEState {
   const [stepIndex, setStepIndex] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
-  // Only activate on the parlay route. Without this gate the auto-advance
-  // grace period would silently walk through every step on /onboarding (where
-  // none of the targets exist) and mark the FTUE complete before the user
-  // ever reaches /parlay.
+  // gate to /parlay — auto-advance would otherwise skip every step on /onboarding
   useEffect(() => {
     if (pathname !== FTUE_ROUTE) {
       setRunning(false);
@@ -122,9 +115,7 @@ function useFTUEInternal(): FTUEState {
     } catch {
       // sessionStorage unavailable
     }
-    // Only start running if we're on the FTUE route. Otherwise just clear
-    // storage — the pathname effect will start the tour once the user lands
-    // on /parlay.
+    // off-route: just clear storage; the pathname effect starts the tour once user lands
     if (pathname === FTUE_ROUTE) {
       setRunning(true);
       setStepIndex(0);
@@ -137,8 +128,6 @@ function useFTUEInternal(): FTUEState {
   return { active, stepIndex, steps: STEPS, currentStep, next, prev, skip, restart };
 }
 
-// ── Spotlight Component ────────────────────────────────────────────────
-
 interface SpotlightRect {
   top: number;
   left: number;
@@ -150,15 +139,13 @@ export function FTUESpotlight() {
   const { active, stepIndex, steps, currentStep, next, prev, skip } = useFTUE();
   const [rect, setRect] = useState<SpotlightRect | null>(null);
   const rafRef = useRef<number>(0);
-  // Track when portal target (document.body) is available — only true on the
-  // client. Without this guard, SSR would try to portal during render.
+  // SSR guard: portal target unavailable on server
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Track whether the target element exists on the current page
   const [targetExists, setTargetExists] = useState(false);
 
-  // Measure target element position (compare before setState to avoid 60fps re-renders)
+  // compare before setState to avoid 60fps re-renders
   const prevRectRef = useRef<SpotlightRect | null>(null);
 
   useEffect(() => {
@@ -174,7 +161,7 @@ export function FTUESpotlight() {
     let advanced = false;
     let frameCount = 0;
     function measure() {
-      // Throttle: measure every 10th frame (~6fps) instead of every frame (60fps)
+      // throttle to ~6fps
       frameCount++;
       if (frameCount % 10 !== 1) {
         rafRef.current = requestAnimationFrame(measure);
@@ -201,9 +188,7 @@ export function FTUESpotlight() {
         setTargetExists(false);
         prevRectRef.current = null;
         setRect(null);
-        // Auto-advance after a 1.5s grace period when the target never appears.
-        // Fixes the case where a step targets an element that only mounts after
-        // user interaction (e.g. parlay-panel renders after a leg is selected).
+        // 1.5s grace then auto-advance — handles steps targeting elements that mount on interaction
         if (!everFound && !advanced && Date.now() - stepStart > 1500) {
           advanced = true;
           next();
@@ -217,16 +202,13 @@ export function FTUESpotlight() {
     return () => cancelAnimationFrame(rafRef.current);
   }, [active, currentStep, next]);
 
-  // Don't render anything if FTUE inactive or target element not on current page
   if (!active || !currentStep) return null;
   if (!targetExists) return null;
-  if (!mounted) return null; // portal target unavailable on server
+  if (!mounted) return null;
 
   const tooltipPosition = currentStep.position ?? "bottom";
 
-  // Portal to document.body so the tooltip + cutout escape any ancestor that
-  // might be creating a stacking context (transform, filter, backdrop-filter
-  // — including ConnectKit's wrappers and the layout's `relative z-10` shell).
+  // portal to body — escapes ConnectKit + layout stacking contexts (transform/filter/backdrop-filter)
   return createPortal(
     <>
       {/* Spotlight cutout */}

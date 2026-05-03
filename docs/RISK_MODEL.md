@@ -35,7 +35,7 @@ Correlation moved out of Level 2 and into the live pricing path. Legs sharing a 
 discount(n) = D × (n − 1) / (n − 1 + k)
 ```
 
-with defaults D = 80% (`CORRELATION_ASYMPTOTE_BPS = 8000`) and k = 1.0 (`CORRELATION_HALF_SAT_PPM = 1_000_000`). Per-group hard cap (`MAX_LEGS_PER_GROUP`, default 3) prevents extreme stacks. Mutual exclusion is enforced at both UI and contract layers. See [changes/CORRELATION.md](changes/CORRELATION.md) for the full spec.
+with defaults D = 80% (`CORRELATION_ASYMPTOTE_BPS = 8000`) and k = 1.0 (`CORRELATION_HALF_SAT_PPM = 1_000_000`). Per-group hard cap (`MAX_LEGS_PER_GROUP`, default 3) prevents extreme stacks. Mutual exclusion is enforced at both UI and contract layers. See [changes/B_SLOG_SPRINT.md](changes/B_SLOG_SPRINT.md) for the *why*.
 
 ## Level 2 (post-hackathon)
 

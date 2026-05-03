@@ -2,16 +2,7 @@ import type { Market, Leg } from "@parlayvoo/shared";
 import { PPM } from "@parlayvoo/shared";
 import { getActiveMarkets, type MarketRow } from "@/lib/db/client";
 
-/**
- * Build Market[] for /api/markets from the pivoted getActiveMarkets query.
- * One DB round-trip returns one row per txtsourceref with yes/no sides
- * flattened into columns. Each Market carries a single Leg whose `id`/`noId`
- * identify the two on-chain legs (seed markets omit noId so the Yes/No card
- * renders the No button only when it's meaningful).
- *
- * DB rows are the source of truth for display. A price/leg-id verification
- * runs later at parlay checkout; this layer doesn't gate on on-chain status.
- */
+/** One row per sourceRef with yes/no flattened. Display only — checkout re-verifies prices/leg-ids on-chain. */
 export async function fetchMarketsFromDb(): Promise<Market[]> {
   const rows = await getActiveMarkets();
   if (rows.length === 0) return [];
@@ -50,10 +41,7 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
 function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
   const yesId = row.intyeslegid ?? nextSyntheticId();
   const corrId = row.txtgamegroup ? stableHash32(`game:${row.txtgamegroup}`) : 0;
-  // bigexclusiongroup is the pre-hashed group id: the sync route runs
-  // `stableHash32("negrisk:" + eventId)` once on insert. The frontend gate
-  // and the on-chain check both compare numeric equality, so we just pass
-  // the raw value through here.
+  // pre-hashed by sync route on insert
   const exclusionId = row.bigexclusiongroup ?? 0;
   const leg: Leg = {
     id: yesId,
@@ -73,22 +61,17 @@ function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
   return leg;
 }
 
-/** FNV-1a 32-bit hash of a string. Stable across runs and platforms; used to
- *  turn a string group key (Polymarket gameGroup or negRisk eventId) into the
- *  numeric group id the on-chain registry expects. Exported so the sync route
- *  hashes negRisk event ids the same way `rowToLeg` would. */
+/** FNV-1a 32-bit hash. Used by both this file and sync route — must match. */
 export function stableHash32(input: string): number {
-  let h = 0x811c9dc5; // FNV offset basis
+  let h = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
     h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0; // FNV prime, keep unsigned
+    h = Math.imul(h, 0x01000193) >>> 0;
   }
   return h >>> 0;
 }
 
-/** Polymarket sourceRefs are the raw conditionId: a 0x-prefixed 32-byte hex.
- *  Seed refs look like `seed:<id>`. Shape-sniff so callers can branch without
- *  threading the `txtsource` column through every surface. */
+/** Shape-sniff polymarket conditionId vs `seed:<id>` without threading txtsource everywhere. */
 export function parsePolySourceRef(sourceRef: string): { conditionId: string } | null {
   if (!/^0x[0-9a-fA-F]{64}$/.test(sourceRef)) return null;
   return { conditionId: sourceRef };

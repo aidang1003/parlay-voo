@@ -12,14 +12,14 @@ Traditional sportsbooks and prediction markets are one-shot: place a bet, wait, 
 
 ## Startup objectives
 
-The list below is the working target the repo is pointed at. Items in `docs/A-DAY.md` are the current sprint backlog; this list is the longer-horizon view.
+The list below is the working target the repo is pointed at. The chronological story of how we got here lives in `docs/changes/` (`A_DAY_SPRINT.md`, `B_SLOG_SPRINT.md`); deferred work lives in `docs/changes/BACKLOG.md`.
 
 ### 1. Ship a crash-parlay product users actually keep open
 
 - Live multiplier climb during leg resolution — the core differentiator vs. every other on-chain book
 - Early cashout with real slippage protection (`minOut`, priced via `ParlayMath.computeCashoutValue`)
 - Three payout modes (Classic / Progressive / EarlyCashout) so users pick their own risk curve
-- Frontend latency good enough that the rocket *feels* live (see scaling backlog in `docs/A-DAY.md`)
+- Frontend latency good enough that the rocket *feels* live (private RPC + batched reads — recap in `docs/changes/A_DAY_SPRINT.md`)
 
 ### 2. Make LP economics credible enough that real capital shows up
 
@@ -34,7 +34,7 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 
 - Legs now come from a curated Polymarket sync (`pnpm db:sync`), not a hand-written seed
 - JIT parlay engine: legs are only registered on-chain at ticket-acceptance time, pricing against the freshest odds (see `packages/foundry/src/core/ParlayEngine.sol` — `buyTicketSigned` is the only buy path)
-- Next target: live settlement against the same Polymarket feed, removing the admin-oracle crutch
+- Live settlement runs daily off the same Polymarket feed via `/api/settlement/run`
 
 ### 4. Make autonomous agents a first-class user
 
@@ -47,7 +47,7 @@ The list below is the working target the repo is pointed at. Items in `docs/A-DA
 - No owner drain paths; owner changes parameters, never moves user or LP funds
 - Permissionless settlement — anyone can call `settleTicket()` once oracle data is in
 - 294 forge tests (unit / fuzz / invariant / integration) + vitest frontend tests gate every commit
-- Bootstrap admin oracle is time-boxed; production uses the propose/challenge OptimisticOracleAdapter
+- Mainnet oracle is `UmaOracleAdapter` (UMA Optimistic Oracle V3 wrapper); no `onlyOwner` function can mutate outcome state. `AdminOracleAdapter` exists for testnet QA and reverts on Base mainnet.
 
 ### 6. Operational: one deploy command, one env file
 

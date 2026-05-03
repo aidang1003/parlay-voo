@@ -18,16 +18,19 @@ Each change doc uses the two-part pattern:
 - **Part 1 — Human Spec.** What the change is, what it does, key design decisions, what the next contributor sees. Bullet-heavy, skimmable, no function signatures.
 - **Part 2 — AI Spec Sheet** (optional). Terse implementation reference for an LLM — file operations, dead references, invariants preserved. Add this only when the change has a mechanical implementation plan worth laying out. Keep it inline in the same file; change docs do **not** mirror into `llm-spec/`.
 
-Use `ARCH_REVIEW_2.md` as the template.
+Use `A_DAY_SPRINT.md` as the shape template (Part 1 narrative; bullet sections that lead with *why*).
 
 ## Filename convention
 
 `<SHORT_SLUG>.md` in SCREAMING_SNAKE_CASE. Examples:
-- `ARCH_REVIEW_2.md` — second round of architecture cleanup
-- `A_DAY_SCALING_SPRINT.md` — scaling-sprint working doc, archived here when the sprint ended
+- `A_DAY_SPRINT.md` — first heads-down sprint (scaling + arch cleanup + UX polish)
+- `B_SLOG_SPRINT.md` — second sprint (correlation engine + UMA oracle + onboarding + UX overhaul)
+- `BACKLOG.md` — deferred work + design sketches that haven't found a sprint yet
 - `REHAB_MODE_ROLLOUT.md` (hypothetical) — when a multi-phase feature lands and you want the story of how it rolled out
 
 No dates in filenames — commit history carries that. Order by opening the folder in git-log order if you need chronology.
+
+Sprint docs collapse multiple change docs once the work is done — keep the *why* behind each piece, drop the implementation detail (it lives in the architecture docs and the code itself).
 
 ## When the change lands
 

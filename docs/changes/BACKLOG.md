@@ -54,12 +54,12 @@ Lets users build massive multiplier parlays for excitement while protecting vaul
 
 **Problems:**
 1. **Stuck tickets.** If an oracle never resolves a leg, the ticket stays `Active` forever. Vault reserves remain locked, reducing free liquidity for new bets.
-2. **No admin override on optimistic paths.** `AdminOracleAdapter` can resolve manually, but if the production `OptimisticOracleAdapter` is the configured adapter for a leg, only its dispute/resolution flow can produce a result.
+2. **No admin override on UMA paths.** `AdminOracleAdapter` can resolve manually on testnets, but on mainnet legs are pinned to `UmaOracleAdapter` and only UMA's assertion/dispute/DVM flow can produce a result. If UMA itself is unavailable or assertions never get posted, there's no safety hatch.
 3. **No timeout mechanism.** No deadline after which an unresolved leg auto-voids or triggers an emergency path.
 
 **Proposed improvements:**
 - **Leg resolution timeout:** add `maxResolutionTime` per leg. If `block.timestamp > leg.earliestResolve + maxResolutionTime` and the leg is still `Unresolved`, anyone can call `voidStaleLeg(legId)` to force-void it. Unblocks settlement for all tickets referencing that leg.
-- **Emergency oracle fallback:** owner can set a fallback oracle adapter per leg that activates after the timeout. Could be `AdminOracleAdapter` as a last resort.
+- **Emergency oracle fallback:** owner can set a fallback oracle adapter per leg that activates after the timeout. On mainnet this would have to be a new dedicated adapter — `AdminOracleAdapter.resolve()` reverts on `block.chainid == 8453` by design, so it can't be the fallback there.
 - **Batch void for stuck tickets:** admin function to void all tickets older than a threshold that reference unresolved legs, releasing their reserves.
 - **Oracle health monitoring:** off-chain service that tracks unresolved legs past their `earliestResolve` and alerts the team.
 

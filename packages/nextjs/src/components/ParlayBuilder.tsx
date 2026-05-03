@@ -481,7 +481,7 @@ export function ParlayBuilder() {
     }
   }, [stake, stakeNum, useLossless]);
 
-  // legId → disabled reason; copy stays neutral per CORRELATION.md
+  // legId → disabled reason; copy stays neutral per docs/changes/B_SLOG_SPRINT.md
   const legGate = useMemo(() => {
     const gate = new Map<string, { reason: "conflict" | "groupCap"; conflictsWith?: string }>();
     if (selectedLegs.length === 0) return gate;
@@ -975,7 +975,7 @@ export function ParlayBuilder() {
             )}
           </div>
 
-          {/* fee + correlation baked into multiplier per CORRELATION.md */}
+          {/* fee + correlation baked into multiplier per docs/changes/B_SLOG_SPRINT.md */}
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-400">
               <span>Potential Payout</span>

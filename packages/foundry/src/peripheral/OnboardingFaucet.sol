@@ -8,7 +8,7 @@ interface IMintableUSDC {
 }
 
 /// @notice Testnet helper that drips ETH (one-shot per address) and mock USDC (24h cooldown).
-///         Operationally distinct from the protocol — see docs/changes/ONBOARDING.md.
+///         Operationally distinct from the protocol — see docs/changes/B_SLOG_SPRINT.md.
 contract OnboardingFaucet is Ownable {
     IMintableUSDC public immutable usdc;
 

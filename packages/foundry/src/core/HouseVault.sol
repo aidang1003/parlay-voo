@@ -60,7 +60,7 @@ contract HouseVault is ERC20, Ownable, Pausable, ReentrancyGuard {
     /// @notice Subtracted from totalAssets() so LP share price stays flat between loss and claim.
     uint256 public totalRehabClaimable;
 
-    /// @notice Correlation pricing knobs. See docs/changes/CORRELATION.md.
+    /// @notice Correlation pricing knobs. See docs/changes/B_SLOG_SPRINT.md.
     struct CorrelationConfig {
         uint256 corrAsymptoteBps;
         uint256 corrHalfSatPpm;

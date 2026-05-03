@@ -42,7 +42,7 @@ export interface MarketRow {
   bigcurationscore: number | null;
   txtgamegroup: string | null;
   /** Non-zero ⇒ this market is part of a mutually-exclusive group. Legs
-   *  sharing the same value cannot co-exist on a ticket (CORRELATION.md). */
+   *  sharing the same value cannot co-exist on a ticket (B_SLOG_SPRINT.md). */
   bigexclusiongroup: number | null;
   tscreatedat: string;
 }

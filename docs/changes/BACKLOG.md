@@ -92,23 +92,37 @@ ParlayEngine:
 
 ---
 
-## See also — deferred design docs
+## 6. Early-resolve tickets once a leg is lost
 
-Long-form deferred designs that don't fit the bullet shape above live as full change docs:
-
-- [`RFQ.md`](RFQ.md) — peer-to-peer parlay markets. Two-sided fills with the vault as maker-of-last-resort. Deferred until there's enough flow for an RFQ window to find takers, and a concrete maker-set answer. Design sketch only — no code planned.
+Once any leg in a ticket loses, the user has no chance of winning the parlay. The ticket should be resolvable immediately rather than waiting for every remaining leg to settle — frees vault reserves earlier and gives the user closure.
 
 ---
 
-## 6
-Once a leg is lost the ticket should be resolveable since the person has no chance of winning.
-Let them complete the ticket
+## 7. RFQ — peer-to-peer parlay markets
+
+**Status:** Design sketch only. No code planned.
+
+**Why this is on the radar.** Prediction markets are intentionally structured differently from a casino: every position has a peer on the other side, not a house. ParlayVoo today is closer to the casino end — users buy parlays priced off frozen Polymarket odds, and the LP vault is the sole counterparty. Fine while volumes are low; caps how big the protocol can grow without the vault carrying all of the directional risk.
+
+**The shape we'd want.** User builds a ticket; instead of immediate fill, the ticket broadcasts as an open RFQ; if no external counterparty steps up within some window, the vault fills it at its current price. The vault stops being the *primary* counterparty and becomes the **maker of last resort**.
+
+The simpler near-term variant the user landed on: the AMM pool always takes the other side at checkout and *then* opens the legs to the market — anyone who wants to buy the other end of a parlay can buy it from the vault at the original odds plus a fee. This shifts the AMM into a market-making role without needing a real RFQ window from day one.
+
+**Why deferred.** The 3-step flow is the easy part. Making it actually work requires answers to a stack of structural questions (maker set: pool-only / whitelisted MMs / permissionless? maker collateral model? RFQ unit: whole-parlay vs per-leg? quote lifetime? Polymarket anchor as guardrail or input? cashout in an RFQ world? LP earnings attribution?) and there's no point picking answers until we have:
+
+- Real ticket volume so an RFQ window has a non-trivial chance of finding a counterparty.
+- A clearer picture of who the makers actually are — one named MM willing to integrate beats a permissionless design with no participants.
+
+Without those, an RFQ implementation just adds a delay step before every ticket falls through to the vault anyway — strictly worse UX with no liquidity benefit. When the design is ready to implement, this entry gets rewritten as a real change doc with Part 1 / Part 2 split.
+
 ---
 
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
-2. Dynamic fee scaling — medium effort, strong DeFi mechanic.
-3. Dynamic max payout — medium effort, unlocks larger tickets.
-4. Jackpot pool — high effort, major feature expansion.
-5. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
+2. Early-resolve tickets once a leg is lost — quick win, frees reserves sooner.
+3. Dynamic fee scaling — medium effort, strong DeFi mechanic.
+4. Dynamic max payout — medium effort, unlocks larger tickets.
+5. Jackpot pool — high effort, major feature expansion.
+6. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
+7. RFQ — only when real flow + a concrete maker set are in hand.

@@ -164,7 +164,7 @@ Live NBA markets are fetched inline from BallDontLie (`packages/nextjs/src/lib/b
 
 ## Protocol Parameters
 
-Pricing knobs are configured via `.env` as non-sensitive `NEXT_PUBLIC_*` variables. They drive both the off-chain quote engine and the on-chain pricing math, with hardcoded fallbacks in `packages/shared/src/constants.ts` so CI and fresh clones work without an `.env`. The deploy script (`HelperConfig.s.sol`) reads the same names via `vm.envOr(...)` and constructor-injects them; contracts retain `onlyOwner` setters for live tuning. See [changes/CORRELATION.md](changes/CORRELATION.md) for the math.
+Pricing knobs are configured via `.env` as non-sensitive `NEXT_PUBLIC_*` variables. They drive both the off-chain quote engine and the on-chain pricing math, with hardcoded fallbacks in `packages/shared/src/constants.ts` so CI and fresh clones work without an `.env`. The deploy script (`HelperConfig.s.sol`) reads the same names via `vm.envOr(...)` and constructor-injects them; contracts retain `onlyOwner` setters for live tuning. See [changes/B_SLOG_SPRINT.md](changes/B_SLOG_SPRINT.md) for the *why*; the math itself is documented in [`RISK_MODEL.md`](RISK_MODEL.md).
 
 | Variable | Default | Meaning |
 |---|---|---|

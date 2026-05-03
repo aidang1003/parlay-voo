@@ -10,7 +10,7 @@ export const MAX_UTILIZATION_BPS = 8000;
 export const MAX_PAYOUT_BPS = 500;
 export const BASE_CASHOUT_PENALTY_BPS = 1500; // 15% base penalty, scaled by unresolved/total legs
 
-// Correlation engine knobs. See docs/changes/CORRELATION.md.
+// Correlation engine knobs. See docs/changes/B_SLOG_SPRINT.md.
 // `process.env.NEXT_PUBLIC_*` overrides at build/deploy time; tests + CI use the fallbacks.
 function envInt(name: string, fallback: number): number {
   const raw = typeof process !== "undefined" ? process.env?.[name] : undefined;

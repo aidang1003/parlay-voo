@@ -136,7 +136,7 @@ When editing a human doc that has a mirror, update both in the same commit. Refe
 
 Any architectural change (adding/removing a contract, reorganizing docs, retiring a shim, introducing a new subsystem) lands with a change doc in `docs/changes/`.
 
-- One file per change, named after the work (e.g. `ARCH_REVIEW_2.md`, `REHAB_MODE.md`).
+- One file per change, named after the work (e.g. `A_DAY_SPRINT.md`, `B_SLOG_SPRINT.md`, `REHAB_MODE.md`).
 - Structure mirrors subsystem docs: Part 1 (human spec) + Part 2 (inline AI spec sheet). Change docs do **not** get an `llm-spec/` mirror — AI detail stays inline.
 - Track concrete edits in a `### Change log` section at the bottom, one bullet per file-level change, as the work lands.
 - When a change doc lands an implemented feature, update the corresponding architecture or reference doc in the same commit.

@@ -81,7 +81,7 @@ CREATE TABLE tbpolymarketresolution (
 );
 ```
 
-Naming per the project's `tb` table / all-lowercase column convention (see `docs/changes/A_DAY_SCALING_SPRINT.md` item S-10).
+Naming per the project's `tb` table / all-lowercase column convention (see `docs/changes/A_DAY_SPRINT.md`).
 
 ## Route contracts
 

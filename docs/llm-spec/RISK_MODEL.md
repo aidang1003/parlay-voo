@@ -46,7 +46,7 @@ error FeeTooHigh(uint256 bps);
 
 Buy path: `_checkExclusion(legIds)` → `_aggregateGroupSizes(legIds)` (also enforces `maxLegsPerGroup`) → `ParlayMath.applyFee` → `ParlayMath.applyCorrelation` → reserve. Math mirrors `packages/shared/src/math.ts`.
 
-Defaults are env-driven via `NEXT_PUBLIC_PROTOCOL_FEE_BPS`, `NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS`, `NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM`, `NEXT_PUBLIC_MAX_LEGS_PER_GROUP` — see [../changes/CORRELATION.md](../changes/CORRELATION.md).
+Defaults are env-driven via `NEXT_PUBLIC_PROTOCOL_FEE_BPS`, `NEXT_PUBLIC_CORRELATION_ASYMPTOTE_BPS`, `NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM`, `NEXT_PUBLIC_MAX_LEGS_PER_GROUP` — see [../changes/B_SLOG_SPRINT.md](../changes/B_SLOG_SPRINT.md).
 
 ## Proposed Level 1 config (not yet on-chain)
 

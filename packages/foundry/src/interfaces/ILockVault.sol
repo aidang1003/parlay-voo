@@ -1,30 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @title ILockVault
-/// @notice Interface HouseVault uses to route fees and mint rehab positions.
-///         Implemented by LockVaultV2.
+/// @notice Surface HouseVault uses for fee routing + rehab positions. Implemented by LockVaultV2.
 interface ILockVault {
-    /// @notice Position classification.
-    /// - FULL    : voluntary LP lock, withdrawable at unlockAt, counts in fee-share weight.
-    /// - PARTIAL : credit-win lock, principal locked forever, earnings liquid.
-    /// - LEAST   : loss-driven rehab lock, principal burns at unlockAt.
+    /// @notice FULL: voluntary LP lock, withdraws at unlockAt, earns fees.
+    /// @notice PARTIAL: credit-win lock; principal locked forever, earnings liquid.
+    /// @notice LEAST: loss-driven rehab lock; principal burns at unlockAt.
     enum Tier {
         FULL,
         PARTIAL,
         LEAST
     }
 
-    /// @notice Notify the lock vault of fee income already transferred in.
-    ///         Called by the fee distributor (HouseVault) after pushing USDC.
+    /// @notice Caller (fee distributor) must transfer USDC in first.
     function notifyFees(uint256 amount) external;
 
-    /// @notice Record a rehab lock on behalf of `user`. Shares must already be
-    ///         approved for transfer from the caller (HouseVault). Only the
-    ///         associated HouseVault may call this.
-    /// @param user     Beneficiary of the locked position.
-    /// @param shares   VOO shares to lock.
-    /// @param duration Lock duration in seconds (applied differently per tier).
-    /// @param tier     PARTIAL or LEAST. FULL must be entered via `lock()`.
+    /// @notice HouseVault-only. tier must be PARTIAL or LEAST; FULL is entered via `lock()`.
     function rehabLock(address user, uint256 shares, uint256 duration, Tier tier) external;
 }

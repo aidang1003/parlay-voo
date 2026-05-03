@@ -1,21 +1,6 @@
-/**
- * Settlement pipeline (F-4). Shared by `/api/settlement/run` (cron-gated) and
- * `/api/settlement/trigger` (manual admin button). The pure pipeline lives
- * here so both entry points produce identical behavior.
- *
- * Phase A: relay Polymarket resolutions into the leg's on-chain oracle.
- *          - AdminOracleAdapter → single-tx `resolve(legId, status, outcome)`.
- *          - UmaOracleAdapter   → `assertOutcome(..., claim)`; separately
- *            settle mature assertions via `settleMature(legId)` on a later
- *            run, once UMA's liveness window has elapsed. (F-5)
- * Phase B: call ParlayEngine.settleTicket() for every active ticket whose
- *          legs are all oracle-resolvable.
- *
- * Idempotent: `tbpolymarketresolution` gates Phase A admin writes; pending
- * UMA assertions are tracked on-chain via `assertionByLeg`; already-settled
- * tickets are skipped in Phase B.
- */
-
+// Phase A: relay Polymarket resolutions on-chain (Admin → resolve(); UMA → assert + later settleMature).
+// Phase B: settleTicket() any active ticket whose legs are all resolvable.
+// Idempotent via tbpolymarketresolution + on-chain assertionByLeg + already-settled ticket skip.
 import {
   createPublicClient,
   createWalletClient,
@@ -47,8 +32,6 @@ import deployedContracts from "@/contracts/deployedContracts";
 import { encodeClaim, type ClaimOutcome } from "@/lib/uma/claim";
 import { TicketStatus, mapResolution } from "./run/lib";
 
-// ── Minimal ABIs ─────────────────────────────────────────────────────────
-
 const ADMIN_ORACLE_ABI = parseAbi([
   "function resolve(uint256 legId, uint8 status, bytes32 outcome)",
   "function canResolve(uint256 legId) view returns (bool)",
@@ -76,8 +59,6 @@ const ENGINE_ABI = parseAbi([
   "function settleTicket(uint256 ticketId)",
 ]);
 
-// ── Types ────────────────────────────────────────────────────────────────
-
 type ChainContracts = {
   AdminOracleAdapter: { address: `0x${string}` };
   UmaOracleAdapter?: { address: `0x${string}` };
@@ -91,8 +72,6 @@ export interface SettlementResult {
   skipped: number;
   errors: string[];
 }
-
-// ── Config ───────────────────────────────────────────────────────────────
 
 function resolveChainSetup() {
   const chainId = Number(
@@ -124,8 +103,6 @@ function resolveChainSetup() {
   return { chainId, rpcUrl, chain, contracts, pk };
 }
 
-// ── Pipeline entry ───────────────────────────────────────────────────────
-
 export async function runSettlement(): Promise<SettlementResult> {
   const cfg = resolveChainSetup();
   const account = privateKeyToAccount(cfg.pk);
@@ -151,8 +128,6 @@ export async function runSettlement(): Promise<SettlementResult> {
     errors: [...phaseA.errors, ...phaseB.errors],
   };
 }
-
-// ── Phase A ──────────────────────────────────────────────────────────────
 
 interface PhaseAResult {
   resolved: number;
@@ -320,8 +295,6 @@ async function resolveLegs(
 
   return out;
 }
-
-// ── Phase B ──────────────────────────────────────────────────────────────
 
 interface PhaseBResult {
   settled: number;

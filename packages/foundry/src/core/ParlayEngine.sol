@@ -15,16 +15,9 @@ import {LegRegistry} from "./LegRegistry.sol";
 import {ParlayMath} from "../libraries/ParlayMath.sol";
 import {IOracleAdapter, LegStatus} from "../interfaces/IOracleAdapter.sol";
 
-/// @title ParlayEngine
-/// @notice Core betting engine for ParlayCity. Users purchase parlay tickets
-///         (minted as ERC721 NFTs) by combining 2-5 legs. Tickets are settled
-///         via oracle adapters and payouts are disbursed from the HouseVault.
-///         Tickets have a single payout flow: hold to settle at full
-///         resolution, or exit early via cashoutEarly while no leg has Lost.
+/// @notice Core betting engine: 2-5 leg parlay tickets (ERC721), settled via oracle adapters, paid from HouseVault.
 contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
-
-    // ── Enums ────────────────────────────────────────────────────────────
 
     enum SettlementMode {
         FAST,
@@ -38,8 +31,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         Claimed
     }
 
-    // ── Structs ──────────────────────────────────────────────────────────
-
     struct Ticket {
         address buyer;
         uint256 stake;
@@ -51,29 +42,10 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         SettlementMode mode;
         TicketStatus status;
         uint256 createdAt;
-        bool isLossless; // credit-funded; winnings route to PARTIAL lock, losses burn credit only
+        bool isLossless;
     }
 
-    // ── Signed-quote types ───────────────────────────────────────────────
-    //
-    // Polymarket prices live off-chain (CLOB orderbook), so the engine accepts
-    // a short-lived EIP-712 Quote signed by a trusted backend signer. The
-    // server re-fetches each leg's mid-price, bakes our fee, and signs the
-    // resulting probabilities. The engine verifies the signature at buy time
-    // and snapshots the attested probabilities + oracle adapter onto the
-    // ticket so settlement/cashout never need a live registry read.
-
-    /// @notice One leg of a signed quote.
-    /// @param sourceRef Stable identifier of the underlying market
-    ///        (e.g. "0xabc..." conditionId for Polymarket or "seed:3").
-    /// @param outcome Bettor's side. 0x01 = yes, 0x02 = no.
-    /// @param probabilityPPM Yes-side implied probability (PPM). The engine
-    ///        applies the No-side complement internally when outcome == 0x02.
-    /// @param cutoffTime Leg cutoff. Must be > block.timestamp at buy.
-    /// @param earliestResolve Oracle earliest-resolve hint; passed through to
-    ///        LegRegistry on first create.
-    /// @param oracleAdapter Oracle adapter address for this leg. Snapshotted
-    ///        onto the ticket so settlement doesn't re-read the registry.
+    /// @notice One leg of a signed quote. outcome: 0x01 = yes, 0x02 = no (engine applies complement for No).
     struct SourceLeg {
         string sourceRef;
         bytes32 outcome;
@@ -83,14 +55,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         address oracleAdapter;
     }
 
-    /// @notice EIP-712 payload produced by /api/quote-sign.
-    /// @param buyer Address allowed to consume this quote. Prevents signed
-    ///        quotes from being replayed by other wallets.
-    /// @param stake Stake amount the quote was priced for. Binding so a
-    ///        backend price is valid only for the exact stake shown to the user.
-    /// @param legs Per-leg source data + attested probabilities.
-    /// @param deadline Unix timestamp after which the quote is invalid.
-    /// @param nonce Per-signer nonce; single-use.
+    /// @notice EIP-712 payload produced by /api/quote-sign. Bound to buyer + stake; nonce is single-use.
     struct Quote {
         address buyer;
         uint256 stake;
@@ -99,49 +64,36 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         uint256 nonce;
     }
 
-    /// @notice Per-leg data snapshotted onto a ticket at buy time. Parallel
-    ///         to Ticket.legIds[]. Freezes the math at the quote priced at
-    ///         purchase so settle/cashout cannot be affected by later oracle
-    ///         or registry changes.
+    /// @notice Per-leg snapshot freezing the priced quote at buy time so settle/cashout ignore later registry drift.
     struct LegSnapshot {
-        uint256 probabilityPPM; // yes-side PPM (same orientation as LegRegistry)
+        uint256 probabilityPPM;
         address oracleAdapter;
     }
-
-    // ── State ────────────────────────────────────────────────────────────
 
     HouseVault public vault;
     LegRegistry public registry;
     IERC20 public usdc;
 
     uint256 public bootstrapEndsAt;
-    /// @notice Per-leg multiplicative fee in BPS (1000 = 10%). Applied to the
-    ///         multiplier as (1 − f) per leg, before correlation discount.
-    ///         Initialised via constructor from HelperConfig (.env-driven).
+    /// @notice Per-leg multiplicative fee BPS, applied as (1 − f) per leg before correlation discount.
     uint256 public protocolFeeBps;
-    uint256 public minStake = 1e6; // 1 USDC
+    uint256 public minStake = 1e6;
     uint256 public maxLegs = 5;
-    uint256 public cashoutPenaltyBps = 1500; // 15% base penalty
+    uint256 public cashoutPenaltyBps = 1500;
 
-    /// @notice Fee split constants (BPS of feePaid).
-    uint256 public constant FEE_TO_LOCKERS_BPS = 9000; // 90%
-    uint256 public constant FEE_TO_SAFETY_BPS = 500; // 5%
-    // Remaining 5% stays in vault implicitly
+    uint256 public constant FEE_TO_LOCKERS_BPS = 9000;
+    uint256 public constant FEE_TO_SAFETY_BPS = 500;
+    // remaining 5% stays in vault implicitly
 
     uint256 private _nextTicketId;
     mapping(uint256 => Ticket) private _tickets;
 
-    /// @notice Trusted off-chain signer for EIP-712 quotes. Owner-settable.
-    ///         A zero value disables buys entirely.
+    /// @notice Trusted EIP-712 quote signer. Zero address disables buys.
     address public trustedQuoteSigner;
 
-    /// @notice Per-ticket leg snapshots, parallel to Ticket.legIds[].
     mapping(uint256 => LegSnapshot[]) private _ticketSnapshots;
 
-    /// @notice One-shot nonces consumed from verified quotes.
     mapping(uint256 => bool) public usedQuoteNonces;
-
-    // ── EIP-712 type hashes ──────────────────────────────────────────────
 
     bytes32 private constant _SOURCE_LEG_TYPEHASH = keccak256(
         "SourceLeg(string sourceRef,bytes32 outcome,uint256 probabilityPPM,uint256 cutoffTime,uint256 earliestResolve,address oracleAdapter)"
@@ -150,8 +102,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     bytes32 private constant _QUOTE_TYPEHASH = keccak256(
         "Quote(address buyer,uint256 stake,SourceLeg[] legs,uint256 deadline,uint256 nonce)SourceLeg(string sourceRef,bytes32 outcome,uint256 probabilityPPM,uint256 cutoffTime,uint256 earliestResolve,address oracleAdapter)"
     );
-
-    // ── Events ───────────────────────────────────────────────────────────
 
     event TicketPurchased(
         uint256 indexed ticketId,
@@ -178,13 +128,9 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
     );
     event LosslessTicketWon(uint256 indexed ticketId, address indexed winner, uint256 payout);
 
-    // ── Errors ───────────────────────────────────────────────────────────
-
     error MutuallyExclusiveLegs(uint256 legA, uint256 legB);
     error TooManyLegsInGroup(uint256 groupId, uint256 legCount, uint256 cap);
     error FeeTooHigh(uint256 bps);
-
-    // ── Constructor ──────────────────────────────────────────────────────
 
     constructor(
         HouseVault _vault,
@@ -201,8 +147,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         protocolFeeBps = _protocolFeeBps;
     }
 
-    // ── Admin ────────────────────────────────────────────────────────────
-
     function pause() external onlyOwner {
         _pause();
     }
@@ -211,8 +155,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         _unpause();
     }
 
-    /// @notice Update the per-leg protocol fee. Reverts if the new fee
-    ///         consumes the entire multiplier (`>= BPS`).
     function setProtocolFeeBps(uint256 _bps) external onlyOwner {
         if (_bps >= 10_000) revert FeeTooHigh(_bps);
         emit ProtocolFeeUpdated(protocolFeeBps, _bps);
@@ -237,14 +179,11 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         cashoutPenaltyBps = _bps;
     }
 
-    /// @notice Set the trusted off-chain signer for EIP-712 quotes. Pass
-    ///         address(0) to disable buys.
+    /// @notice Set the EIP-712 quote signer. address(0) disables buys.
     function setTrustedQuoteSigner(address _signer) external onlyOwner {
         emit TrustedQuoteSignerUpdated(trustedQuoteSigner, _signer);
         trustedQuoteSigner = _signer;
     }
-
-    // ── Views ────────────────────────────────────────────────────────────
 
     function getTicket(uint256 ticketId) external view returns (Ticket memory) {
         require(ticketId < _nextTicketId, "ParlayEngine: invalid ticketId");
@@ -255,27 +194,21 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         return _nextTicketId;
     }
 
-    /// @notice EIP-712 domain separator (exposed for off-chain signers + tests).
+    /// @notice EIP-712 domain separator (for off-chain signers + tests).
     function domainSeparator() external view returns (bytes32) {
         return _domainSeparatorV4();
     }
 
-    /// @notice EIP-712 digest a signer would produce for a given Quote. Used
-    ///         by the off-chain backend and by tests; the engine calls the
-    ///         internal version during buy.
+    /// @notice EIP-712 digest a signer produces for a Quote.
     function hashQuote(Quote calldata q) external view returns (bytes32) {
         return _hashQuote(q);
     }
 
-    /// @notice Read per-leg snapshots attached to a signed-quote ticket.
     function getTicketSnapshots(uint256 ticketId) external view returns (LegSnapshot[] memory) {
         require(ticketId < _nextTicketId, "ParlayEngine: invalid ticketId");
         return _ticketSnapshots[ticketId];
     }
 
-    // ── EIP-712 internals ────────────────────────────────────────────────
-
-    /// @dev Hash a single SourceLeg per EIP-712 struct encoding.
     function _hashSourceLeg(SourceLeg calldata leg) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -290,7 +223,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         );
     }
 
-    /// @dev Produce the EIP-712 digest for a Quote.
     function _hashQuote(Quote calldata q) internal view returns (bytes32) {
         bytes32[] memory legHashes = new bytes32[](q.legs.length);
         for (uint256 i = 0; i < q.legs.length; i++) {
@@ -309,9 +241,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         return _hashTypedDataV4(structHash);
     }
 
-    /// @dev Verify a Quote + signature. Reverts on any failure. Caller is
-    ///      responsible for marking the nonce used after side-effect-free
-    ///      validation passes.
+    /// @dev Caller marks nonce used after validation passes.
     function _verifyQuote(Quote calldata q, bytes calldata signature) internal view {
         require(trustedQuoteSigner != address(0), "ParlayEngine: signer not set");
         require(block.timestamp <= q.deadline, "ParlayEngine: quote expired");
@@ -323,13 +253,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         require(recovered == trustedQuoteSigner, "ParlayEngine: bad signature");
     }
 
-    // ── Core Logic ───────────────────────────────────────────────────────
-
-    /// @notice Purchase a ticket from a backend-signed EIP-712 quote. The
-    ///         server re-fetches Polymarket prices, signs a Quote, and the
-    ///         engine verifies + consumes the signature here. Any leg whose
-    ///         sourceRef isn't yet on-chain is created in LegRegistry as part
-    ///         of this tx (just-in-time).
+    /// @notice Purchase a ticket from a backend-signed EIP-712 quote. JIT-creates legs in LegRegistry as needed.
     function buyTicketSigned(Quote calldata quote, bytes calldata signature)
         external
         nonReentrant
@@ -340,12 +264,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         return _buyTicketSigned(quote);
     }
 
-    /// @notice Purchase a parlay funded by rehab credit instead of USDC. The
-    ///         stake is deducted from `creditBalance[msg.sender]`; no USDC
-    ///         moves and no fee is charged (protocol pays "fair odds on paper"
-    ///         — the win is routed into a PARTIAL lock rather than paid in
-    ///         cash). Quote flow and leg validation are identical to
-    ///         `buyTicketSigned`.
+    /// @notice Credit-funded parlay. No USDC, no fee; wins route to PARTIAL lock instead of cash payout.
     function buyLosslessParlay(Quote calldata quote, bytes calldata signature)
         external
         nonReentrant
@@ -392,10 +311,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             isLossless: false
         });
 
-        // Snapshot per-leg oracle + quote PPM so settle/cashout don't re-read
-        // LegRegistry. The quote PPM is the one the bettor agreed to; storing
-        // it makes the math frozen at buy time and isolates tickets from any
-        // subsequent probability drift on the shared registry row.
+        // freeze per-leg oracle + PPM at buy time; isolates ticket from later registry drift
         LegSnapshot[] storage snaps = _ticketSnapshots[ticketId];
         for (uint256 i = 0; i < quote.legs.length; i++) {
             snaps.push(
@@ -414,8 +330,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         }
     }
 
-    /// @dev Inner implementation for buyLosslessParlay. Factored out of the
-    ///      external entry to keep stack depth under limit.
     function _buyLosslessParlay(Quote calldata quote) internal returns (uint256 ticketId) {
         require(quote.legs.length >= 2, "ParlayEngine: need >= 2 legs");
         require(quote.legs.length <= maxLegs, "ParlayEngine: too many legs");
@@ -423,8 +337,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
 
         (uint256[] memory legIdsMem, bytes32[] memory outcomesMem, uint256 fairMulX1e6) = _resolveQuoteLegs(quote);
         _checkExclusion(legIdsMem);
-        // Lossless: no fee deduction. Correlation discount still applies so
-        // the vault doesn't reserve a payout that ignores SGP correlation.
+        // no fee, but correlation discount applies so reservation respects SGP correlation
         uint256 multiplierX1e6 = _losslessMultiplier(fairMulX1e6, _aggregateGroupSizes(legIdsMem));
         uint256 potentialPayout = ParlayMath.computePayout(quote.stake, multiplierX1e6);
 
@@ -472,10 +385,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         }
     }
 
-    /// @dev Resolve-or-create every leg referenced by a quote and return the
-    ///      parallel legIds / outcomes arrays plus the *fair* multiplier
-    ///      (no fee, no correlation applied). Factored out of _buyTicketSigned
-    ///      to keep that function under the stack-slot budget.
+    /// @dev Returns parallel legIds/outcomes plus the fair multiplier (no fee, no correlation).
     function _resolveQuoteLegs(Quote calldata quote)
         internal
         returns (uint256[] memory legIds, bytes32[] memory outcomes, uint256 fairMulX1e6)
@@ -506,9 +416,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         fairMulX1e6 = ParlayMath.computeMultiplier(probsPPM);
     }
 
-    /// @dev Build per-correlation-group sizes from a parlay's legIds, also
-    ///      enforcing the per-group cap. Reverts with `TooManyLegsInGroup`
-    ///      when any non-zero group exceeds `maxLegsPerGroup`.
+    /// @dev Reverts TooManyLegsInGroup when any non-zero group exceeds maxLegsPerGroup.
     function _aggregateGroupSizes(uint256[] memory legIds) internal view returns (uint256[] memory sizes) {
         uint256[] memory corrGroups = registry.getLegCorrGroups(legIds);
         uint256 n = corrGroups.length;
@@ -547,7 +455,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         }
     }
 
-    /// @dev Revert if any pair of legs share a non-zero exclusionGroupId.
     function _checkExclusion(uint256[] memory legIds) internal view {
         uint256[] memory groups = registry.getLegExclusionGroups(legIds);
         uint256 n = groups.length;
@@ -560,24 +467,16 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         }
     }
 
-    /// @dev Snapshot HouseVault.corrConfig as a tuple. Auto-getter returns the
-    ///      tuple `(corrAsymptoteBps, corrHalfSatPpm, maxLegsPerGroup)`.
     function _corrConfig() internal view returns (uint256 asymptoteBps, uint256 halfSatPpm, uint256 maxLegsPerGroup) {
         (asymptoteBps, halfSatPpm, maxLegsPerGroup) = vault.corrConfig();
     }
 
-    /// @dev Apply correlation discount only — used by the lossless path.
     function _losslessMultiplier(uint256 fairMulX1e6, uint256[] memory groupSizes) internal view returns (uint256) {
         (uint256 d, uint256 k,) = _corrConfig();
         return ParlayMath.applyCorrelation(fairMulX1e6, groupSizes, d, k);
     }
 
-    /// @dev Compute fee + potentialPayout + final multiplier from a stake,
-    ///      leg count, fair multiplier, and per-group sizes. The final
-    ///      multiplier folds in `(1 − f)^n` (per-leg fee) and the saturating
-    ///      correlation discount; `feePaid` carves out the fee portion of
-    ///      stake (used for the 90/5/5 routing) so the implicit reservation
-    ///      backing equals `stake − feePaid`.
+    /// @dev Final multiplier folds in (1 − f)^n + correlation; feePaid carves out the 90/5/5 fee portion.
     function _priceQuote(uint256 stake, uint256 legCount, uint256 fairMulX1e6, uint256[] memory groupSizes)
         internal
         view
@@ -589,14 +488,11 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         multiplierX1e6 = ParlayMath.applyCorrelation(feeAdjusted, groupSizes, corrAsymptote, halfSat);
         potentialPayout = ParlayMath.computePayout(stake, multiplierX1e6);
 
-        // feePaid = stake × (1 − (1−f)^n). Iterative loop matches applyFee
-        // exactly, so the implicit `effectiveStake = stake − feePaid` equals
-        // `stake × (1−f)^n` and stays in the vault as the bet's backing.
+        // iterative loop matches applyFee exactly so effectiveStake = stake × (1−f)^n
         uint256 effectiveStake = ParlayMath.applyFee(stake, legCount, fee);
         feePaid = stake - effectiveStake;
     }
 
-    /// @dev Apply the 90/5/5 fee split. No-op when feePaid == 0.
     function _routeFees(uint256 feePaid, uint256 ticketIdForEvent) internal {
         if (feePaid == 0) return;
         uint256 feeToLockers = (feePaid * FEE_TO_LOCKERS_BPS) / 10_000;
@@ -606,10 +502,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         emit FeesRouted(ticketIdForEvent, feeToLockers, feeToSafety, feeToVault);
     }
 
-    /// @dev Resolve the (probabilityPPM, oracleAdapter) pair for a ticket's
-    ///      leg at settlement/cashout time. Read from the per-ticket snapshot
-    ///      written at buy time — the math is frozen against the backend-
-    ///      attested price, isolated from any subsequent registry drift.
+    /// @dev Reads from per-ticket snapshot frozen at buy time, not LegRegistry.
     function _legContext(uint256 ticketId, uint256 legIndex)
         internal
         view
@@ -619,8 +512,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         return (s.probabilityPPM, IOracleAdapter(s.oracleAdapter));
     }
 
-    /// @notice Settle a ticket by checking oracle results for every leg.
-    ///         Anyone can call this (permissionless settlement).
+    /// @notice Permissionless settlement. Checks oracle results for every leg.
     function settleTicket(uint256 ticketId) external nonReentrant whenNotPaused {
         require(ticketId < _nextTicketId, "ParlayEngine: invalid ticketId");
         Ticket storage ticket = _tickets[ticketId];
@@ -636,9 +528,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
 
             (LegStatus legStatus,) = oracle.getStatus(ticket.legIds[i]);
 
-            // Determine if the bettor's chosen side won:
-            // Yes bet (outcome != 0x02): wins when leg status is Won
-            // No bet  (outcome == 0x02): wins when leg status is Lost
             bool isNoBet = ticket.outcomes[i] == bytes32(uint256(2));
             bool bettorWon;
 
@@ -667,9 +556,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             ticket.status = TicketStatus.Lost;
             if (originalPayout > 0) vault.releasePayout(originalPayout);
             if (!ticket.isLossless) {
-                // Rehab carve applies to USDC-funded tickets only. Lossless
-                // tickets already consumed credit at buy; a loss simply burns
-                // the credit with no new claimable accrual.
+                // lossless lost: credit already burned at buy, no rehab accrual
                 uint256 effectiveStake = ticket.stake - ticket.feePaid;
                 if (effectiveStake > 0) {
                     vault.distributeLoss(effectiveStake, ownerOf(ticketId));
@@ -684,29 +571,23 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
                 ticket.status = TicketStatus.Won;
             }
         } else {
-            // Some legs voided, rest won. Recalculate with remaining legs.
             uint256 remainingLegs = ticket.legIds.length - voidedCount;
             if (remainingLegs < 2) {
-                // Not enough legs for a valid parlay: void the ticket and
-                // refund the effective stake.
                 ticket.status = TicketStatus.Voided;
                 if (originalPayout > 0) vault.releasePayout(originalPayout);
                 if (ticket.isLossless) {
-                    // Refund credit (stake was credit, not USDC).
                     vault.refundCredit(ownerOf(ticketId), ticket.stake);
                 } else {
                     uint256 refundAmount = ticket.stake - ticket.feePaid;
                     if (refundAmount > 0) vault.refundVoided(ownerOf(ticketId), refundAmount);
                 }
             } else {
-                // Recalculate multiplier with only the non-voided legs.
                 uint256[] memory remainingProbs = new uint256[](remainingLegs);
                 uint256 idx = 0;
                 for (uint256 i = 0; i < ticket.legIds.length; i++) {
                     (uint256 ppm, IOracleAdapter oracle) = _legContext(ticketId, i);
                     (LegStatus legStatus,) = oracle.getStatus(ticket.legIds[i]);
                     if (legStatus != LegStatus.Voided) {
-                        // Use complement for No bets, same as at buy time.
                         remainingProbs[idx++] =
                             (ticket.outcomes[i] == bytes32(uint256(2))) ? (1_000_000 - ppm) : ppm;
                     }
@@ -716,7 +597,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
                 uint256 effectiveStake = ticket.stake - ticket.feePaid;
                 uint256 newPayout = ParlayMath.computePayout(effectiveStake, newMultiplier);
 
-                // Cap newPayout at originalPayout (vault only reserved that much).
+                // cap to originalPayout — that's all the vault reserved
                 if (newPayout > originalPayout) newPayout = originalPayout;
                 if (originalPayout > newPayout) vault.releasePayout(originalPayout - newPayout);
 
@@ -735,7 +616,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         emit TicketSettled(ticketId, ticket.status);
     }
 
-    /// @notice Claim the payout for a winning ticket.
     function claimPayout(uint256 ticketId) external nonReentrant whenNotPaused {
         require(ticketId < _nextTicketId, "ParlayEngine: invalid ticketId");
         Ticket storage ticket = _tickets[ticketId];
@@ -750,13 +630,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         emit PayoutClaimed(ticketId, msg.sender, amount);
     }
 
-    /// @notice Cash out an Active ticket at fair value minus the cashout
-    ///         penalty. Callable on any ticket where no leg has Lost and at
-    ///         least one leg has Won — pays out based on won legs' implied
-    ///         multiplier, penalty scaled by the fraction of unresolved legs.
-    ///         Closes the ticket and releases the remaining reserve.
-    /// @param ticketId The ticket to cash out.
-    /// @param minOut Minimum cashout value (slippage protection).
+    /// @notice Early cashout at fair value minus penalty (penalty scaled by fraction of unresolved legs). Requires no Lost leg + ≥1 Won.
     function cashoutEarly(uint256 ticketId, uint256 minOut) external nonReentrant whenNotPaused {
         require(ticketId < _nextTicketId, "ParlayEngine: invalid ticketId");
         Ticket storage ticket = _tickets[ticketId];
@@ -767,7 +641,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         uint256 wonCount;
         uint256 unresolvedCount;
 
-        // First pass: categorize legs and check for losses.
         for (uint256 i = 0; i < ticket.legIds.length; i++) {
             (, IOracleAdapter oracle) = _legContext(ticketId, i);
 
@@ -801,7 +674,6 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
         require(wonCount > 0, "ParlayEngine: need at least 1 won leg");
         require(unresolvedCount > 0, "ParlayEngine: all resolved, use settleTicket");
 
-        // Second pass: collect won probabilities.
         uint256[] memory wonProbs = new uint256[](wonCount);
         uint256 wIdx;
         for (uint256 i = 0; i < ticket.legIds.length; i++) {
@@ -811,7 +683,7 @@ contract ParlayEngine is ERC721, Ownable, Pausable, ReentrancyGuard, EIP712 {
             (LegStatus legStatus,) = oracle.getStatus(ticket.legIds[i]);
             if (legStatus != LegStatus.Won && legStatus != LegStatus.Lost) continue;
 
-            // Must be a won leg (losses already reverted in first pass).
+            // losses reverted in first pass, so this must be a won leg
             wonProbs[wIdx++] = (ticket.outcomes[i] == bytes32(uint256(2))) ? (1_000_000 - ppm) : ppm;
         }
 

@@ -38,7 +38,7 @@ export interface MarketRow {
   bigcutofftime: number;
   bigearliestresolve: number;
   blnactive: boolean;
-  jsonbapipayload: unknown | null;
+  jsonbapipayload: unknown;
   bigcurationscore: number | null;
   txtgamegroup: string | null;
   /** Non-zero ⇒ this market is part of a mutually-exclusive group. Legs
@@ -111,7 +111,7 @@ export interface UpsertMarketInput {
   cutoffTime: number;
   earliestResolve: number;
   active?: boolean;
-  apiPayload?: unknown | null;
+  apiPayload?: unknown;
   curationScore?: number | null;
   gameGroup?: string | null;
   /** Stable hash of the source's exclusion identifier (Polymarket negRisk

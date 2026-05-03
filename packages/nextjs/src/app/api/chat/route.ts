@@ -1,4 +1,4 @@
-import { streamText, tool } from "ai";
+import { streamText, tool, type Message } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import {
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { messages } = await req.json();
+  const { messages } = (await req.json()) as { messages: Message[] };
 
   const result = streamText({
     model: anthropic("claude-sonnet-4-20250514"),

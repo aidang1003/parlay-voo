@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchMarketsFromDb } from "@/lib/polymarket/markets";
 
-/**
- * GET /api/markets -- single DB read against leg_mapping. Both seed and
- * polymarket legs live in the same table; the polymarket sync route pulls
- * polymarket data in. Pending-registration rows are hidden by the DB helper.
- */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const categoryFilter = searchParams.get("category");

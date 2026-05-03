@@ -5,23 +5,18 @@ import { MAX_LEGS } from "@parlayvoo/shared";
 import { useParlayConfig } from "@/lib/hooks";
 
 interface MultiplierClimbProps {
-  /** Per-leg multipliers (decimal, e.g. 2.5) */
   legMultipliers: number[];
-  /** Whether a leg has crashed/failed */
   crashed?: boolean;
-  /** How many legs have resolved as Won (drives progressive animation) */
+  /** How many legs resolved as Won — drives progressive animation. */
   resolvedUpTo?: number;
-  /** Enable animated rocket climb + crash effects (default: false for static) */
   animated?: boolean;
 }
 
-/** Pick nice gridline values for log scale */
 function logGridlines(maxVal: number): number[] {
   const nice = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
   return nice.filter((v) => v > 1 && v < maxVal);
 }
 
-/** Pick nice gridline values for linear scale */
 function linearGridlines(maxVal: number): number[] {
   const step = Math.pow(10, Math.floor(Math.log10(maxVal)));
   const normalized = maxVal / step;
@@ -31,10 +26,9 @@ function linearGridlines(maxVal: number): number[] {
   for (let v = interval; v < maxVal; v += interval) {
     lines.push(Math.round(v * 100) / 100);
   }
-  return lines.slice(0, 5); // max 5 gridlines
+  return lines.slice(0, 5);
 }
 
-/** Dynamic ceiling: next "nice" number above maxVal */
 function niceCeiling(maxVal: number, isLog: boolean): number {
   if (isLog) {
     const ceilings = [2, 5, 10, 20, 50, 100, 200, 500, 1000, 5000, 10000];
@@ -55,17 +49,11 @@ function formatLabel(v: number): string {
   return v.toFixed(v % 1 === 0 ? 0 : 1);
 }
 
-/** Ease-out cubic for smooth counter interpolation */
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-/**
- * Build a smooth SVG path from a list of points using a Catmull-Rom spline
- * converted to cubic Bezier segments. Restores the curved rocket flight
- * styling the original `parlaycity` chart used; the straight-segment fallback
- * before this looked like a stock chart, not a flight path.
- */
+/** Catmull-Rom spline → cubic Bezier — gives the curved rocket-flight look. */
 function smoothPath(pts: { x: number; y: number }[]): string {
   if (pts.length === 0) return "";
   if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
@@ -94,7 +82,6 @@ export function MultiplierClimb({
   const { maxLegs } = useParlayConfig();
   const effectiveMaxLegs = maxLegs ?? MAX_LEGS;
 
-  // --- Animated state ---
   const [displayedMultiplier, setDisplayedMultiplier] = useState(1);
   const [animatedSegments, setAnimatedSegments] = useState(0);
   const [showCrash, setShowCrash] = useState(false);
@@ -110,7 +97,6 @@ export function MultiplierClimb({
     return legMultipliers.reduce((acc, m) => acc * m, 1);
   }, [legMultipliers]);
 
-  // Compute cumulative multiplier at each resolved leg
   const resolvedMultiplier = useMemo(() => {
     const resolved = resolvedUpTo ?? 0;
     if (resolved === 0 || legMultipliers.length === 0) return 1;
@@ -121,7 +107,6 @@ export function MultiplierClimb({
     return cum;
   }, [legMultipliers, resolvedUpTo]);
 
-  // Animated multiplier counter -- rAF ease-out from previous to target
   const animateCounter = useCallback(
     (from: number, to: number) => {
       if (!animated) return;
@@ -144,41 +129,33 @@ export function MultiplierClimb({
     [animated],
   );
 
-  // Watch resolvedUpTo changes to trigger animations
   useEffect(() => {
     if (!animated) return;
     const resolved = resolvedUpTo ?? 0;
     const prev = prevResolvedRef.current;
 
     if (resolved > prev) {
-      // New leg(s) resolved -- animate segment + counter
       setAnimatedSegments(resolved);
       setJustResolvedLeg(resolved - 1);
       animateCounter(displayedMultiplierRef.current, resolvedMultiplier);
-      // Clear pop animation after it plays
       const timer = setTimeout(() => setJustResolvedLeg(null), 500);
       prevResolvedRef.current = resolved;
       return () => clearTimeout(timer);
     } else if (resolved === 0 && prev === 0 && displayedMultiplierRef.current === 1) {
-      // Initial state
       setAnimatedSegments(0);
     }
 
     prevResolvedRef.current = resolved;
-    // resolvedMultiplier is memoized from legMultipliers + resolvedUpTo, so it captures
-    // those dependencies. animateCounter reads from displayedMultiplierRef (not state),
-    // avoiding the stale closure. Adding animateCounter/displayedMultiplier to deps
-    // would re-trigger on every animation frame.
+    // animateCounter reads displayedMultiplierRef (not state) — adding to deps would re-trigger every frame
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedUpTo, animated, resolvedMultiplier]);
 
-  // Reset animation state only on false→true transitions (replay restart),
-  // NOT on initial mount where the watch effect above needs to run first.
+  // reset only on false→true (replay restart), not on initial mount
   const prevAnimatedRef = useRef(animated);
   useEffect(() => {
     const wasAnimated = prevAnimatedRef.current;
     prevAnimatedRef.current = animated;
-    if (!animated || wasAnimated) return; // skip unless false→true
+    if (!animated || wasAnimated) return;
     setShowCrash(false);
     setIsShaking(false);
     setAnimatedSegments(0);
@@ -187,7 +164,6 @@ export function MultiplierClimb({
     prevResolvedRef.current = 0;
   }, [animated]);
 
-  // Crash trigger
   useEffect(() => {
     if (!animated || !crashed) return;
     setIsShaking(true);
@@ -196,12 +172,10 @@ export function MultiplierClimb({
     return () => clearTimeout(shakeTimer);
   }, [crashed, animated]);
 
-  // Cleanup rAF on unmount
   useEffect(() => {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, []);
 
-  // Risk color: green -> yellow -> red as legs increase
   const riskLevel = legMultipliers.length / effectiveMaxLegs;
   const color =
     riskLevel <= 0.4
@@ -210,13 +184,11 @@ export function MultiplierClimb({
         ? "#eab308"
         : "#ef4444";
 
-  // Dynamic ceiling based on max multiplier
   const ceiling = useMemo(
     () => niceCeiling(Math.max(runningMultiplier, 2), isLog),
     [runningMultiplier, isLog],
   );
 
-  // Map a multiplier value to Y coordinate (0 = top, 100 = bottom)
   const toY = useMemo(() => {
     const pad = 4;
     if (isLog) {
@@ -232,7 +204,6 @@ export function MultiplierClimb({
     };
   }, [ceiling, isLog]);
 
-  // Generate SVG path points
   const points = useMemo(() => {
     const pad = 4;
     const pts: { x: number; y: number }[] = [{ x: pad, y: toY(1) }];
@@ -247,7 +218,6 @@ export function MultiplierClimb({
     return pts;
   }, [legMultipliers, toY, effectiveMaxLegs]);
 
-  // Dynamic gridlines
   const gridlines = useMemo(() => {
     const raw = isLog ? logGridlines(ceiling) : linearGridlines(ceiling);
     if (raw.length > 4) {
@@ -259,7 +229,6 @@ export function MultiplierClimb({
 
   const pathD = points.length > 1 ? smoothPath(points) : "";
 
-  // Reactively track SVG path total length for stroke dash animation
   const [pathLength, setPathLength] = useState(0);
   useLayoutEffect(() => {
     if (pathRef.current) {
@@ -267,19 +236,15 @@ export function MultiplierClimb({
     }
   }, [pathD]);
 
-  // Builder preview mode: animated=true but no resolvedUpTo (not watching live resolution)
+  // builder preview = animated but no live resolution to track
   const isBuilderPreview = animated && resolvedUpTo === undefined;
 
-  // For animated mode: compute stroke-dasharray/offset to reveal segments progressively
   const dashStyle = useMemo(() => {
-    // Builder preview: show full path (no dash animation)
     if (isBuilderPreview) return undefined;
     if (!animated || pathLength === 0 || points.length <= 1) return undefined;
     const totalSegments = points.length - 1;
     const revealedSegments = Math.min(animatedSegments, totalSegments);
-    // Sum straight-line segment lengths, then map onto the actual curved path
-    // length so the reveal fraction stays accurate now that we draw a smooth
-    // (longer) Bezier path instead of polylines.
+    // map straight-segment lengths onto the curved Bezier so reveal fraction stays accurate
     let revealStraight = 0;
     let totalStraight = 0;
     for (let i = 0; i < totalSegments; i++) {
@@ -296,20 +261,15 @@ export function MultiplierClimb({
     };
   }, [animated, isBuilderPreview, animatedSegments, points, pathLength]);
 
-  // Rocket tip position -- always show rocket at baseline (bottom) when idle
   const rocketPos = useMemo(() => {
     if (!animated) return null;
-    // No legs selected: rocket sits at the 1x baseline (bottom-left)
     if (points.length <= 1) return points[0];
-    // Builder preview: rocket at the tip of the full path
     if (isBuilderPreview) return points[points.length - 1];
     const resolved = resolvedUpTo ?? 0;
     const idx = Math.min(resolved, points.length - 1);
     return idx > 0 ? points[idx] : points[0];
   }, [animated, isBuilderPreview, points, resolvedUpTo]);
 
-  // Display value: animated counter vs static
-  // Builder preview uses running multiplier (no resolution counter to animate)
   const displayValue = isBuilderPreview
     ? runningMultiplier
     : animated

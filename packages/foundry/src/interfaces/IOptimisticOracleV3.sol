@@ -3,9 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Subset of UMA's OptimisticOracleV3Interface that we call from UmaOracleAdapter.
-/// Kept local so we don't pull UMA's (AGPL) protocol package into our tree.
-/// Upstream: UMAprotocol/protocol/packages/core/contracts/optimistic-oracle-v3/interfaces/OptimisticOracleV3Interface.sol
+/// @notice Subset of UMA OOv3 we call. Local copy avoids pulling UMA's AGPL package. Upstream: UMAprotocol/protocol .../OptimisticOracleV3Interface.sol
 interface IOptimisticOracleV3 {
     function assertTruth(
         bytes memory claim,
@@ -31,8 +29,6 @@ interface IOptimisticOracleV3 {
 }
 
 /// @notice Callback surface OOv3 invokes on the asserting contract.
-/// Our UmaOracleAdapter implements both. See UMAprotocol's
-/// OptimisticOracleV3CallbackRecipientInterface for the canonical definition.
 interface IOptimisticOracleV3CallbackRecipient {
     function assertionResolvedCallback(bytes32 assertionId, bool assertedTruthfully) external;
     function assertionDisputedCallback(bytes32 assertionId) external;

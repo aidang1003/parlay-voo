@@ -4,9 +4,7 @@ pragma solidity ^0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IOracleAdapter, LegStatus} from "../interfaces/IOracleAdapter.sol";
 
-/// @title AdminOracleAdapter
-/// @notice FAST mode oracle: the contract owner manually resolves legs.
-///         Used during the bootstrap phase when trusted admin resolution is acceptable.
+/// @notice FAST-mode bootstrap oracle: owner manually resolves legs.
 contract AdminOracleAdapter is IOracleAdapter, Ownable {
     struct Resolution {
         LegStatus status;
@@ -20,10 +18,7 @@ contract AdminOracleAdapter is IOracleAdapter, Ownable {
 
     constructor() Ownable(msg.sender) {}
 
-    /// @notice Resolve a leg. Only callable by the contract owner.
-    /// @dev Disabled on Base mainnet (chainId 8453) until a trustless oracle
-    ///      (UMA OOv3, see A-DAY F-5) replaces this admin path. The backdoor is
-    ///      acceptable on local + Base Sepolia for bootstrap + testing only.
+    /// @dev Disabled on Base mainnet (8453); admin backdoor only acceptable on local + Sepolia. Mainnet uses UmaOracleAdapter.
     function resolve(uint256 legId, LegStatus status, bytes32 outcome) external onlyOwner {
         require(block.chainid != 8453, "AdminOracle: disabled on Base mainnet");
         require(status != LegStatus.Unresolved, "AdminOracle: cannot set Unresolved");

@@ -1,11 +1,15 @@
 import { type Hex } from "viem";
-import type { PolymarketOrderBook } from "@parlayvoo/shared";
+import {
+  type PolymarketOrderBook,
+  YES_OUTCOME as SHARED_YES_OUTCOME,
+  NO_OUTCOME as SHARED_NO_OUTCOME,
+} from "@parlayvoo/shared";
 import { getActiveMarkets } from "@/lib/db/client";
 import { PolymarketClient } from "@/lib/polymarket/client";
 import { parsePolySourceRef, midToPpm } from "@/lib/polymarket/markets";
 
-export const YES_OUTCOME = ("0x" + "01".padStart(64, "0")) as Hex;
-export const NO_OUTCOME = ("0x" + "02".padStart(64, "0")) as Hex;
+export const YES_OUTCOME = SHARED_YES_OUTCOME as Hex;
+export const NO_OUTCOME = SHARED_NO_OUTCOME as Hex;
 
 export type LegSide = "yes" | "no";
 
@@ -23,11 +27,7 @@ export interface BuiltLeg {
   earliestResolve: number;
 }
 
-/** Shared between /api/quote-sign (signs + returns) and /api/quote-preview
- *  (returns live pricing so the UI can periodically refresh leg odds before
- *  buy). Refreshes CLOB mid for polymarket legs; falls back to the DB PPM if
- *  Polymarket is flaky. Throws on unknown sourceRef or no-side unavailable so
- *  callers can return a 400. */
+/** Refreshes CLOB mid for polymarket legs; throws LegBuildError(400) on unknown sourceRef or missing no-side. */
 export async function buildLegs(inputs: LegInput[]): Promise<BuiltLeg[]> {
   const markets = await getActiveMarkets();
   const bySourceRef = new Map(markets.map((m) => [m.txtsourceref, m]));
@@ -47,7 +47,7 @@ export async function buildLegs(inputs: LegInput[]): Promise<BuiltLeg[]> {
       throw new LegBuildError(400, `no-side unavailable for ${leg.sourceRef}`);
     }
 
-    // Default PPM from DB (already YES-side; contract flips for no-bets).
+    // DB PPM is YES-side; contract flips for no-bets
     let yesPpm = row.intyesprobppm;
 
     if (row.txtsource === "polymarket") {
@@ -84,14 +84,7 @@ export class LegBuildError extends Error {
   }
 }
 
-/** Best-bid / best-ask mid in PPM, or null if the book is unusable.
- *
- *  Polymarket's CLOB `/book` endpoint returns bids and asks as plain arrays
- *  with no documented sort order, so we don't trust `[0]` to be the top of
- *  book — we take max of bids and min of asks regardless of input order.
- *  Crossed/inverted books (best ask <= best bid) are stale fetches and are
- *  rejected so callers fall back to the DB PPM rather than computing a
- *  nonsense mid (e.g. dust orders straddling a dead market → 50/50). */
+/** /book sort order is undocumented so take max(bids)/min(asks); crossed books reject so caller falls back to DB PPM. */
 export function bookMidPpm(book: PolymarketOrderBook): number | null {
   const bids = book.bids
     .map((b) => Number(b.price))

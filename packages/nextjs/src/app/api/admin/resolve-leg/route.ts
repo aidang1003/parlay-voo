@@ -23,6 +23,9 @@ import {
   LOCAL_CHAIN_ID,
   getRpcUrl,
   type SupportedChainId,
+  YES_OUTCOME as SHARED_YES_OUTCOME,
+  NO_OUTCOME as SHARED_NO_OUTCOME,
+  ZERO_OUTCOME as SHARED_ZERO_OUTCOME,
 } from "@parlayvoo/shared";
 import deployedContracts from "@/contracts/deployedContracts";
 
@@ -34,9 +37,9 @@ const ADMIN_ORACLE_ABI = parseAbi([
   "function canResolve(uint256 legId) view returns (bool)",
 ]);
 
-const YES_OUTCOME = ("0x" + "01".padStart(64, "0")) as Hex;
-const NO_OUTCOME  = ("0x" + "02".padStart(64, "0")) as Hex;
-const VOID_OUTCOME = ("0x" + "0".padStart(64, "0")) as Hex;
+const YES_OUTCOME = SHARED_YES_OUTCOME as Hex;
+const NO_OUTCOME = SHARED_NO_OUTCOME as Hex;
+const VOID_OUTCOME = SHARED_ZERO_OUTCOME as Hex;
 
 export async function POST(req: Request) {
   const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID) as SupportedChainId;

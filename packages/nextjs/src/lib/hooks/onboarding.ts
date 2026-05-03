@@ -9,10 +9,7 @@ import {BUILDER_SUFFIX} from "../builder-code";
 import {EMPTY_ABI, usePinnedChainId, usePinnedWriteContract} from "./_internal";
 import {useUSDCBalance} from "./usdc";
 
-/** Runtime lookup that tolerates the faucet not being deployed yet on the
- *  active chain. Doesn't go through `useDeployedContract`'s typed API because
- *  `OnboardingFaucet` is absent from `deployedContracts.ts` until the first
- *  `pnpm deploy:faucet:*` run. Once present, it's picked up automatically. */
+/** Bypasses useDeployedContract — OnboardingFaucet may be missing until first `pnpm deploy:faucet:*`. */
 function useFaucetContract(): {address: `0x${string}`; abi: Abi} | undefined {
   const chainId = usePinnedChainId();
   return useMemo(() => {
@@ -24,19 +21,16 @@ function useFaucetContract(): {address: `0x${string}`; abi: Abi} | undefined {
 const ETH_THRESHOLD = parseUnits("0.001", 18);
 const USDC_THRESHOLD = parseUnits("1000", 6);
 
-/** Flags reflecting whether the connected wallet has cleared each prerequisite. */
 export interface OnboardingProgress {
   walletInstalled: boolean;
   walletConnected: boolean;
   onCorrectChain: boolean;
   hasGas: boolean;
   hasUsdc: boolean;
-  /** All five prerequisites satisfied. */
   completed: boolean;
-  /** Steps 1-3 satisfied — the user can use the app even without funds. */
+  /** Steps 1-3 satisfied — user can enter the app without funds. */
   canEnter: boolean;
-  /** Becomes true after first client render so the page does not render
-   *  optimistic green checks for `walletInstalled` during SSR. */
+  /** Avoids SSR rendering optimistic green checks for walletInstalled. */
   hydrated: boolean;
 }
 
@@ -87,18 +81,13 @@ interface FaucetTxState {
 export interface UseOnboardingFaucetReturn extends FaucetTxState {
   claimEth: () => Promise<void>;
   claimUsdc: () => Promise<void>;
-  /** Faucet contract is deployed on the active chain. False on chains where
-   *  the faucet was not deployed (e.g. fresh Anvil) — UI falls back to the
-   *  in-app mint button or anvil_setBalance for ETH. */
+  /** False when faucet not deployed on active chain — UI falls back to in-app mint / anvil_setBalance. */
   available: boolean;
   canClaimEth: boolean;
   canClaimUsdc: boolean;
-  /** Unix seconds when the next USDC claim becomes available, or null. */
   nextUsdcClaimAt: number | null;
 }
 
-/** Wraps `OnboardingFaucet.claimEth` / `claimUsdc` plus the per-address state
- *  reads needed to gate the buttons (one-shot ETH, 24h USDC cooldown). */
 export function useOnboardingFaucet(): UseOnboardingFaucetReturn {
   const {address} = useAccount();
   const faucet = useFaucetContract();
@@ -167,8 +156,7 @@ export function useOnboardingFaucet(): UseOnboardingFaucetReturn {
       });
       setIsPending(false);
       setIsConfirming(true);
-      // Best-effort wait — refetch the read state regardless of receipt status
-      // so a re-broadcasted tx still flips the buttons once the chain catches up.
+      // refetch regardless of receipt status — re-broadcasts still flip buttons
       setTimeout(refetchAll, 1500);
       setIsConfirming(false);
       setIsSuccess(true);

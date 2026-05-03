@@ -24,4 +24,11 @@ export const CORRELATION_ASYMPTOTE_BPS = envInt("NEXT_PUBLIC_CORRELATION_ASYMPTO
 export const CORRELATION_HALF_SAT_PPM = envInt("NEXT_PUBLIC_CORRELATION_HALF_SAT_PPM", 1_000_000);
 export const MAX_LEGS_PER_GROUP = envInt("NEXT_PUBLIC_MAX_LEGS_PER_GROUP", 3);
 
+// Outcome bytes32 wire encoding shared with Solidity (LegStatus enum order).
+// 1 = Won/YES, 2 = Lost/NO, 0 = Voided. Typed as `0x${string}` so callers can
+// cast to viem's `Hex` without re-encoding.
+export const YES_OUTCOME: `0x${string}` = `0x${"00".repeat(31)}01`;
+export const NO_OUTCOME: `0x${string}` = `0x${"00".repeat(31)}02`;
+export const ZERO_OUTCOME: `0x${string}` = `0x${"00".repeat(32)}`;
+
 // Chain IDs live in chains.ts — import from there.

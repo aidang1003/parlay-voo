@@ -1,9 +1,4 @@
-/**
- * Cron-gated entry to the settlement pipeline. See `../runner.ts` for the
- * actual Phase A/B logic (shared with `/api/settlement/trigger`, the manual
- * admin button).
- */
-
+// cron-gated entry to settlement pipeline; see ../runner.ts for the actual logic
 import { NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { runSettlement } from "../runner";

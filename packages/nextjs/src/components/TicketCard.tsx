@@ -2,8 +2,9 @@
 
 import { formatUSDC } from "@/lib/utils";
 import { useSettleTicket, useClaimPayout, useCashoutEarly } from "@/lib/hooks";
+import type { TicketStatus } from "@/lib/ticket-status";
 
-export type TicketStatus = "Active" | "Won" | "Lost" | "Voided" | "Claimed";
+export type { TicketStatus };
 
 export interface TicketLeg {
   description: string;

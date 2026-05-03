@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_LEGS, MIN_LEGS, MIN_STAKE_USDC, USDC_DECIMALS } from "./constants.js";
+import { MAX_LEGS, MIN_LEGS, MIN_STAKE_USDC } from "./constants.js";
 
 // Strict plain-decimal matcher: digits with optional single dot.
 // Rejects scientific notation (1e2), sign prefixes (+10), whitespace,
@@ -111,22 +111,4 @@ export const AgentQuoteRequestSchema = QuoteBaseSchema.extend({
 
 export function parseAgentQuoteRequest(data: unknown) {
   return AgentQuoteRequestSchema.safeParse(data);
-}
-
-// Re-export USDC parse helper
-export function parseUSDC(amount: string): bigint {
-  const parts = amount.split(".");
-  const whole = BigInt(parts[0] ?? "0") * BigInt(10 ** USDC_DECIMALS);
-  if (parts.length === 1) return whole;
-  const fracStr = (parts[1] ?? "").padEnd(USDC_DECIMALS, "0").slice(0, USDC_DECIMALS);
-  return whole + BigInt(fracStr);
-}
-
-export function formatUSDC(raw: bigint): string {
-  const divisor = BigInt(10 ** USDC_DECIMALS);
-  const whole = raw / divisor;
-  const frac = raw % divisor;
-  if (frac === 0n) return whole.toString();
-  const fracStr = frac.toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
-  return `${whole}.${fracStr}`;
 }

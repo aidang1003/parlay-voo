@@ -14,22 +14,9 @@ import {
 } from "@parlayvoo/shared";
 import type { RiskProfile } from "@parlayvoo/shared";
 import { LEG_MAP, refreshLegMap } from "@/lib/mcp/tools";
+import { RISK_CAPS } from "@/lib/risk";
 
-const RISK_CAPS: Record<
-  RiskProfile,
-  { maxKelly: number; maxLegs: number; minWinProb: number }
-> = {
-  conservative: { maxKelly: 0.05, maxLegs: 3, minWinProb: 0.15 },
-  moderate: { maxKelly: 0.15, maxLegs: 4, minWinProb: 0.05 },
-  aggressive: { maxKelly: 1.0, maxLegs: 5, minWinProb: 0.0 },
-};
-
-/**
- * POST /api/premium/agent-quote
- *
- * Combined quote + risk assessment for the ParlayBuilder risk advisor.
- * Mirrors the Express `/premium/agent-quote` response shape.
- */
+// Combined quote + Kelly risk assessment.
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -76,7 +63,6 @@ export async function POST(req: Request) {
     }
     const groupSizes = Array.from(groupCounts.values());
 
-    // ── Quote computation ──────────────────────────────────────────────
     const stakeNum = parseFloat(stake) || 0;
     if (stakeNum < 1) {
       return NextResponse.json(
@@ -106,7 +92,6 @@ export async function POST(req: Request) {
       valid: true,
     };
 
-    // ── Risk assessment ────────────────────────────────────────────────
     const profile: RiskProfile =
       riskTolerance === "conservative" || riskTolerance === "aggressive"
         ? riskTolerance
@@ -115,7 +100,6 @@ export async function POST(req: Request) {
     const warnings: string[] = [];
     const numLegs = probs.length;
 
-    // BigInt overflow guard
     if (fairMultiplierX1e6 > 9007199254740991n) {
       return NextResponse.json({
         quote,
@@ -161,7 +145,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Correlation detection
     const catCounts: Record<string, number> = {};
     for (const cat of categories) {
       catCounts[cat] = (catCounts[cat] || 0) + 1;

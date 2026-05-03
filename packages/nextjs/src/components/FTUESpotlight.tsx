@@ -13,12 +13,6 @@ interface FTUEStep {
 
 const PHASE_1_STEPS: FTUEStep[] = [
   {
-    targetId: "ftue-connect-wallet",
-    title: "Connect Your Wallet",
-    description: "Start by connecting your wallet to interact with ParlayVoo on Base.",
-    position: "bottom",
-  },
-  {
     targetId: "ftue-builder",
     title: "Build Your Parlay",
     description: "Pick 2-5 prediction legs and choose Yes or No on each. Your odds multiply together!",
@@ -191,6 +185,9 @@ export function FTUESpotlight() {
       return;
     }
 
+    const stepStart = Date.now();
+    let everFound = false;
+    let advanced = false;
     let frameCount = 0;
     function measure() {
       // Throttle: measure every 10th frame (~6fps) instead of every frame (60fps)
@@ -202,6 +199,7 @@ export function FTUESpotlight() {
 
       const el = document.getElementById(currentStep!.targetId);
       if (el) {
+        everFound = true;
         setTargetExists(true);
         const r = el.getBoundingClientRect();
         const pad = 8;
@@ -219,13 +217,21 @@ export function FTUESpotlight() {
         setTargetExists(false);
         prevRectRef.current = null;
         setRect(null);
+        // Auto-advance after a 1.5s grace period when the target never appears.
+        // Fixes the case where a step targets an element that only mounts after
+        // user interaction (e.g. parlay-panel renders after a leg is selected).
+        if (!everFound && !advanced && Date.now() - stepStart > 1500) {
+          advanced = true;
+          next();
+          return;
+        }
       }
       rafRef.current = requestAnimationFrame(measure);
     }
 
     measure();
     return () => cancelAnimationFrame(rafRef.current);
-  }, [active, currentStep]);
+  }, [active, currentStep, next]);
 
   // Don't render anything if FTUE inactive or target element not on current page
   if (!active || !currentStep) return null;

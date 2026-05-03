@@ -19,7 +19,7 @@ flowchart TB
     end
 
     subgraph "Frontend -- Next.js 14 (Vercel)"
-        UI[Parlay Builder / Vault / Tickets / Ticket Detail / About]
+        UI[Onboarding (/) -> Parlay (/parlay) / Vault / Tickets / Ticket Detail / About]
         CHAT[AI Chat Panel<br/>Vercel AI SDK + Claude]
         API[API Routes<br/>/api/markets · /api/quote-sign<br/>/api/mcp · /api/premium/agent-quote]
     end
@@ -37,6 +37,7 @@ flowchart TB
         OA[AdminOracleAdapter<br/>testnet only]
         OO[UmaOracleAdapter<br/>UMA OOv3 wrapper]
         PM[ParlayMath<br/>pure library]
+        OF[OnboardingFaucet<br/>peripheral · testnet drip<br/>(separate deploy)]
     end
 
     subgraph "Human Users"

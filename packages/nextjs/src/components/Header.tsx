@@ -9,7 +9,7 @@ import { useFTUE } from "./FTUESpotlight";
 import { HeaderPositionPill } from "./HeaderPositionPill";
 
 const NAV_LINKS = [
-  { href: "/", label: "Parlay" },
+  { href: "/parlay", label: "Parlay" },
   { href: "/vault", label: "Vault" },
   { href: "/tickets", label: "My Tickets" },
   { href: "/agents", label: "Agents" },
@@ -52,8 +52,7 @@ export function Header() {
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
             {NAV_LINKS.map(({ href, label }) => {
-              const active =
-                href === "/" ? pathname === "/" : pathname.startsWith(href);
+              const active = pathname.startsWith(href);
               return (
                 <Link
                   key={href}

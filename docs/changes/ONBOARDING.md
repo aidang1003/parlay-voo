@@ -1,6 +1,6 @@
 # Onboarding
 
-**Status:** Planning. Branch `feat/onboarding`. Nothing implemented yet — this doc is a plan.
+**Status:** Implementation in progress. Branch `feat/onboarding`. Contract + deploy script + frontend page + hooks + middleware + FTUE fix + about-page reset have all landed; deploy on Anvil/Sepolia + smoke test still pending.
 
 A guided landing page that walks a brand-new crypto user from "no wallet at all" to "ready to place a parlay on Base Sepolia." The onboarding page becomes the new root (`/`), the parlay builder moves to `/parlay`, and the existing FTUE spotlight on the builder drops its wallet-connect step plus fixes one broken step in that flow.
 
@@ -311,3 +311,25 @@ Bullets added as work lands. One bullet per concrete change, file paths included
 
 - `docs/changes/ONBORADING.md` renamed to `docs/changes/ONBOARDING.md`; brain-dump rewritten as Part 1 + Part 2 spec; root path now reserved for onboarding, parlay builder slated to move to `/parlay`.
 - Plan updated: faucet is funded + owned by the wallet behind `QUOTE_SIGNER_PRIVATE_KEY` (falling back to `DEPLOYER_PRIVATE_KEY` when unset, mirroring HelperConfig). `DeployOnboardingFaucet.s.sol` broadcasts as that key, sets `owner = vm.addr(QUOTE_SIGNER_PRIVATE_KEY)`, and seeds initial ETH from the same wallet. Runbook + deployment doc updates added to file-ops list.
+
+**Implementation — landed**
+
+- Created `packages/foundry/src/peripheral/OnboardingFaucet.sol` (Ownable, immutable USDC ref, `claimEth` one-shot per address, `claimUsdc` 24h cooldown, `fund` permissionless, `withdrawEth` + `setDripParams` owner-only). Custom errors: `AlreadyClaimedEth`, `UsdcCooldownActive(nextClaimAt)`, `FaucetEmpty`, `EthTransferFailed`.
+- Created `packages/foundry/test/unit/OnboardingFaucet.t.sol` — 16 tests, all passing. Covers first/second-claim, contract-empty revert, separate-address claims, cooldown, owner-only setters, fuzz on total ETH transferred.
+- Created `packages/foundry/script/DeployOnboardingFaucet.s.sol` — broadcasts as `QUOTE_SIGNER_PRIVATE_KEY` (falls back through the same chain HelperConfig uses), reads MockUSDC from latest broadcast JSON, owner = signer address, seeds 0.1 ETH on Sepolia / 0 on Anvil.
+- Extended `scripts/generate-deployed-contracts.ts` to discover both `Deploy.s.sol` and `DeployOnboardingFaucet.s.sol` broadcast directories and merge per-chain entries; `OnboardingFaucet` added to `CONTRACT_NAMES`. Added `deploy:faucet:local` / `deploy:faucet:sepolia` scripts in root `package.json`. JSON output now sorted alphabetically for determinism across merge orders.
+- Moved `packages/nextjs/src/app/page.tsx` → `app/parlay/page.tsx` (`git mv`). Header NAV_LINK rewired to `/parlay` (logo stays at `/`). Internal "Start Building" / "Build Your First Parlay" / "Try a lossless parlay" / "Place a Lossless Parlay" CTAs across `about`, `tickets`, `RehabLocks`, `RehabCTA` updated to `/parlay`.
+- Created onboarding landing at `app/page.tsx` — five-step checklist, top-of-page "Enter the app" CTA when complete, hero + testnet banner when not, "Skip onboarding" link at the bottom.
+- Created step components in `app/_onboard/`: `OnboardStep` (shared row with circle + title + action), `InstallWalletStep` (Rabby canonical, MetaMask + Coinbase Wallet alternates), `ConnectWalletStep` (ConnectKit modal trigger), `SwitchNetworkStep` (uses `useSwitchChain`), `ClaimEthStep`, `ClaimUsdcStep`, `EnterAppCTA` (sets cookie + localStorage, routes to `/parlay`).
+- Created `lib/onboarding.ts` (localStorage `onboarding:completed` + cookie helpers `getCompleted`, `setCompleted`, `resetOnboarding`).
+- Created `lib/hooks/onboarding.ts` (`useOnboardingProgress` returns flags + `hydrated`; `useOnboardingFaucet` wraps `claimEth`/`claimUsdc` with `usePinnedWriteContract`, surfaces cooldown state + decoded errors). Local `useFaucetContract()` does runtime lookup so the file typechecks before the faucet is in `deployedContracts.ts`. Re-exported from `lib/hooks/index.ts`.
+- Created `packages/nextjs/src/middleware.ts` — redirects to `/` when `onboarding_completed` cookie is missing on any route except `/`, `/api`, `/_next/*`, statics.
+- Edited `components/FTUESpotlight.tsx`: dropped `ftue-connect-wallet` from `PHASE_1_STEPS` (now starts at "Build Your Parlay"); extended the measure loop with a 1500ms grace + auto-advance when the target ID never appears (fixes the `parlay-panel` blank-overlay bug). FTUE tests updated for the smaller phase 1 (3→2 progress dots, "Build Your Parlay" instead of "Connect Your Wallet").
+- Created `app/about/ResetOnboardingButton.tsx` (client component) and wired it under the bottom CTA on `/about`. Calls `resetOnboarding()` then routes to `/`.
+- Updated docs: `CLAUDE.md` (root) frontend block + Foundry block now reference `app/parlay/`, `app/_onboard/`, `middleware.ts`, `lib/onboarding.ts`, `lib/hooks/onboarding.ts`, `OnboardingFaucet.sol`, `DeployOnboardingFaucet.s.sol`. `packages/nextjs/CLAUDE.md` Pages list updated. `docs/RUNBOOK.md` gains an "Onboarding Faucet" section (deploy, balance check, refill, owner-only ops). `docs/DEPLOYMENT.md` gains an "Onboarding faucet (separate deploy)" section. `docs/ARCHITECTURE.md` Mermaid diagram: frontend node now reads "Onboarding (/) → Parlay (/parlay) / Vault / Tickets / Ticket Detail / About"; contracts subgraph adds an `OnboardingFaucet` node marked "(separate deploy)".
+
+**Pending**
+
+- `pnpm deploy:faucet:local` + manual smoke test on Anvil (fresh wallet, all five steps green, /parlay loads, FTUE skips wallet step).
+- `pnpm deploy:faucet:sepolia` + on-chain verification of the funded faucet.
+- `pnpm gate` (test + typecheck + build) green from a clean tree.

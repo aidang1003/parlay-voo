@@ -15,6 +15,7 @@ import {
   HandCoins,
 } from "lucide-react";
 import { HowItWorks } from "@/components/HowItWorks";
+import { ResetOnboardingButton } from "./ResetOnboardingButton";
 
 export default function AboutPage() {
   return (
@@ -36,7 +37,7 @@ export default function AboutPage() {
         </p>
         <div className="mt-8 flex items-center justify-center gap-4">
           <Link
-            href="/"
+            href="/parlay"
             className="btn-gradient rounded-xl px-8 py-3.5 text-sm font-bold text-white"
           >
             Start Building
@@ -345,7 +346,7 @@ export default function AboutPage() {
           </p>
           <div className="mt-6 flex items-center justify-center gap-4">
             <Link
-              href="/"
+              href="/parlay"
               className="btn-gradient rounded-xl px-8 py-3 text-sm font-bold text-white"
             >
               Start Building
@@ -356,6 +357,9 @@ export default function AboutPage() {
             >
               Enter the Vault
             </Link>
+          </div>
+          <div className="mt-6">
+            <ResetOnboardingButton />
           </div>
         </div>
       </section>

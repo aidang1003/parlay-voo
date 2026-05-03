@@ -60,6 +60,19 @@ pnpm fund-wallet:sepolia 1000
 
 Per-chain config (USDC, bootstrap length, UMA OOv3 address / liveness / bond) lives in `packages/foundry/script/HelperConfig.s.sol`. Adding a new chain = adding a `getXxxConfig()` branch keyed on `block.chainid`.
 
+## Onboarding faucet (separate deploy)
+
+The `OnboardingFaucet` powers the new-user onboarding page on `/`. It is deliberately **not** part of `Deploy.s.sol` so a redeploy of the protocol does not reset the per-address `claimed` map. Funded + owned by the wallet behind `QUOTE_SIGNER_PRIVATE_KEY` (with fallback to `DEPLOYER_PRIVATE_KEY`).
+
+Run after the main deploy on each chain:
+
+```bash
+pnpm deploy:faucet:local      # Anvil
+pnpm deploy:faucet:sepolia    # Base Sepolia (seeds 0.1 ETH)
+```
+
+`tsx scripts/generate-deployed-contracts.ts` is chained automatically and merges the faucet address into `deployedContracts.ts` alongside the protocol contracts. Refill + parameter ops are covered in `docs/RUNBOOK.md` ("Onboarding Faucet").
+
 ## Contract verification
 
 Pass `--verify` flags through forge, or verify manually:

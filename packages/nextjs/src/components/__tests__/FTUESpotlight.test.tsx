@@ -38,7 +38,7 @@ describe("FTUESpotlight", () => {
   it("renders tooltip on first visit (phase 1)", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.getByTestId("ftue-tooltip")).toBeInTheDocument();
-    expect(screen.getByText("Connect Your Wallet")).toBeInTheDocument();
+    expect(screen.getByText("Build Your Parlay")).toBeInTheDocument();
   });
 
   it("does not render when both phases are completed", async () => {
@@ -59,12 +59,12 @@ describe("FTUESpotlight", () => {
 
   it("renders progress dots", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
-    // Phase 1 has 3 steps, so 3 dots
+    // Phase 1 has 2 steps after dropping the wallet step (now owned by /onboarding).
     const tooltip = screen.getByTestId("ftue-tooltip");
     const dots = tooltip.querySelectorAll(".rounded-full");
     // Filter to just the small progress dots (h-1.5 w-1.5)
     const progressDots = Array.from(dots).filter(d => d.classList.contains("h-1\\.5") || d.className.includes("h-1.5"));
-    expect(progressDots.length).toBe(3);
+    expect(progressDots.length).toBe(2);
   });
 
   it("shows Back button disabled on first step", async () => {

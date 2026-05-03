@@ -6,11 +6,12 @@ Next.js 14 (App Router), React 18, TypeScript, Tailwind 3. Wallet: wagmi 2, viem
 
 ## Pages
 
-- `/` -- parlay builder
+- `/` -- onboarding landing (5-step checklist; redirects first-time visitors via `middleware.ts`)
+- `/parlay` -- parlay builder
 - `/vault` -- LP dashboard
 - `/tickets` -- user tickets list
 - `/ticket/[id]` -- ticket detail + settle/claim
-- `/about` -- project overview
+- `/about` -- project overview (also hosts the "Reset onboarding" affordance)
 
 ## API Routes
 

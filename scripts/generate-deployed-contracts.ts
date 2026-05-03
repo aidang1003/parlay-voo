@@ -26,7 +26,9 @@ import {dirname, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BROADCAST_DIR = resolve(ROOT, "packages/foundry/broadcast/Deploy.s.sol");
+const BROADCAST_ROOT = resolve(ROOT, "packages/foundry/broadcast");
+/** Each entry is `<Script>.s.sol` — discovered separately, then merged per chain. */
+const BROADCAST_SCRIPTS = ["Deploy.s.sol", "DeployOnboardingFaucet.s.sol"];
 const FORGE_OUT_DIR = resolve(ROOT, "packages/foundry/out");
 const TS_OUT = resolve(ROOT, "packages/nextjs/src/contracts/deployedContracts.ts");
 const JSON_OUT_DIR = resolve(ROOT, "packages/foundry/deployments");
@@ -43,6 +45,7 @@ const CONTRACT_NAMES: Record<string, string> = {
   AdminOracleAdapter: "AdminOracleAdapter",
   UmaOracleAdapter: "UmaOracleAdapter",
   MockYieldAdapter: "MockYieldAdapter",
+  OnboardingFaucet: "OnboardingFaucet",
 };
 
 interface BroadcastTx {
@@ -63,17 +66,25 @@ interface ChainEntry {
 }
 
 function discoverChainIds(): number[] {
-  if (!existsSync(BROADCAST_DIR)) return [];
-  return readdirSync(BROADCAST_DIR, {withFileTypes: true})
-    .filter((d) => d.isDirectory() && /^\d+$/.test(d.name))
-    .map((d) => Number(d.name))
-    .sort((a, b) => a - b);
+  const chainIds = new Set<number>();
+  for (const script of BROADCAST_SCRIPTS) {
+    const dir = resolve(BROADCAST_ROOT, script);
+    if (!existsSync(dir)) continue;
+    for (const d of readdirSync(dir, {withFileTypes: true})) {
+      if (d.isDirectory() && /^\d+$/.test(d.name)) chainIds.add(Number(d.name));
+    }
+  }
+  return [...chainIds].sort((a, b) => a - b);
 }
 
-function readBroadcast(chainId: number): BroadcastFile | undefined {
-  const path = resolve(BROADCAST_DIR, String(chainId), "run-latest.json");
-  if (!existsSync(path)) return undefined;
-  return JSON.parse(readFileSync(path, "utf8")) as BroadcastFile;
+function readBroadcasts(chainId: number): BroadcastFile[] {
+  const out: BroadcastFile[] = [];
+  for (const script of BROADCAST_SCRIPTS) {
+    const path = resolve(BROADCAST_ROOT, script, String(chainId), "run-latest.json");
+    if (!existsSync(path)) continue;
+    out.push(JSON.parse(readFileSync(path, "utf8")) as BroadcastFile);
+  }
+  return out;
 }
 
 function readAbi(forgeName: string): unknown[] | undefined {
@@ -83,14 +94,17 @@ function readAbi(forgeName: string): unknown[] | undefined {
   return artifact.abi;
 }
 
-function buildChainEntry(broadcast: BroadcastFile): ChainEntry {
+function buildChainEntry(broadcasts: BroadcastFile[]): ChainEntry {
   const entry: ChainEntry = {};
-  // Pick the LAST CREATE per contractName so re-deployments in the same broadcast win.
+  // Pick the LAST CREATE per contractName, walking each script's broadcast in order.
+  // Faucet redeploys overwrite older faucet entries; they don't disturb Deploy.s.sol contracts.
   const lastByName = new Map<string, string>();
-  for (const tx of broadcast.transactions) {
-    if (tx.transactionType !== "CREATE" || !tx.contractName || !tx.contractAddress) continue;
-    if (!CONTRACT_NAMES[tx.contractName]) continue;
-    lastByName.set(tx.contractName, tx.contractAddress);
+  for (const broadcast of broadcasts) {
+    for (const tx of broadcast.transactions) {
+      if (tx.transactionType !== "CREATE" || !tx.contractName || !tx.contractAddress) continue;
+      if (!CONTRACT_NAMES[tx.contractName]) continue;
+      lastByName.set(tx.contractName, tx.contractAddress);
+    }
   }
   for (const [forgeName, address] of lastByName) {
     const abi = readAbi(forgeName);
@@ -162,8 +176,9 @@ export type ContractName<C extends SupportedChainId = SupportedChainId> =
 
 function emitJson(entry: ChainEntry): string {
   // Slim per-chain JSON: addresses only, no ABIs (Solidity scripts only need addresses).
+  // Sort keys alphabetically so output is deterministic regardless of merge order.
   const slim: Record<string, string> = {};
-  for (const [name, c] of Object.entries(entry)) slim[name] = c.address;
+  for (const name of Object.keys(entry).sort()) slim[name] = entry[name].address;
   return JSON.stringify(slim, null, 2) + "\n";
 }
 
@@ -187,19 +202,21 @@ function main() {
   const updatedChains: number[] = [];
 
   for (const chainId of targetChains) {
-    const broadcast = readBroadcast(chainId);
-    if (!broadcast) {
-      console.warn(`  ! no broadcast for chain ${chainId}, skipping`);
+    const broadcasts = readBroadcasts(chainId);
+    if (broadcasts.length === 0) {
+      console.warn(`  ! no broadcasts for chain ${chainId}, skipping`);
       continue;
     }
-    const entry = buildChainEntry(broadcast);
+    const entry = buildChainEntry(broadcasts);
     if (Object.keys(entry).length === 0) {
-      console.warn(`  ! no recognized contracts in broadcast for chain ${chainId}`);
+      console.warn(`  ! no recognized contracts in broadcasts for chain ${chainId}`);
       continue;
     }
-    merged[chainId] = entry;
+    // Merge over any existing chain entry so a faucet-only redeploy doesn't blow away
+    // protocol contracts that aren't in the faucet broadcast.
+    merged[chainId] = {...(merged[chainId] ?? {}), ...entry};
     updatedChains.push(chainId);
-    console.log(`  ✓ chain ${chainId}: ${Object.keys(entry).length} contracts`);
+    console.log(`  ✓ chain ${chainId}: ${Object.keys(merged[chainId]).length} contracts`);
   }
 
   if (Object.keys(merged).length === 0) {

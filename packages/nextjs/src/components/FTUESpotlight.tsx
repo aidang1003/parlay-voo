@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
+
+const FTUE_ROUTE = "/parlay";
 
 // ── FTUE Hook ──────────────────────────────────────────────────────────
 
@@ -11,56 +15,27 @@ interface FTUEStep {
   position?: "top" | "bottom" | "left" | "right";
 }
 
-const PHASE_1_STEPS: FTUEStep[] = [
-  {
-    targetId: "ftue-connect-wallet",
-    title: "Connect Your Wallet",
-    description: "Start by connecting your wallet to interact with ParlayVoo on Base.",
-    position: "bottom",
-  },
+const STEPS: FTUEStep[] = [
   {
     targetId: "ftue-builder",
-    title: "Build Your Parlay",
-    description: "Pick 2-5 prediction legs and choose Yes or No on each. Your odds multiply together!",
+    title: "Place a Bet",
+    description: "Pick 2-5 prediction legs from the markets and choose Yes or No on each. Your odds multiply together for a bigger payout.",
     position: "top",
   },
   {
     targetId: "ftue-vault-link",
-    title: "Become the House",
-    description: "Deposit USDC into the vault to earn yield from fees and losing bets.",
+    title: "Be the House",
+    description: "Head to the Vault page to deposit USDC. You earn yield from fees and from every bet that crashes.",
     position: "bottom",
   },
 ];
 
-const PHASE_2_STEPS: FTUEStep[] = [
-  {
-    targetId: "parlay-panel",
-    title: "Your Parlay Ticket",
-    description: "Selected legs appear here. Watch your multiplier grow as you add legs.",
-    position: "left",
-  },
-  {
-    targetId: "parlay-multiplier",
-    title: "Multiplier Climb",
-    description: "This is your rocket! Watch it climb as legs resolve in your favor.",
-    position: "left",
-  },
-  {
-    targetId: "stake-input",
-    title: "Set Your Stake",
-    description: "Enter how much USDC to wager. Your potential payout = stake x multiplier.",
-    position: "left",
-  },
-];
-
 const STORAGE_KEY = "ftue:completed";
-const PHASE2_STORAGE_KEY = "ftue:phase2_completed";
 
 // ── Shared Context ─────────────────────────────────────────────────────
 
 interface FTUEState {
   active: boolean;
-  phase: 0 | 1 | 2;
   stepIndex: number;
   steps: FTUEStep[];
   currentStep: FTUEStep | null;
@@ -86,50 +61,46 @@ export function useFTUE(): FTUEState {
 }
 
 function useFTUEInternal(): FTUEState {
-  const [phase, setPhase] = useState<0 | 1 | 2>(0); // 0 = inactive
+  const pathname = usePathname();
+  const [running, setRunning] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
+  // Only activate on the parlay route. Without this gate the auto-advance
+  // grace period would silently walk through every step on /onboarding (where
+  // none of the targets exist) and mark the FTUE complete before the user
+  // ever reaches /parlay.
   useEffect(() => {
+    if (pathname !== FTUE_ROUTE) {
+      setRunning(false);
+      setStepIndex(0);
+      setHydrated(true);
+      return;
+    }
     try {
-      const p1Done = sessionStorage.getItem(STORAGE_KEY) === "true";
-      const p2Done = sessionStorage.getItem(PHASE2_STORAGE_KEY) === "true";
-      if (!p1Done) {
-        setPhase(1);
-        setStepIndex(0);
-      } else if (!p2Done) {
-        setPhase(2);
-        setStepIndex(0);
-      }
+      const done = sessionStorage.getItem(STORAGE_KEY) === "true";
+      setRunning(!done);
+      setStepIndex(0);
     } catch {
       // sessionStorage unavailable
     }
     setHydrated(true);
-  }, []);
-
-  const steps = phase === 1 ? PHASE_1_STEPS : phase === 2 ? PHASE_2_STEPS : [];
+  }, [pathname]);
 
   const next = useCallback(() => {
     setStepIndex((prev) => {
-      if (prev >= steps.length - 1) {
+      if (prev >= STEPS.length - 1) {
         try {
-          if (phase === 1) {
-            sessionStorage.setItem(STORAGE_KEY, "true");
-            setPhase(2);
-            return 0;
-          } else {
-            sessionStorage.setItem(PHASE2_STORAGE_KEY, "true");
-            setPhase(0);
-            return 0;
-          }
+          sessionStorage.setItem(STORAGE_KEY, "true");
         } catch {
-          setPhase(0);
-          return 0;
+          // sessionStorage unavailable
         }
+        setRunning(false);
+        return 0;
       }
       return prev + 1;
     });
-  }, [steps.length, phase]);
+  }, []);
 
   const prev = useCallback(() => {
     setStepIndex((p) => Math.max(0, p - 1));
@@ -138,29 +109,32 @@ function useFTUEInternal(): FTUEState {
   const skip = useCallback(() => {
     try {
       sessionStorage.setItem(STORAGE_KEY, "true");
-      sessionStorage.setItem(PHASE2_STORAGE_KEY, "true");
     } catch {
       // sessionStorage unavailable
     }
-    setPhase(0);
+    setRunning(false);
     setStepIndex(0);
   }, []);
 
   const restart = useCallback(() => {
     try {
       sessionStorage.removeItem(STORAGE_KEY);
-      sessionStorage.removeItem(PHASE2_STORAGE_KEY);
     } catch {
       // sessionStorage unavailable
     }
-    setPhase(1);
-    setStepIndex(0);
-  }, []);
+    // Only start running if we're on the FTUE route. Otherwise just clear
+    // storage — the pathname effect will start the tour once the user lands
+    // on /parlay.
+    if (pathname === FTUE_ROUTE) {
+      setRunning(true);
+      setStepIndex(0);
+    }
+  }, [pathname]);
 
-  const active = hydrated && phase > 0 && steps.length > 0;
-  const currentStep = active ? steps[stepIndex] : null;
+  const active = hydrated && running;
+  const currentStep = active ? STEPS[stepIndex] : null;
 
-  return { active, phase, stepIndex, steps, currentStep, next, prev, skip, restart };
+  return { active, stepIndex, steps: STEPS, currentStep, next, prev, skip, restart };
 }
 
 // ── Spotlight Component ────────────────────────────────────────────────
@@ -176,6 +150,10 @@ export function FTUESpotlight() {
   const { active, stepIndex, steps, currentStep, next, prev, skip } = useFTUE();
   const [rect, setRect] = useState<SpotlightRect | null>(null);
   const rafRef = useRef<number>(0);
+  // Track when portal target (document.body) is available — only true on the
+  // client. Without this guard, SSR would try to portal during render.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Track whether the target element exists on the current page
   const [targetExists, setTargetExists] = useState(false);
@@ -191,6 +169,9 @@ export function FTUESpotlight() {
       return;
     }
 
+    const stepStart = Date.now();
+    let everFound = false;
+    let advanced = false;
     let frameCount = 0;
     function measure() {
       // Throttle: measure every 10th frame (~6fps) instead of every frame (60fps)
@@ -202,6 +183,7 @@ export function FTUESpotlight() {
 
       const el = document.getElementById(currentStep!.targetId);
       if (el) {
+        everFound = true;
         setTargetExists(true);
         const r = el.getBoundingClientRect();
         const pad = 8;
@@ -219,21 +201,33 @@ export function FTUESpotlight() {
         setTargetExists(false);
         prevRectRef.current = null;
         setRect(null);
+        // Auto-advance after a 1.5s grace period when the target never appears.
+        // Fixes the case where a step targets an element that only mounts after
+        // user interaction (e.g. parlay-panel renders after a leg is selected).
+        if (!everFound && !advanced && Date.now() - stepStart > 1500) {
+          advanced = true;
+          next();
+          return;
+        }
       }
       rafRef.current = requestAnimationFrame(measure);
     }
 
     measure();
     return () => cancelAnimationFrame(rafRef.current);
-  }, [active, currentStep]);
+  }, [active, currentStep, next]);
 
   // Don't render anything if FTUE inactive or target element not on current page
   if (!active || !currentStep) return null;
   if (!targetExists) return null;
+  if (!mounted) return null; // portal target unavailable on server
 
   const tooltipPosition = currentStep.position ?? "bottom";
 
-  return (
+  // Portal to document.body so the tooltip + cutout escape any ancestor that
+  // might be creating a stacking context (transform, filter, backdrop-filter
+  // — including ConnectKit's wrappers and the layout's `relative z-10` shell).
+  return createPortal(
     <>
       {/* Spotlight cutout */}
       {rect && (
@@ -305,7 +299,8 @@ export function FTUESpotlight() {
       {!rect && targetExists && (
         <div className="ftue-overlay" onClick={next} />
       )}
-    </>
+    </>,
+    document.body,
   );
 }
 

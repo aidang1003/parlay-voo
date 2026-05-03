@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+
+// FTUE only activates on /parlay (the route gate keeps it from auto-completing
+// on /onboarding where its targets don't exist).
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/parlay",
+}));
+
 import { FTUESpotlight, FTUEProvider } from "../FTUESpotlight";
 
 // ── DOM mocks ─────────────────────────────────────────────────────────────
@@ -35,36 +42,34 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("FTUESpotlight", () => {
-  it("renders tooltip on first visit (phase 1)", async () => {
+  it("renders tooltip on first visit", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.getByTestId("ftue-tooltip")).toBeInTheDocument();
-    expect(screen.getByText("Connect Your Wallet")).toBeInTheDocument();
+    expect(screen.getByText("Place a Bet")).toBeInTheDocument();
   });
 
-  it("does not render when both phases are completed", async () => {
+  it("does not render when the tour is completed", async () => {
     sessionStore["ftue:completed"] = "true";
-    sessionStore["ftue:phase2_completed"] = "true";
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.queryByTestId("ftue-tooltip")).not.toBeInTheDocument();
   });
 
-  it("skip button completes both phases", async () => {
+  it("skip button completes the tour", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
     expect(screen.getByTestId("ftue-tooltip")).toBeInTheDocument();
     await act(async () => { fireEvent.click(screen.getByText("Skip")); });
     expect(screen.queryByTestId("ftue-tooltip")).not.toBeInTheDocument();
     expect(sessionStorage.setItem).toHaveBeenCalledWith("ftue:completed", "true");
-    expect(sessionStorage.setItem).toHaveBeenCalledWith("ftue:phase2_completed", "true");
   });
 
   it("renders progress dots", async () => {
     await act(async () => { render(<FTUEProvider><FTUESpotlight /></FTUEProvider>); });
-    // Phase 1 has 3 steps, so 3 dots
+    // Two-step tour: Place a Bet, Be the House.
     const tooltip = screen.getByTestId("ftue-tooltip");
     const dots = tooltip.querySelectorAll(".rounded-full");
     // Filter to just the small progress dots (h-1.5 w-1.5)
     const progressDots = Array.from(dots).filter(d => d.classList.contains("h-1\\.5") || d.className.includes("h-1.5"));
-    expect(progressDots.length).toBe(3);
+    expect(progressDots.length).toBe(2);
   });
 
   it("shows Back button disabled on first step", async () => {

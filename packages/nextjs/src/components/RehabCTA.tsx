@@ -75,7 +75,7 @@ export function RehabCTA({ stake }: RehabCTAProps) {
 
       <div className="flex gap-3">
         <Link
-          href="/"
+          href="/parlay"
           className="flex-1 rounded-xl border border-amber-500/30 bg-amber-500/10 py-2.5 text-center text-sm font-semibold text-amber-300 transition-colors hover:bg-amber-500/20"
         >
           Place a Lossless Parlay

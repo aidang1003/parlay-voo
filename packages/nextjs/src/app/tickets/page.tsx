@@ -273,7 +273,7 @@ export default function TicketsPage() {
               <p className="text-lg font-semibold text-gray-400">No tickets yet</p>
               <p className="mt-1 text-sm text-gray-500">Build your first parlay and your tickets will show up here.</p>
               <Link
-                href="/"
+                href="/parlay"
                 className="btn-gradient mt-6 inline-block rounded-xl px-6 py-2.5 text-sm font-bold text-white"
               >
                 Build Your First Parlay

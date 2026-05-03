@@ -1,12 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ConnectKitButton } from "connectkit";
 import { HelpCircle, LogOut } from "lucide-react";
 import { useAccount, useDisconnect } from "wagmi";
 import { useFTUE } from "./FTUESpotlight";
 import { HeaderPositionPill } from "./HeaderPositionPill";
+import { getCompleted } from "@/lib/onboarding";
 
 const NAV_LINKS = [
   { href: "/parlay", label: "Parlay" },
@@ -18,15 +20,36 @@ const NAV_LINKS = [
 
 export function Header() {
   const pathname = usePathname();
+  const router = useRouter();
   const { restart } = useFTUE();
   const { isConnected } = useAccount();
   const { disconnect } = useDisconnect();
+
+  const replayTutorial = () => {
+    if (pathname !== "/parlay") router.push("/parlay");
+    restart();
+  };
+
+  // Once onboarding is complete, the logo links to /parlay so returning users
+  // skip the checklist entirely. SSR renders "/" (no localStorage); the value
+  // updates on the client after hydration. Listen for storage changes so a
+  // reset on /about reflects in this tab too.
+  const [logoHref, setLogoHref] = useState<"/" | "/parlay">("/");
+  useEffect(() => {
+    const sync = () => setLogoHref(getCompleted() ? "/parlay" : "/");
+    sync();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === "onboarding:completed") sync();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [pathname]);
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/5 bg-bg/80 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2.5">
+          <Link href={logoHref} className="flex items-center gap-2.5">
             {/* Logo mark */}
             <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
               <rect width="32" height="32" rx="8" fill="url(#logo-grad)" />
@@ -72,7 +95,7 @@ export function Header() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={restart}
+            onClick={replayTutorial}
             className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-300"
             title="Replay tutorial"
           >

@@ -993,11 +993,16 @@ export function ParlayBuilder() {
       </div>
 
       {/* Ticket builder / summary panel */}
-      <div className="lg:col-span-2" id="parlay-panel">
-        <div className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
+      <div className="lg:col-span-2">
+        <div id="parlay-panel" className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
           {/* Multiplier climb */}
           <div id="parlay-multiplier">
             <MultiplierClimb legMultipliers={climbLegMultipliers} animated />
+            {selectedLegs.length === 0 && (
+              <p className="mt-3 text-center text-xs text-gray-500">
+                Pick 2 to 5 markets on the left to build your parlay.
+              </p>
+            )}
           </div>
 
           {/* Selected legs summary with numbered badges */}

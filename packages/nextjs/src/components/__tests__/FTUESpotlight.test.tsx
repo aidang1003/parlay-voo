@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+
+// FTUE only activates on /parlay (the route gate keeps it from auto-completing
+// on /onboarding where its targets don't exist).
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/parlay",
+}));
+
 import { FTUESpotlight, FTUEProvider } from "../FTUESpotlight";
 
 // ── DOM mocks ─────────────────────────────────────────────────────────────

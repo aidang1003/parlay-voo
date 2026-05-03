@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
+
+const FTUE_ROUTE = "/parlay";
 
 // ── FTUE Hook ──────────────────────────────────────────────────────────
 
@@ -80,11 +84,22 @@ export function useFTUE(): FTUEState {
 }
 
 function useFTUEInternal(): FTUEState {
+  const pathname = usePathname();
   const [phase, setPhase] = useState<0 | 1 | 2>(0); // 0 = inactive
   const [stepIndex, setStepIndex] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
+  // Only activate on the parlay route. Without this gate the auto-advance
+  // grace period would silently walk through every step on /onboarding (where
+  // none of the targets exist) and mark the FTUE complete before the user
+  // ever reaches /parlay.
   useEffect(() => {
+    if (pathname !== FTUE_ROUTE) {
+      setPhase(0);
+      setStepIndex(0);
+      setHydrated(true);
+      return;
+    }
     try {
       const p1Done = sessionStorage.getItem(STORAGE_KEY) === "true";
       const p2Done = sessionStorage.getItem(PHASE2_STORAGE_KEY) === "true";
@@ -94,12 +109,15 @@ function useFTUEInternal(): FTUEState {
       } else if (!p2Done) {
         setPhase(2);
         setStepIndex(0);
+      } else {
+        setPhase(0);
+        setStepIndex(0);
       }
     } catch {
       // sessionStorage unavailable
     }
     setHydrated(true);
-  }, []);
+  }, [pathname]);
 
   const steps = phase === 1 ? PHASE_1_STEPS : phase === 2 ? PHASE_2_STEPS : [];
 
@@ -147,9 +165,14 @@ function useFTUEInternal(): FTUEState {
     } catch {
       // sessionStorage unavailable
     }
-    setPhase(1);
-    setStepIndex(0);
-  }, []);
+    // Only activate phase 1 if we're on the FTUE route. Otherwise just clear
+    // storage — the pathname effect will start phase 1 once the user lands
+    // on /parlay.
+    if (pathname === FTUE_ROUTE) {
+      setPhase(1);
+      setStepIndex(0);
+    }
+  }, [pathname]);
 
   const active = hydrated && phase > 0 && steps.length > 0;
   const currentStep = active ? steps[stepIndex] : null;
@@ -170,6 +193,10 @@ export function FTUESpotlight() {
   const { active, stepIndex, steps, currentStep, next, prev, skip } = useFTUE();
   const [rect, setRect] = useState<SpotlightRect | null>(null);
   const rafRef = useRef<number>(0);
+  // Track when portal target (document.body) is available — only true on the
+  // client. Without this guard, SSR would try to portal during render.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Track whether the target element exists on the current page
   const [targetExists, setTargetExists] = useState(false);
@@ -236,10 +263,14 @@ export function FTUESpotlight() {
   // Don't render anything if FTUE inactive or target element not on current page
   if (!active || !currentStep) return null;
   if (!targetExists) return null;
+  if (!mounted) return null; // portal target unavailable on server
 
   const tooltipPosition = currentStep.position ?? "bottom";
 
-  return (
+  // Portal to document.body so the tooltip + cutout escape any ancestor that
+  // might be creating a stacking context (transform, filter, backdrop-filter
+  // — including ConnectKit's wrappers and the layout's `relative z-10` shell).
+  return createPortal(
     <>
       {/* Spotlight cutout */}
       {rect && (
@@ -311,7 +342,8 @@ export function FTUESpotlight() {
       {!rect && targetExists && (
         <div className="ftue-overlay" onClick={next} />
       )}
-    </>
+    </>,
+    document.body,
   );
 }
 

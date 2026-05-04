@@ -1,8 +1,8 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import { Script, console } from "forge-std/Script.sol";
-import { Vm } from "forge-std/Vm.sol";
+import {Script, console} from "forge-std/Script.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 contract ScaffoldETHDeploy is Script {
     error InvalidChain();

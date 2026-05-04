@@ -1,33 +1,37 @@
 {
   "name": "@se-2/foundry",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
-    "account": "make account",
-    "account:generate": "node scripts-js/generateKeystore.js",
-    "account:import": "node scripts-js/importAccount.js",
-    "account:reveal-pk": "node scripts-js/revealPK.js",
-    "chain": "make chain",
-    "clean": "forge clean",
-    "compile": "make compile",
-    "deploy": "node scripts-js/parseArgs.js",
-    "flatten": "make flatten",
-    "fork": "make fork FORK_URL=${1:-mainnet}",
-    "format": "make format",
-    "postinstall": "shx cp -n .env.example .env",
-    "lint": "make lint",
-    "test": "forge test",
-    "verify": "make verify RPC_URL=${1:-localhost}"
-  },
-  "dependencies": {
-    "dotenv": "~16.3.1",
-    "envfile": "~6.18.0",
-    "ethers": "~5.7.1",
-    "prettier": "~2.8.8",
-    "qrcode": "~1.5.3",
-    "toml": "~3.0.0"
+    "chain": "anvil",
+    "compile": "forge compile",
+    "build": "forge build",
+    "clean": "forge clean && rm -rf broadcast/Deploy.s.sol/31337",
+    "nuke": "forge clean && rm -rf broadcast",
+    "format": "forge fmt",
+    "lint": "forge fmt --check",
+    "test": "forge test -vvv --no-match-path 'test/fork/**'",
+    "test:fork": "dotenv -c -- bash -c 'test -n \"${BASE_SEPOLIA_RPC_URL:-$NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL}\" || (echo \"BASE_SEPOLIA_RPC_URL not set\" && exit 1); BASE_SEPOLIA_RPC_URL=\"${BASE_SEPOLIA_RPC_URL:-$NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL}\" forge test --match-path \"test/fork/**\" -vvv'",
+    "deploy": "pnpm run deploy:local",
+    "deploy:local": "dotenv -c -- forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast && pnpm run generate-abis",
+    "deploy:sepolia": "dotenv -c -- forge script script/Deploy.s.sol --rpc-url base-sepolia --broadcast --slow --verify && pnpm run generate-abis",
+    "generate-abis": "node scripts-js/generateTsAbis.js",
+    "fund-wallet:local": "dotenv -c -- forge script script/FundWallet.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --sig 'run(uint256)'",
+    "fund-wallet:sepolia": "dotenv -c -- forge script script/FundWallet.s.sol --rpc-url base-sepolia --broadcast --sig 'run(uint256)'",
+    "resolve-leg:local": "dotenv -c -- forge script script/ResolveLeg.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --sig 'run(string,uint8)'",
+    "resolve-leg:sepolia": "dotenv -c -- forge script script/ResolveLeg.s.sol --rpc-url base-sepolia --broadcast --sig 'run(string,uint8)'",
+    "verify": "forge script script/Deploy.s.sol --rpc-url base-sepolia --verify --resume",
+    "snapshot": "forge snapshot",
+    "coverage": "forge coverage --report summary",
+    "flatten": "forge flatten",
+    "fork": "anvil --fork-url ${FORK_URL:-https://sepolia.base.org} --chain-id 31337",
+    "account": "echo 'pnpm account is not used — set WARM_DEPLOYER_PRIVATE_KEY in .env instead'",
+    "account:generate": "echo 'pnpm account:generate is not used — set WARM_DEPLOYER_PRIVATE_KEY in .env instead'",
+    "account:import": "echo 'pnpm account:import is not used — set WARM_DEPLOYER_PRIVATE_KEY in .env instead'",
+    "account:reveal-pk": "echo 'pnpm account:reveal-pk is not used — WARM_DEPLOYER_PRIVATE_KEY is in .env'"
   },
   "devDependencies": {
-    "shx": "^0.3.4"
+    "dotenv-cli": "^7.4.2"
   }
 }

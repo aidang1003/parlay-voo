@@ -33,31 +33,34 @@ export function DebugContracts() {
   }, [contractNames, selectedContract, setSelectedContract]);
 
   return (
-    <div className="flex flex-col gap-y-6 lg:gap-y-8 py-8 lg:py-12 justify-center items-center">
+    <div className="flex flex-col items-center justify-center gap-y-6 py-4 lg:gap-y-8 lg:py-6">
       {contractNames.length === 0 ? (
-        <p className="text-3xl mt-14">No contracts found!</p>
+        <p className="mt-14 text-2xl text-gray-400">No contracts found!</p>
       ) : (
         <>
           {contractNames.length > 1 && (
-            <div className="flex flex-row gap-2 w-full max-w-7xl pb-1 px-6 lg:px-10 flex-wrap">
-              {contractNames.map(contractName => (
-                <button
-                  className={`btn btn-secondary btn-sm font-light hover:border-transparent ${
-                    contractName === selectedContract
-                      ? "bg-base-300 hover:bg-base-300 no-animation"
-                      : "bg-base-100 hover:bg-secondary"
-                  }`}
-                  key={contractName}
-                  onClick={() => setSelectedContract(contractName)}
-                >
-                  {contractName}
-                  {(contractsData[contractName] as GenericContract)?.external && (
-                    <span className="tooltip tooltip-top tooltip-accent" data-tip="External contract">
-                      <BarsArrowUpIcon className="h-4 w-4 cursor-pointer" />
-                    </span>
-                  )}
-                </button>
-              ))}
+            <div className="flex w-full max-w-7xl flex-row flex-wrap gap-2 px-2 pb-1 lg:px-4">
+              {contractNames.map(contractName => {
+                const active = contractName === selectedContract;
+                return (
+                  <button
+                    key={contractName}
+                    onClick={() => setSelectedContract(contractName)}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${
+                      active
+                        ? "border-brand-pink/40 bg-brand-pink/10 text-brand-pink"
+                        : "border-white/10 bg-white/5 text-gray-300 hover:border-brand-pink/30 hover:bg-brand-pink/5 hover:text-brand-pink"
+                    }`}
+                  >
+                    {contractName}
+                    {(contractsData[contractName] as GenericContract)?.external && (
+                      <span title="External contract">
+                        <BarsArrowUpIcon className="h-4 w-4" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
           {contractNames.map(

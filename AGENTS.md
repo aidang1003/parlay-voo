@@ -52,6 +52,14 @@ yarn deploy --network <network>   # e.g., sepolia, mainnet, base
 yarn vercel:yolo --prod # for deployment of frontend
 ```
 
+## Environment variables
+
+**One file, two symlinks.** Edit only `/.env` at the repo root — it is the single source of truth. `packages/foundry/.env` and `packages/nextjs/.env.local` are symlinks to it, installed automatically by `pnpm install` (root `postinstall` runs `scripts/setup-env.sh`). The `pnpm dev`, `pnpm start`, `pnpm build`, and `pnpm deploy*` commands also re-link before they fire, so symlinks self-heal if anything ever clobbers them.
+
+If you ever see a real (non-symlink) file at `packages/foundry/.env` or `packages/nextjs/.env.local`, delete it and run `pnpm setup:env`. Do not commit secrets there — both paths are gitignored, but they will silently drift from the root file.
+
+A boot-time validator in `packages/nextjs/instrumentation.ts` checks that the address derived from `HOT_SIGNER_PRIVATE_KEY` matches the on-chain `ParlayEngine.trustedQuoteSigner()` and prints a framed warning on mismatch. Heed it — that is the bug class that silently reverts every ticket purchase.
+
 ## Architecture
 
 ### Smart Contract Development
@@ -161,16 +169,59 @@ Use `notification` from `~~/utils/scaffold-eth` for success/error/warning feedba
 
 ### Styling
 
-**Use DaisyUI classes** for building frontend components.
+**Default to DaisyUI for every UI primitive.** Tailwind CSS v4 is configured with the DaisyUI 5 plugin in `packages/nextjs/styles/globals.css`. The default theme is `parlay` (deep dark, neon pink + purple); `light` is also defined. Daisy semantic classes (`btn`, `bg-base-100`, `text-base-content`, etc.) auto-resolve to those theme colors — so using DaisyUI = consistent theming for free.
+
+**Rule:** if DaisyUI ships a component for what you're building, use it. Reach for raw Tailwind only when no DaisyUI component fits, or when you're composing a custom design-system class (gradient text, glass card, glow utility) defined in `globals.css`.
+
+DaisyUI primitives to default to:
+
+| Need | DaisyUI class |
+| --- | --- |
+| Button | `btn`, `btn-primary`/`btn-secondary`/`btn-accent`/`btn-ghost`/`btn-error`, `btn-sm`/`btn-lg` |
+| Card / panel | `card`, `card-body`, `card-title`, `card-actions` |
+| Alert / banner | `alert alert-info`/`alert-success`/`alert-warning`/`alert-error` |
+| Badge / chip | `badge`, `badge-primary`/`badge-success`/`badge-error`, `badge-outline` |
+| Modal / dialog | `modal`, `modal-box`, `modal-action` |
+| Tabs | `tabs tabs-lift`/`tabs-bordered`, `tab`, `tab-active` |
+| Form field | `input input-bordered`, `select select-bordered`, `textarea textarea-bordered`, `checkbox`, `toggle`, `range`, `radio` |
+| Loading | `loading loading-spinner`, `loading-dots`, `loading-bars` |
+| Navbar / drawer | `navbar`, `drawer`, `menu` |
+| Stat tile | `stats`, `stat`, `stat-title`/`stat-value`/`stat-desc` |
+| Progress | `progress progress-primary` |
+| Dropdown | `dropdown`, `dropdown-content` |
+| Tooltip | `tooltip`, `tooltip-top`, `tooltip-accent` |
+| Table | `table`, `table-zebra`, `table-sm`/`table-md` |
 
 ```tsx
-// ✅ Good - using DaisyUI classes
-<button className="btn btn-primary">Connect</button>
-<div className="card bg-base-100 shadow-xl">...</div>
+// ✅ Good — DaisyUI semantic class, auto-themed
+<button className="btn btn-primary">Mint</button>
+<div className="card bg-base-200 shadow-xl"><div className="card-body">…</div></div>
+<div className="alert alert-warning">Cooldown active</div>
 
-// ❌ Avoid - raw Tailwind when DaisyUI has a component
-<button className="px-4 py-2 bg-blue-500 text-white rounded">Connect</button>
+// ❌ Avoid — raw Tailwind for something DaisyUI handles
+<button className="px-4 py-2 bg-pink-500 text-white rounded">Mint</button>
+<div className="rounded-xl bg-gray-900 p-6 shadow-xl">…</div>
 ```
+
+**When raw Tailwind IS appropriate:**
+
+1. Custom design-system classes already defined in `globals.css` — `gradient-text`, `glass-card`, `glass-card-glow`, `btn-gradient`, `glow-pink`/`glow-purple`/`glow-green`/`glow-red`/`glow-gold`, `text-glow-*`. Prefer these over re-implementing them.
+2. Layout / spacing / animation utilities (`flex`, `grid`, `gap-*`, `animate-*`, `space-y-*`) — DaisyUI doesn't cover these.
+3. Existing parlay component surfaces (`bg-gray-900/40`, `border-white/5`, `text-gray-300/400/500`) — match these in adjacent code so the page feels cohesive. The translucent dark/white-alpha pattern is the established look for non-DaisyUI surfaces (admin debug, ticket card detail rows, blockexplorer tables).
+
+**Color tokens from the parlay theme** (auto-mapped via DaisyUI):
+
+| Token | Purpose | Hex |
+| --- | --- | --- |
+| `primary` | Primary CTA / accent | `#ff1a8c` (brand pink) |
+| `secondary` | Secondary accent / loud surfaces | `#9200e1` (brand purple) |
+| `accent` | Tertiary accent | `#b75fff` (purple-1) |
+| `base-100` | Page background | `#080812` |
+| `base-200` | Card / surface | `hsl(260 18% 7%)` |
+| `base-300` | Subtle border / muted surface | `hsl(260 15% 16%)` |
+| `success` / `warning` / `error` / `info` | Status colors | `#22c55e` / `#f59e0b` / `#ef4444` / `#4a90e2` |
+
+`bg-secondary` and `bg-primary` are very saturated — fine for buttons + small accents, but **avoid them as full-bleed page surfaces or table headers**; they overpower the dark theme. For large surfaces use `bg-base-200`/`bg-base-300` or the translucent `bg-gray-900/40` pattern.
 
 ### Configure Target Network before deploying to testnet / mainnet.
 

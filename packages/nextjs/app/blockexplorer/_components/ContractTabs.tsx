@@ -51,35 +51,22 @@ export const ContractTabs = ({ address, contractData }: PageProps) => {
   return (
     <>
       {isContract && (
-        <div role="tablist" className="tabs tabs-lift">
-          <button
-            role="tab"
-            className={`tab ${activeTab === "transactions" ? "tab-active" : ""}`}
-            onClick={() => setActiveTab("transactions")}
-          >
-            Transactions
-          </button>
-          <button
-            role="tab"
-            className={`tab ${activeTab === "code" ? "tab-active" : ""}`}
-            onClick={() => setActiveTab("code")}
-          >
-            Code
-          </button>
-          <button
-            role="tab"
-            className={`tab  ${activeTab === "storage" ? "tab-active" : ""}`}
-            onClick={() => setActiveTab("storage")}
-          >
-            Storage
-          </button>
-          <button
-            role="tab"
-            className={`tab  ${activeTab === "logs" ? "tab-active" : ""}`}
-            onClick={() => setActiveTab("logs")}
-          >
-            Logs
-          </button>
+        <div role="tablist" className="flex flex-wrap gap-2 border-b border-white/5">
+          {(["transactions", "code", "storage", "logs"] as const).map(t => {
+            const active = activeTab === t;
+            return (
+              <button
+                key={t}
+                role="tab"
+                onClick={() => setActiveTab(t)}
+                className={`-mb-px rounded-t-lg border-b-2 px-3 py-2 text-xs font-semibold capitalize transition-colors ${
+                  active ? "border-brand-pink text-brand-pink" : "border-transparent text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                {t}
+              </button>
+            );
+          })}
         </div>
       )}
       {activeTab === "transactions" && (

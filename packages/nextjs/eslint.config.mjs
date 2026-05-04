@@ -20,6 +20,9 @@ export default defineConfig([
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/ban-ts-comment": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+      "@next/next/no-img-element": "off",
+      "react-hooks/exhaustive-deps": "warn",
 
       "prettier/prettier": [
         "warn",

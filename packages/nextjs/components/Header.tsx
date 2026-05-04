@@ -1,103 +1,121 @@
 "use client";
 
-import React, { useRef } from "react";
-import Image from "next/image";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { hardhat } from "viem/chains";
-import { Bars3Icon, BugAntIcon } from "@heroicons/react/24/outline";
-import { FaucetButton, RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
-import { useOutsideClick, useTargetNetwork } from "~~/hooks/scaffold-eth";
+import { usePathname, useRouter } from "next/navigation";
+import { useFTUE } from "./FTUESpotlight";
+import { HeaderPositionPill } from "./HeaderPositionPill";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { HelpCircle, LogOut } from "lucide-react";
+import { useAccount, useDisconnect } from "wagmi";
+import { getCompleted } from "~~/lib/onboarding";
 
-type HeaderMenuLink = {
-  label: string;
-  href: string;
-  icon?: React.ReactNode;
-};
+const NAV_LINKS = [
+  { href: "/parlay", label: "Parlay" },
+  { href: "/vault", label: "Vault" },
+  { href: "/tickets", label: "My Tickets" },
+  { href: "/agents", label: "Agents" },
+  { href: "/about", label: "About" },
+] as const;
 
-export const menuLinks: HeaderMenuLink[] = [
-  {
-    label: "Home",
-    href: "/",
-  },
-  {
-    label: "Debug Contracts",
-    href: "/debug",
-    icon: <BugAntIcon className="h-4 w-4" />,
-  },
-];
-
-export const HeaderMenuLinks = () => {
+export function Header() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { restart } = useFTUE();
+  const { isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
+
+  const replayTutorial = () => {
+    if (pathname !== "/parlay") router.push("/parlay");
+    restart();
+  };
+
+  // Once onboarding is complete, the logo links to /parlay so returning users
+  // skip the checklist entirely. SSR renders "/" (no localStorage); the value
+  // updates on the client after hydration. Listen for storage changes so a
+  // reset on /about reflects in this tab too.
+  const [logoHref, setLogoHref] = useState<"/" | "/parlay">("/");
+  useEffect(() => {
+    const sync = () => setLogoHref(getCompleted() ? "/parlay" : "/");
+    sync();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === "onboarding:completed") sync();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [pathname]);
 
   return (
-    <>
-      {menuLinks.map(({ label, href, icon }) => {
-        const isActive = pathname === href;
-        return (
-          <li key={href}>
-            <Link
-              href={href}
-              passHref
-              className={`${
-                isActive ? "bg-secondary shadow-md" : ""
-              } hover:bg-secondary hover:shadow-md focus:!bg-secondary active:!text-neutral py-1.5 px-3 text-sm rounded-full gap-2 grid grid-flow-col`}
-            >
-              {icon}
-              <span>{label}</span>
-            </Link>
-          </li>
-        );
-      })}
-    </>
-  );
-};
-
-/**
- * Site header
- */
-export const Header = () => {
-  const { targetNetwork } = useTargetNetwork();
-  const isLocalNetwork = targetNetwork.id === hardhat.id;
-
-  const burgerMenuRef = useRef<HTMLDetailsElement>(null);
-  useOutsideClick(burgerMenuRef, () => {
-    burgerMenuRef?.current?.removeAttribute("open");
-  });
-
-  return (
-    <div className="sticky lg:static top-0 navbar bg-base-100 min-h-0 shrink-0 justify-between z-20 shadow-md shadow-secondary px-0 sm:px-2">
-      <div className="navbar-start w-auto lg:w-1/2">
-        <details className="dropdown" ref={burgerMenuRef}>
-          <summary className="ml-1 btn btn-ghost lg:hidden hover:bg-transparent">
-            <Bars3Icon className="h-1/2" />
-          </summary>
-          <ul
-            className="menu menu-compact dropdown-content mt-3 p-2 shadow-sm bg-base-100 rounded-box w-52"
-            onClick={() => {
-              burgerMenuRef?.current?.removeAttribute("open");
-            }}
+    <header className="sticky top-0 z-50 border-b border-white/5 bg-bg/80 backdrop-blur-xl">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <div className="flex items-center gap-8">
+          <Link href={logoHref} className="flex items-center gap-2.5">
+            {/* Logo mark */}
+            <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="32" height="32" rx="8" fill="url(#logo-grad)" />
+              <path
+                d="M10 22V10h4.5c1.2 0 2.2.35 2.9 1 .7.65 1.1 1.55 1.1 2.65 0 1.1-.4 2-1.1 2.65-.7.65-1.7 1-2.9 1H13v4.7H10z"
+                fill="white"
+              />
+              <path d="M18 22l3.5-6.5L18 10h3l2 4 2-4h3l-3.5 6.5L28 22h-3l-2-4-2 4h-3z" fill="white" opacity="0.85" />
+              <defs>
+                <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#ec4899" />
+                  <stop offset="1" stopColor="#8b5cf6" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <span className="text-xl font-black tracking-tight">
+              <span className="gradient-text">ParlayVoo</span>
+            </span>
+          </Link>
+          <nav className="hidden items-center gap-1 sm:flex">
+            {NAV_LINKS.map(({ href, label }) => {
+              const active = pathname.startsWith(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  id={href === "/vault" ? "ftue-vault-link" : undefined}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-all ${
+                    active
+                      ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
+                      : "text-gray-400 hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={replayTutorial}
+            className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-300"
+            title="Replay tutorial"
           >
-            <HeaderMenuLinks />
-          </ul>
-        </details>
-        <Link href="/" passHref className="hidden lg:flex items-center gap-2 ml-4 mr-6 shrink-0">
-          <div className="flex relative w-10 h-10">
-            <Image alt="SE2 logo" className="cursor-pointer" fill src="/logo.svg" />
+            <HelpCircle className="h-4 w-4" />
+          </button>
+          <HeaderPositionPill />
+          <div id="ftue-connect-wallet">
+            <ConnectButton accountStatus="address" chainStatus="full" showBalance={false} />
           </div>
-          <div className="flex flex-col">
-            <span className="font-bold leading-tight">Scaffold-ETH</span>
-            <span className="text-xs">Ethereum dev stack</span>
-          </div>
-        </Link>
-        <ul className="hidden lg:flex lg:flex-nowrap menu menu-horizontal px-1 gap-2">
-          <HeaderMenuLinks />
-        </ul>
+          {isConnected && (
+            <button
+              onClick={() => disconnect()}
+              className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-neon-red/10 hover:text-neon-red"
+              title="Disconnect wallet"
+              aria-label="Disconnect wallet"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
+          <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-yellow-400">
+            Testnet
+          </span>
+        </div>
       </div>
-      <div className="navbar-end grow mr-4">
-        <RainbowKitCustomConnectButton />
-        {isLocalNetwork && <FaucetButton />}
-      </div>
-    </div>
+    </header>
   );
-};
+}

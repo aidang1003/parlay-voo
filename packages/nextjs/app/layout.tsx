@@ -1,25 +1,24 @@
 import "@rainbow-me/rainbowkit/styles.css";
 import "@scaffold-ui/components/styles.css";
-import { ScaffoldEthAppWithProviders } from "~~/components/ScaffoldEthAppWithProviders";
+import type { Metadata } from "next";
 import { ThemeProvider } from "~~/components/ThemeProvider";
+import { Providers } from "~~/components/providers";
 import "~~/styles/globals.css";
-import { getMetadata } from "~~/utils/scaffold-eth/getMetadata";
 
-export const metadata = getMetadata({
-  title: "Scaffold-ETH 2 App",
-  description: "Built with 🏗 Scaffold-ETH 2",
-});
+export const metadata: Metadata = {
+  title: "ParlayVoo - Crash-Parlay AMM on Base",
+  description:
+    "On-chain parlay betting with crash-style cashout. Build multi-leg tickets, ride the multiplier, or be the house.",
+};
 
-const ScaffoldEthApp = ({ children }: { children: React.ReactNode }) => {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html suppressHydrationWarning className={``}>
-      <body>
-        <ThemeProvider enableSystem>
-          <ScaffoldEthAppWithProviders>{children}</ScaffoldEthAppWithProviders>
+    <html lang="en" suppressHydrationWarning data-theme="parlay">
+      <body className="min-h-screen bg-bg text-gray-200 antialiased">
+        <ThemeProvider attribute="data-theme" defaultTheme="parlay" enableSystem={false} themes={["parlay", "light"]}>
+          <Providers>{children}</Providers>
         </ThemeProvider>
       </body>
     </html>
   );
-};
-
-export default ScaffoldEthApp;
+}

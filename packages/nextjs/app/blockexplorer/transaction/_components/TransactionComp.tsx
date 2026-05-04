@@ -38,117 +38,127 @@ const TransactionComp = ({ txHash }: { txHash: Hash }) => {
   }, [client, txHash]);
 
   return (
-    <div className="container mx-auto mt-10 mb-20 px-10 md:px-0">
-      <button className="btn btn-sm btn-primary" onClick={() => router.back()}>
-        Back
+    <div className="space-y-6">
+      <button
+        onClick={() => router.back()}
+        className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-gray-300 transition-colors hover:border-brand-pink/40 hover:bg-brand-pink/10 hover:text-brand-pink"
+      >
+        ← Back
       </button>
       {transaction ? (
-        <div className="overflow-x-auto">
-          <h2 className="text-3xl font-bold mb-4 text-center text-primary-content">Transaction Details</h2>{" "}
-          <table className="table rounded-lg bg-base-100 w-full shadow-lg md:table-lg table-md">
-            <tbody>
-              <tr>
-                <td>
-                  <strong>Transaction Hash:</strong>
-                </td>
-                <td>{transaction.hash}</td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>Block Number:</strong>
-                </td>
-                <td>{Number(transaction.blockNumber)}</td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>From:</strong>
-                </td>
-                <td>
-                  <Address address={transaction.from} format="long" onlyEnsOrAddress chain={targetNetwork} />
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>To:</strong>
-                </td>
-                <td>
-                  {!receipt?.contractAddress ? (
-                    transaction.to && (
-                      <Address address={transaction.to} format="long" onlyEnsOrAddress chain={targetNetwork} />
-                    )
-                  ) : (
-                    <span>
-                      Contract Creation:
-                      <Address address={receipt.contractAddress} format="long" onlyEnsOrAddress chain={targetNetwork} />
-                    </span>
-                  )}
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>Value:</strong>
-                </td>
-                <td>
-                  {formatEther(transaction.value)} {targetNetwork.nativeCurrency.symbol}
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>Function called:</strong>
-                </td>
-                <td>
-                  <div className="w-full md:max-w-[600px] lg:max-w-[800px] overflow-x-auto whitespace-nowrap">
-                    {functionCalled === "0x" ? (
-                      "This transaction did not call any function."
+        <div className="rounded-2xl border border-white/5 bg-gray-900/40 p-6">
+          <h2 className="mb-4 text-2xl font-black text-white">
+            Transaction <span className="gradient-text">Details</span>
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-white/5">
+                <Row
+                  label="Transaction Hash"
+                  value={<span className="break-all font-mono text-xs text-gray-300">{transaction.hash}</span>}
+                />
+                <Row
+                  label="Block Number"
+                  value={<span className="font-mono text-xs text-gray-300">{Number(transaction.blockNumber)}</span>}
+                />
+                <Row
+                  label="From"
+                  value={<Address address={transaction.from} format="long" onlyEnsOrAddress chain={targetNetwork} />}
+                />
+                <Row
+                  label="To"
+                  value={
+                    !receipt?.contractAddress ? (
+                      transaction.to && (
+                        <Address address={transaction.to} format="long" onlyEnsOrAddress chain={targetNetwork} />
+                      )
                     ) : (
-                      <>
-                        <span className="mr-2">{getFunctionDetails(transaction)}</span>
-                        <span className="badge badge-primary font-bold">{functionCalled}</span>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>Gas Price:</strong>
-                </td>
-                <td>{formatUnits(transaction.gasPrice || 0n, 9)} Gwei</td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>Data:</strong>
-                </td>
-                <td className="form-control">
-                  <textarea
-                    readOnly
-                    value={transaction.input}
-                    className="p-0 w-full textarea-primary bg-inherit h-[150px]"
-                  />
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <strong>Logs:</strong>
-                </td>
-                <td>
-                  <ul>
-                    {receipt?.logs?.map((log, i) => (
-                      <li key={i}>
-                        <strong>Log {i} topics:</strong> {JSON.stringify(log.topics, replacer, 2)}
-                      </li>
-                    ))}
-                  </ul>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                      <span className="flex items-center gap-2 text-xs text-gray-400">
+                        Contract Creation:
+                        <Address
+                          address={receipt.contractAddress}
+                          format="long"
+                          onlyEnsOrAddress
+                          chain={targetNetwork}
+                        />
+                      </span>
+                    )
+                  }
+                />
+                <Row
+                  label="Value"
+                  value={
+                    <span className="font-mono text-xs text-gray-300">
+                      {formatEther(transaction.value)} {targetNetwork.nativeCurrency.symbol}
+                    </span>
+                  }
+                />
+                <Row
+                  label="Function called"
+                  value={
+                    <div className="w-full overflow-x-auto whitespace-nowrap md:max-w-[600px] lg:max-w-[800px]">
+                      {functionCalled === "0x" ? (
+                        <span className="text-xs text-gray-500">This transaction did not call any function.</span>
+                      ) : (
+                        <>
+                          <span className="mr-2 text-xs text-gray-300">{getFunctionDetails(transaction)}</span>
+                          <span className="rounded-full border border-brand-pink/40 bg-brand-pink/10 px-2 py-0.5 font-mono text-[11px] text-brand-pink">
+                            {functionCalled}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  }
+                />
+                <Row
+                  label="Gas Price"
+                  value={
+                    <span className="font-mono text-xs text-gray-300">
+                      {formatUnits(transaction.gasPrice || 0n, 9)} Gwei
+                    </span>
+                  }
+                />
+                <Row
+                  label="Data"
+                  value={
+                    <textarea
+                      readOnly
+                      value={transaction.input}
+                      className="h-[150px] w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-[11px] text-gray-300"
+                    />
+                  }
+                />
+                <Row
+                  label="Logs"
+                  value={
+                    <ul className="space-y-1">
+                      {receipt?.logs?.map((log, i) => (
+                        <li key={i} className="font-mono text-[11px] text-gray-400">
+                          <strong className="text-gray-300">Log {i} topics:</strong>{" "}
+                          {JSON.stringify(log.topics, replacer, 2)}
+                        </li>
+                      ))}
+                    </ul>
+                  }
+                />
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
-        <p className="text-2xl text-base-content">Loading...</p>
+        <p className="text-2xl text-gray-400">Loading…</p>
       )}
     </div>
   );
 };
+
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <tr className="align-top">
+      <td className="py-3 pr-4 text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</td>
+      <td className="py-3 text-gray-300">{value}</td>
+    </tr>
+  );
+}
 
 export default TransactionComp;

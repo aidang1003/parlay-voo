@@ -29,6 +29,7 @@ function getDirectories(path) {
 }
 
 function getFiles(path) {
+  if (!existsSync(path)) return [];
   return readdirSync(path).filter(function (file) {
     return statSync(join(path, file)).isFile();
   });
@@ -203,7 +204,7 @@ function processAllDeployments(broadcastPath) {
   return allContracts;
 }
 
-function main() {
+async function main() {
   const current_path_to_broadcast = join(__dirname, "..", "broadcast");
   const current_path_to_deployments = join(__dirname, "..", "deployments");
 
@@ -272,12 +273,10 @@ function main() {
     export default deployedContracts satisfies GenericContractsDeclaration;
   `;
 
-  writeFileSync(
-    `${NEXTJS_TARGET_DIR}deployedContracts.ts`,
-    format(fileTemplate("~~/utils/scaffold-eth/contract"), {
-      parser: "typescript",
-    })
-  );
+  const formatted = await format(fileTemplate("~~/utils/scaffold-eth/contract"), {
+    parser: "typescript",
+  });
+  writeFileSync(`${NEXTJS_TARGET_DIR}deployedContracts.ts`, formatted);
 
   console.log(
     `📝 Updated TypeScript contract definition file on ${NEXTJS_TARGET_DIR}deployedContracts.ts`
@@ -285,7 +284,7 @@ function main() {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error("Error:", error);
   process.exitCode = 1;

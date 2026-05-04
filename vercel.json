@@ -1,4 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "pnpm install --frozen-lockfile"
+  "installCommand": "pnpm install --frozen-lockfile",
+  "crons": [
+    {
+      "path": "/api/polymarket/sync",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/settlement/run",
+      "schedule": "0 20 * * *"
+    }
+  ]
 }

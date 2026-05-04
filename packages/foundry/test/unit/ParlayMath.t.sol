@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {ParlayMath} from "../../src/libraries/ParlayMath.sol";
+import {ParlayMath} from "../../contracts/libraries/ParlayMath.sol";
 
 /// @dev Wrapper contract so vm.expectRevert can catch reverts from library calls
 contract ParlayMathWrapper {
@@ -22,12 +22,11 @@ contract ParlayMathWrapper {
         return ParlayMath.correlationDiscountBps(n, asymptoteBps, halfSatPpm);
     }
 
-    function applyCorrelation(
-        uint256 mulX1e6,
-        uint256[] memory groupSizes,
-        uint256 asymptoteBps,
-        uint256 halfSatPpm
-    ) external pure returns (uint256) {
+    function applyCorrelation(uint256 mulX1e6, uint256[] memory groupSizes, uint256 asymptoteBps, uint256 halfSatPpm)
+        external
+        pure
+        returns (uint256)
+    {
         return ParlayMath.applyCorrelation(mulX1e6, groupSizes, asymptoteBps, halfSatPpm);
     }
 
@@ -43,7 +42,9 @@ contract ParlayMathWrapper {
         uint256 totalLegs,
         uint256 potentialPayout
     ) external pure returns (uint256, uint256) {
-        return ParlayMath.computeCashoutValue(effectiveStake, wonProbsPPM, unresolvedCount, basePenaltyBps, totalLegs, potentialPayout);
+        return ParlayMath.computeCashoutValue(
+            effectiveStake, wonProbsPPM, unresolvedCount, basePenaltyBps, totalLegs, potentialPayout
+        );
     }
 }
 
@@ -162,9 +163,7 @@ contract ParlayMathTest is Test {
         // 1500 * 2 / 7 = 428 (truncated from 428.57...)
         uint256[] memory wonProbs = new uint256[](1);
         wonProbs[0] = 500_000;
-        (, uint256 penaltyBps) = ParlayMath.computeCashoutValue(
-            10e6, wonProbs, 2, 1500, 7, type(uint128).max
-        );
+        (, uint256 penaltyBps) = ParlayMath.computeCashoutValue(10e6, wonProbs, 2, 1500, 7, type(uint128).max);
         assertEq(penaltyBps, 428);
     }
 

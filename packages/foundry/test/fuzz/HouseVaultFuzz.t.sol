@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract HouseVaultFuzzTest is Test {

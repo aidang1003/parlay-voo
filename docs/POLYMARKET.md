@@ -74,7 +74,7 @@ Classification runs off the event's title + slug + tag labels (regex on `\bnba\b
 
 ## Running sync locally
 
-Requires `DATABASE_URL`, `CRON_SECRET`, `DEPLOYER_PRIVATE_KEY` in `.env.local`, and the dev server running (`pnpm dev`).
+Requires `DATABASE_URL`, `CRON_SECRET`, `WARM_DEPLOYER_PRIVATE_KEY` in `.env.local`, and the dev server running (`pnpm dev`).
 
 ```bash
 # One-time: apply schema + backfill seed legs into leg_mapping
@@ -102,7 +102,7 @@ Wipe and reset by deleting and recreating the branch. Inspect with either the Ne
 `vercel.json` registers a daily cron at `08:00 UTC` against `/api/polymarket/sync`. Vercel attaches the `Authorization: Bearer $CRON_SECRET` header when the secret is set in project env.
 
 ```bash
-vercel env ls                    # should show DATABASE_URL + CRON_SECRET + DEPLOYER_PRIVATE_KEY
+vercel env ls                    # should show DATABASE_URL + CRON_SECRET + WARM_DEPLOYER_PRIVATE_KEY
 vercel cron ls                   # should show the daily entry
 ```
 
@@ -120,12 +120,12 @@ vercel cron ls                   # should show the daily entry
 If a Polymarket market enters a UMA dispute that drags past our 48h `earliestResolve` buffer, the sync route will keep finding the leg unresolved every run. To manually void:
 
 ```bash
-# From anywhere with DEPLOYER_PRIVATE_KEY in scope:
+# From anywhere with WARM_DEPLOYER_PRIVATE_KEY in scope:
 cast send $NEXT_PUBLIC_ADMIN_ORACLE_ADDRESS \
   "resolve(uint256,uint8,bytes32)" \
   <yesLegId> 3 0x0000...0000 \
   --rpc-url $BASE_SEPOLIA_RPC_URL \
-  --private-key $DEPLOYER_PRIVATE_KEY
+  --private-key $WARM_DEPLOYER_PRIVATE_KEY
 
 # LegStatus enum: Unresolved=0, Won=1, Lost=2, Voided=3
 # Then do the same for <noLegId>, and manually insert a row into
@@ -136,7 +136,7 @@ cast send $NEXT_PUBLIC_ADMIN_ORACLE_ADDRESS \
 
 **"unauthorized" from `/api/polymarket/sync`** — CRON_SECRET missing or mismatched. Check `.env.local` and Vercel env.
 
-**"missing required env"** — `DEPLOYER_PRIVATE_KEY` isn't set in root `.env`. Contract addresses live in `packages/nextjs/src/contracts/deployedContracts.ts` (regenerated on every `pnpm deploy:*`) — they are not read from env vars.
+**"missing required env"** — `WARM_DEPLOYER_PRIVATE_KEY` isn't set in root `.env`. Contract addresses live in `packages/nextjs/src/contracts/deployedContracts.ts` (regenerated on every `pnpm deploy:*`) — they are not read from env vars.
 
 **"market already closed/archived"** — Curated entry references a market that ended before registration. Remove or replace the `conditionId` in `curated.ts`.
 

@@ -2,10 +2,10 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
-import {ILockVault} from "../../src/interfaces/ILockVault.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LockVaultV2} from "../../contracts/core/LockVaultV2.sol";
+import {ILockVault} from "../../contracts/interfaces/ILockVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Rehab tests: loss accrues to per-user claimable balance, user

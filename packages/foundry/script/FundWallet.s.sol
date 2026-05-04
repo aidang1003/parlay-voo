@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
-import {MockUSDC} from "../src/MockUSDC.sol";
+import {MockUSDC} from "../contracts/MockUSDC.sol";
 import {CodeConstants} from "./HelperConfig.s.sol";
 
 /// @notice Mint MockUSDC + (on local Anvil) fund ETH to a wallet.
@@ -19,8 +19,7 @@ contract FundWallet is Script, CodeConstants {
     using stdJson for string;
 
     function _readMockUsdcFromBroadcast() internal view returns (address) {
-        string memory path =
-            string.concat("broadcast/Deploy.s.sol/", vm.toString(block.chainid), "/run-latest.json");
+        string memory path = string.concat("broadcast/Deploy.s.sol/", vm.toString(block.chainid), "/run-latest.json");
         string memory json = vm.readFile(path);
         bytes32 target = keccak256(bytes("MockUSDC"));
         for (uint256 i = 0; i < 256; i++) {
@@ -47,8 +46,8 @@ contract FundWallet is Script, CodeConstants {
         // Local Anvil falls back to the well-known account #0 so devs can fund a wallet
         // with zero env setup. Remote chains must supply the real deployer key (MockUSDC owner).
         uint256 key = block.chainid == LOCAL_CHAIN_ID
-            ? vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY)
-            : vm.envUint("DEPLOYER_PRIVATE_KEY");
+            ? vm.envOr("WARM_DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY)
+            : vm.envUint("WARM_DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(key);
         uint256 amount = amountUnits * 1e6; // USDC is 6-decimals
 

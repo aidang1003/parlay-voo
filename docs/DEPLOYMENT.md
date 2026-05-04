@@ -38,10 +38,10 @@ pnpm fund-wallet:local 10000
 
 ```bash
 # 1. Fill root .env:
-#   DEPLOYER_PRIVATE_KEY=<funded key>
-#   QUOTE_SIGNER_PRIVATE_KEY=<signer key — set as trusted signer during deploy>
-#   BASESCAN_API_KEY=<optional, for verification>
-#   USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e  (or leave blank to use the HelperConfig default)
+#   WARM_DEPLOYER_PRIVATE_KEY=<funded key>
+#   HOT_SIGNER_PRIVATE_KEY=<signer key — set as trusted signer during deploy>
+#   ETHERSCAN_API_KEY=<optional, for verification>
+#   USE_REAL_USDC=true  (use the chain's canonical Circle USDC; otherwise deploys MockUSDC)
 
 # 2. Deploy
 pnpm deploy:sepolia
@@ -55,23 +55,14 @@ pnpm fund-wallet:sepolia 1000
 1. Loads `HelperConfig.getBaseSepoliaConfig()` — returns `{usdc, bootstrapDays, umaOracleV3, umaLiveness, umaBondAmount, uniswapNFPM, weth, deployerKey}`.
 2. Deploys HouseVault, LegRegistry, AdminOracleAdapter, UmaOracleAdapter (wrapping UMA OOv3 at `0x0F7fC5E6482f096380db6158f978167b57388deE` on Base Sepolia), ParlayEngine. Wires permissions and fee routing.
 3. Deploys LockVaultV2 (continuous-duration lock curve) and the yield adapter.
-4. Calls `SetTrustedSigner` to register `QUOTE_SIGNER_PRIVATE_KEY`'s address as the engine's trusted JIT quote signer.
+4. Calls `SetTrustedSigner` to register `HOT_SIGNER_PRIVATE_KEY`'s address as the engine's trusted JIT quote signer.
 5. `tsx scripts/generate-deployed-contracts.ts 84532` reads the forge broadcast JSON + ABIs from `forge out/` and writes `packages/nextjs/src/contracts/deployedContracts.ts`.
 
 Per-chain config (USDC, bootstrap length, UMA OOv3 address / liveness / bond) lives in `packages/foundry/script/HelperConfig.s.sol`. Adding a new chain = adding a `getXxxConfig()` branch keyed on `block.chainid`.
 
-## Onboarding faucet (separate deploy)
+## Onboarding ETH drip
 
-The `OnboardingFaucet` powers the new-user onboarding page on `/`. It is deliberately **not** part of `Deploy.s.sol` so a redeploy of the protocol does not reset the per-address `claimed` map. Funded + owned by the wallet behind `QUOTE_SIGNER_PRIVATE_KEY` (with fallback to `DEPLOYER_PRIVATE_KEY`).
-
-Run after the main deploy on each chain:
-
-```bash
-pnpm deploy:faucet:local      # Anvil
-pnpm deploy:faucet:sepolia    # Base Sepolia (seeds 0.1 ETH)
-```
-
-`tsx scripts/generate-deployed-contracts.ts` is chained automatically and merges the faucet address into `deployedContracts.ts` alongside the protocol contracts. Refill + parameter ops are covered in `docs/RUNBOOK.md` ("Onboarding Faucet").
+The new-user onboarding page on `/` drips 0.005 ETH for gas via `POST /api/onboarding/claim-eth`. The relayer key is `ANVIL_ACCOUNT_0` on local and `HOT_SIGNER_PRIVATE_KEY` on testnet — no contract, no separate deploy. Keep the testnet hot signer wallet topped up.
 
 ## Contract verification
 
@@ -80,7 +71,7 @@ Pass `--verify` flags through forge, or verify manually:
 ```bash
 forge verify-contract <address> src/core/HouseVault.sol:HouseVault \
   --chain base-sepolia \
-  --etherscan-api-key $BASESCAN_API_KEY \
+  --etherscan-api-key $ETHERSCAN_API_KEY \
   --constructor-args $(cast abi-encode "constructor(address)" 0x036CbD53842c5426634e7929541eC2318f3dCF7e)
 ```
 
@@ -98,7 +89,7 @@ Required env vars on Vercel:
 |---|---|---|
 | `NEXT_PUBLIC_CHAIN_ID` | Yes | `84532` for Base Sepolia, `31337` for local |
 | `NEXT_PUBLIC_WC_PROJECT_ID` | Yes | WalletConnect project ID |
-| `QUOTE_SIGNER_PRIVATE_KEY` | Yes | Server-side JIT quote signing |
+| `HOT_SIGNER_PRIVATE_KEY` | Yes | Server-side JIT quote signing |
 | `ANTHROPIC_API_KEY` | For chat | Enables AI chat panel |
 | `BASE_SEPOLIA_RPC_URL` | Optional | Alchemy RPC (fallback: public Base Sepolia) |
 
@@ -106,7 +97,7 @@ Required env vars on Vercel:
 
 - [ ] Deployer funded with ETH + USDC on Base Sepolia
 - [ ] `deployedContracts.ts` regenerated with correct addresses (auto-written by `generate-deployed-contracts.ts`)
-- [ ] Trusted JIT signer matches `QUOTE_SIGNER_PRIVATE_KEY`
+- [ ] Trusted JIT signer matches `HOT_SIGNER_PRIVATE_KEY`
 - [ ] Contracts verified on BaseScan (optional but recommended)
 - [ ] Frontend connects on chain ID 84532
 - [ ] Vault deposit, ticket purchase (signed quote), and claim all work end-to-end
@@ -115,8 +106,8 @@ Required env vars on Vercel:
 
 | Variable | Required | Description |
 |---|---|---|
-| `DEPLOYER_PRIVATE_KEY` | Yes | Deploy broadcaster |
-| `QUOTE_SIGNER_PRIVATE_KEY` | Yes | Registered as engine's trusted JIT quote signer |
+| `WARM_DEPLOYER_PRIVATE_KEY` | Yes | Deploy broadcaster |
+| `HOT_SIGNER_PRIVATE_KEY` | Yes | Registered as engine's trusted JIT quote signer |
 | `BASE_SEPOLIA_RPC_URL` | Yes | RPC endpoint (default `https://sepolia.base.org`) |
-| `USDC_ADDRESS` | Optional | Override Circle USDC (HelperConfig default: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`) |
-| `BASESCAN_API_KEY` | Optional | For auto-verification |
+| `USE_REAL_USDC` | Optional | `true` → canonical Circle USDC for the chain (per `CodeConstants`). Unset / `false` → deploy MockUSDC (mint button works in-app, even on mainnets — see CoreStep warning). |
+| `ETHERSCAN_API_KEY` | Optional | Single Etherscan v2 key — covers Mainnet/Sepolia/Base/Base Sepolia auto-verification |

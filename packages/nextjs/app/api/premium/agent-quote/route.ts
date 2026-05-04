@@ -1,0 +1,178 @@
+import { NextResponse } from "next/server";
+import { formatUnits } from "viem";
+import { LEG_MAP, refreshLegMap } from "~~/lib/mcp/tools";
+import { RISK_CAPS } from "~~/lib/risk";
+import {
+  CORRELATION_ASYMPTOTE_BPS,
+  CORRELATION_HALF_SAT_PPM,
+  PPM,
+  PROTOCOL_FEE_BPS,
+  RiskAction,
+  USDC_DECIMALS,
+  applyCorrelation,
+  applyFee,
+  computeMultiplier,
+  computePayout,
+} from "~~/utils/parlay";
+import type { RiskProfile } from "~~/utils/parlay";
+
+// Combined quote + Kelly risk assessment.
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { legIds, outcomes, stake, bankroll, riskTolerance } = body as {
+      legIds: number[];
+      outcomes: string[];
+      stake: string;
+      bankroll: string;
+      riskTolerance: string;
+    };
+
+    await refreshLegMap();
+
+    if (!Array.isArray(legIds) || legIds.length < 2 || legIds.length > 5) {
+      return NextResponse.json({ error: "legIds must be an array of 2-5 numbers" }, { status: 400 });
+    }
+
+    const probs: number[] = [];
+    const categories: string[] = [];
+    const groupCounts = new Map<number, number>();
+    for (const id of legIds) {
+      const leg = LEG_MAP.get(id);
+      if (!leg) {
+        return NextResponse.json({ error: `Leg ${id} not found` }, { status: 400 });
+      }
+      if (!leg.active) {
+        return NextResponse.json({ error: `Leg ${id} is not active` }, { status: 400 });
+      }
+      probs.push(leg.probabilityPPM);
+      categories.push(leg.category);
+      const corrId = leg.correlationGroupId ?? 0;
+      if (corrId !== 0) {
+        groupCounts.set(corrId, (groupCounts.get(corrId) ?? 0) + 1);
+      }
+    }
+    const groupSizes = Array.from(groupCounts.values());
+
+    const stakeNum = parseFloat(stake) || 0;
+    if (stakeNum < 1) {
+      return NextResponse.json({ error: "Stake must be at least 1 USDC" }, { status: 400 });
+    }
+
+    const stakeRaw = BigInt(Math.round(stakeNum * 10 ** USDC_DECIMALS));
+    const fairMultiplierX1e6 = computeMultiplier(probs);
+    const feeAdjusted = applyFee(fairMultiplierX1e6, probs.length, PROTOCOL_FEE_BPS);
+    const netMultiplierX1e6 = applyCorrelation(
+      feeAdjusted,
+      groupSizes,
+      CORRELATION_ASYMPTOTE_BPS,
+      CORRELATION_HALF_SAT_PPM,
+    );
+    const payout = computePayout(stakeRaw, netMultiplierX1e6);
+
+    const quote = {
+      legIds,
+      outcomes,
+      stake,
+      multiplierX1e6: netMultiplierX1e6.toString(),
+      potentialPayout: formatUnits(payout, USDC_DECIMALS),
+      probabilities: probs,
+      valid: true,
+    };
+
+    const profile: RiskProfile =
+      riskTolerance === "conservative" || riskTolerance === "aggressive" ? riskTolerance : "moderate";
+    const caps = RISK_CAPS[profile];
+    const warnings: string[] = [];
+    const numLegs = probs.length;
+
+    if (fairMultiplierX1e6 > 9007199254740991n) {
+      return NextResponse.json({
+        quote,
+        risk: {
+          action: RiskAction.AVOID,
+          suggestedStake: "0.00",
+          kellyFraction: 0,
+          winProbability: 0,
+          expectedValue: 0,
+          confidence: 0.5,
+          reasoning: "Combined multiplier exceeds safe computation range.",
+          warnings: ["Multiplier too large"],
+          riskTolerance: profile,
+          fairMultiplier: 0,
+          netMultiplier: 0,
+        },
+      });
+    }
+
+    const fairMultFloat = Number(fairMultiplierX1e6) / PPM;
+    const netMultFloat = Number(netMultiplierX1e6) / PPM;
+    const winProbability = 1 / fairMultFloat;
+    const ev = winProbability * netMultFloat - 1;
+    const expectedValue = Math.round(ev * stakeNum * 100) / 100;
+
+    const b = netMultFloat - 1;
+    const p = winProbability;
+    const q = 1 - p;
+    let kellyFraction = b > 0 ? Math.max(0, (b * p - q) / b) : 0;
+    kellyFraction = Math.min(kellyFraction, caps.maxKelly);
+
+    const bankrollNum = parseFloat(bankroll) || 1000;
+    const suggestedStake = Math.round(kellyFraction * bankrollNum * 100) / 100;
+
+    if (numLegs > caps.maxLegs) {
+      warnings.push(`${profile} profile recommends max ${caps.maxLegs} legs, you have ${numLegs}`);
+    }
+    if (winProbability < caps.minWinProb) {
+      warnings.push(
+        `Win probability ${(winProbability * 100).toFixed(2)}% is below ${profile} minimum of ${(caps.minWinProb * 100).toFixed(0)}%`,
+      );
+    }
+
+    const catCounts: Record<string, number> = {};
+    for (const cat of categories) {
+      catCounts[cat] = (catCounts[cat] || 0) + 1;
+    }
+    for (const [cat, count] of Object.entries(catCounts)) {
+      if (count > 1) {
+        warnings.push(`${count} legs in category "${cat}" may be correlated`);
+      }
+    }
+
+    let action: string = RiskAction.BUY;
+    let reasoning = "";
+
+    if (winProbability < caps.minWinProb || numLegs > caps.maxLegs) {
+      action = RiskAction.AVOID;
+      reasoning = `${numLegs}-leg parlay at ${(winProbability * 100).toFixed(2)}% win probability exceeds ${profile} risk tolerance limits.`;
+    } else if (kellyFraction === 0) {
+      action = RiskAction.REDUCE_STAKE;
+      reasoning = `Net multiplier (${netMultFloat.toFixed(2)}x) leaves no positive Kelly edge. Kelly suggests $0.`;
+    } else if (suggestedStake < stakeNum) {
+      action = RiskAction.REDUCE_STAKE;
+      reasoning = `Kelly criterion suggests ${suggestedStake.toFixed(2)} USDC (${(kellyFraction * 100).toFixed(2)}% of bankroll). Your proposed stake of ${stake} USDC exceeds this.`;
+    } else {
+      reasoning = `${numLegs}-leg parlay at ${(winProbability * 100).toFixed(2)}% win probability. Kelly suggests ${(kellyFraction * 100).toFixed(2)}% of bankroll = ${suggestedStake.toFixed(2)} USDC.`;
+    }
+
+    const confidence = Math.max(0.5, 1 - (numLegs - 2) * 0.1);
+
+    const risk = {
+      action,
+      suggestedStake: suggestedStake.toFixed(2),
+      kellyFraction: Math.round(kellyFraction * 10_000) / 10_000,
+      winProbability: Math.round(winProbability * 1_000_000) / 1_000_000,
+      expectedValue,
+      confidence: Math.round(confidence * 100) / 100,
+      reasoning,
+      warnings,
+      riskTolerance: profile,
+      fairMultiplier: Math.round(fairMultFloat * 100) / 100,
+      netMultiplier: Math.round(netMultFloat * 100) / 100,
+    };
+
+    return NextResponse.json({ quote, risk });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Internal error" }, { status: 500 });
+  }
+}

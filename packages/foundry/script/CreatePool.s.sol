@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
+import {CodeConstants} from "./HelperConfig.s.sol";
 
 interface IWETH {
     function deposit() external payable;
@@ -29,12 +30,10 @@ interface INonfungiblePositionManager {
         uint256 deadline;
     }
 
-    function createAndInitializePoolIfNecessary(
-        address token0,
-        address token1,
-        uint24 fee,
-        uint160 sqrtPriceX96
-    ) external payable returns (address pool);
+    function createAndInitializePoolIfNecessary(address token0, address token1, uint24 fee, uint160 sqrtPriceX96)
+        external
+        payable
+        returns (address pool);
 
     function mint(MintParams calldata params)
         external
@@ -45,7 +44,7 @@ interface INonfungiblePositionManager {
 /// @title CreatePool -- Create USDC/WETH Uniswap V3 pool on Base Sepolia
 /// @notice Wraps ETH, creates pool, and adds initial liquidity
 /// @dev Run: forge script script/CreatePool.s.sol --rpc-url base-sepolia --broadcast
-contract CreatePool is Script {
+contract CreatePool is Script, CodeConstants {
     struct Config {
         address usdc;
         address weth;
@@ -89,9 +88,8 @@ contract CreatePool is Script {
         // 3. Create and initialize pool (fee=500 = 0.05%)
         uint160 sqrtPriceX96 = usdcIsToken0 ? SQRT_PRICE_USDC_WETH : SQRT_PRICE_WETH_USDC;
         uint24 fee = uint24(vm.envOr("POOL_FEE", uint256(500)));
-        address pool = INonfungiblePositionManager(c.nfpm).createAndInitializePoolIfNecessary(
-            token0, token1, fee, sqrtPriceX96
-        );
+        address pool =
+            INonfungiblePositionManager(c.nfpm).createAndInitializePoolIfNecessary(token0, token1, fee, sqrtPriceX96);
         console.log("Pool created: ", pool);
 
         // 4. Add liquidity
@@ -103,10 +101,21 @@ contract CreatePool is Script {
 
     function _loadConfig() internal view returns (Config memory) {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
+        address usdc;
+        address nfpm;
+        if (block.chainid == BASE_SEPOLIA_CHAIN_ID) {
+            usdc = USDC_BASE_SEPOLIA;
+            nfpm = UNISWAP_NFPM_BASE_SEPOLIA;
+        } else if (block.chainid == BASE_MAINNET_CHAIN_ID) {
+            usdc = USDC_BASE_MAINNET;
+            nfpm = UNISWAP_NFPM_BASE_MAINNET;
+        } else {
+            revert("CreatePool: unsupported chain (Base Sepolia + Base Mainnet only)");
+        }
         return Config({
-            usdc: vm.envOr("USDC_ADDRESS", address(0x036CbD53842c5426634e7929541eC2318f3dCF7e)),
-            weth: vm.envOr("WETH_ADDRESS", address(0x4200000000000000000000000000000000000006)),
-            nfpm: vm.envOr("UNISWAP_NFPM", address(0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2)),
+            usdc: usdc,
+            weth: WETH_BASE,
+            nfpm: nfpm,
             wethAmount: vm.envOr("WETH_AMOUNT", uint256(0.01 ether)),
             deployer: vm.addr(deployerKey)
         });

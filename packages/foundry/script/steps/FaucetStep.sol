@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
 
 abstract contract FaucetStep is Script {
     function _mintInitialUsdc(MockUSDC mockUsdc, address deployer) internal {

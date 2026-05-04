@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {ParlayMath} from "../../src/libraries/ParlayMath.sol";
+import {ParlayMath} from "../../contracts/libraries/ParlayMath.sol";
 
 /// @title CashoutMathFuzz
 /// @notice Fuzz tests for computeCashoutValue and progressive payout math.
@@ -28,19 +28,13 @@ contract CashoutMathFuzzTest is Test {
         uint256[] memory wonProbs = new uint256[](1);
         wonProbs[0] = wonProb;
 
-        (uint256 cashoutValue,) = ParlayMath.computeCashoutValue(
-            stake, wonProbs, 1, basePenaltyBps, 2, potentialPayout
-        );
+        (uint256 cashoutValue,) = ParlayMath.computeCashoutValue(stake, wonProbs, 1, basePenaltyBps, 2, potentialPayout);
 
         assertLe(cashoutValue, potentialPayout, "cashout must not exceed potential payout");
     }
 
     /// @notice penaltyBps is always bounded by basePenaltyBps (since unresolved/total <= 1).
-    function testFuzz_cashout_penaltyBounded(
-        uint256 stake,
-        uint256 wonProb,
-        uint256 basePenaltyBps
-    ) public pure {
+    function testFuzz_cashout_penaltyBounded(uint256 stake, uint256 wonProb, uint256 basePenaltyBps) public pure {
         stake = bound(stake, 1e6, 1e12);
         wonProb = bound(wonProb, 10_000, PPM);
         basePenaltyBps = bound(basePenaltyBps, 0, 5000);
@@ -48,19 +42,15 @@ contract CashoutMathFuzzTest is Test {
         uint256[] memory wonProbs = new uint256[](1);
         wonProbs[0] = wonProb;
 
-        (, uint256 penaltyBps) = ParlayMath.computeCashoutValue(
-            stake, wonProbs, 1, basePenaltyBps, 2, type(uint128).max
-        );
+        (, uint256 penaltyBps) =
+            ParlayMath.computeCashoutValue(stake, wonProbs, 1, basePenaltyBps, 2, type(uint128).max);
 
         assertLe(penaltyBps, basePenaltyBps, "penalty must not exceed base");
     }
 
     /// @notice Cashout with zero penalty equals the won-leg expected value.
     ///         fairValue = wonValue (no discount by unresolved probs — wonValue IS the EV).
-    function testFuzz_cashout_zeroPenalty_equalsFairValue(
-        uint256 stake,
-        uint256 wonProb
-    ) public pure {
+    function testFuzz_cashout_zeroPenalty_equalsFairValue(uint256 stake, uint256 wonProb) public pure {
         stake = bound(stake, 1e6, 1e12);
         wonProb = bound(wonProb, 10_000, PPM);
 
@@ -68,9 +58,8 @@ contract CashoutMathFuzzTest is Test {
         wonProbs[0] = wonProb;
 
         // basePenaltyBps = 0 means no penalty applied
-        (uint256 cashoutValue, uint256 penaltyBps) = ParlayMath.computeCashoutValue(
-            stake, wonProbs, 1, 0, 2, type(uint128).max
-        );
+        (uint256 cashoutValue, uint256 penaltyBps) =
+            ParlayMath.computeCashoutValue(stake, wonProbs, 1, 0, 2, type(uint128).max);
 
         assertEq(penaltyBps, 0, "penalty should be zero");
 
@@ -98,18 +87,14 @@ contract CashoutMathFuzzTest is Test {
         uint256[] memory wonProbs1 = new uint256[](1);
         wonProbs1[0] = wonProb1;
 
-        (uint256 cashout1,) = ParlayMath.computeCashoutValue(
-            stake, wonProbs1, 1, basePenaltyBps, 2, type(uint128).max
-        );
+        (uint256 cashout1,) = ParlayMath.computeCashoutValue(stake, wonProbs1, 1, basePenaltyBps, 2, type(uint128).max);
 
         // 2-won-leg cashout: totalLegs=3 (2 won + 1 unresolved)
         uint256[] memory wonProbs2 = new uint256[](2);
         wonProbs2[0] = wonProb1;
         wonProbs2[1] = wonProb2;
 
-        (uint256 cashout2,) = ParlayMath.computeCashoutValue(
-            stake, wonProbs2, 1, basePenaltyBps, 3, type(uint128).max
-        );
+        (uint256 cashout2,) = ParlayMath.computeCashoutValue(stake, wonProbs2, 1, basePenaltyBps, 3, type(uint128).max);
 
         // More won legs means higher wonMultiplier AND lower penalty ratio
         assertGe(cashout2, cashout1, "more won legs must yield higher or equal cashout");
@@ -133,9 +118,8 @@ contract CashoutMathFuzzTest is Test {
         wonProbs[0] = w0;
         wonProbs[1] = w1;
 
-        (uint256 cashoutValue, uint256 penaltyBps) = ParlayMath.computeCashoutValue(
-            stake, wonProbs, 2, basePenaltyBps, 4, potentialPayout
-        );
+        (uint256 cashoutValue, uint256 penaltyBps) =
+            ParlayMath.computeCashoutValue(stake, wonProbs, 2, basePenaltyBps, 4, potentialPayout);
 
         assertLe(cashoutValue, potentialPayout, "capped at potential payout");
         // penaltyBps = basePenaltyBps * 2 / 4 = basePenaltyBps / 2
@@ -173,11 +157,10 @@ contract CashoutMathFuzzTest is Test {
     // ── Progressive payout invariants ─────────────────────────────────────
 
     /// @notice Progressive partial payout never exceeds potentialPayout.
-    function testFuzz_progressive_neverExceedsPotentialPayout(
-        uint256 stake,
-        uint256 prob,
-        uint256 potentialPayout
-    ) public pure {
+    function testFuzz_progressive_neverExceedsPotentialPayout(uint256 stake, uint256 prob, uint256 potentialPayout)
+        public
+        pure
+    {
         stake = bound(stake, 1e6, 1e12);
         prob = bound(prob, 10_000, PPM);
         potentialPayout = bound(potentialPayout, 1, type(uint128).max);
@@ -220,12 +203,10 @@ contract CashoutMathFuzzTest is Test {
 
     /// @notice Claimable amount (payout - alreadyClaimed) is always non-negative.
     ///         Simulates sequential progressive claims.
-    function testFuzz_progressive_claimableNonNegative(
-        uint256 stake,
-        uint256 p0,
-        uint256 p1,
-        uint256 potentialPayout
-    ) public pure {
+    function testFuzz_progressive_claimableNonNegative(uint256 stake, uint256 p0, uint256 p1, uint256 potentialPayout)
+        public
+        pure
+    {
         stake = bound(stake, 1e6, 1e12);
         p0 = bound(p0, 10_000, 999_999);
         p1 = bound(p1, 10_000, 999_999);

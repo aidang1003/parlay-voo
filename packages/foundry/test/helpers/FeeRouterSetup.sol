@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LockVaultV2} from "../../contracts/core/LockVaultV2.sol";
 
 /// @notice Shared helper for test setUp: deploys LockVaultV2, wires fee routing.
 abstract contract FeeRouterSetup is Test {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {ParlayMath} from "../../src/libraries/ParlayMath.sol";
+import {ParlayMath} from "../../contracts/libraries/ParlayMath.sol";
 
 contract ParlayMathFuzzTest is Test {
     /// @notice Multiplier never overflows for 1-5 legs with reasonable probabilities.

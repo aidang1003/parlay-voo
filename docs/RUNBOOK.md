@@ -37,44 +37,22 @@ cast send <YOUR_ADDR> --value 0.1ether --rpc-url http://127.0.0.1:8545 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-### Onboarding Faucet (Sepolia)
+### Onboarding ETH drip (Sepolia)
 
-The `OnboardingFaucet` is operationally distinct from the protocol — it has its own deploy script, its own funding wallet, and is not part of `Deploy.s.sol`. Funded + owned by the wallet behind `QUOTE_SIGNER_PRIVATE_KEY` (falling back to `DEPLOYER_PRIVATE_KEY` when unset).
+The onboarding step at `/` drips 0.005 ETH for gas via `POST /api/onboarding/claim-eth`. The relayer is `HOT_SIGNER_PRIVATE_KEY` on testnet (anvil#0 locally) — no contract, no separate deploy. Just keep the hot signer wallet topped up.
 
-**One-time deploy** (after the protocol is up on the chain):
-
-```bash
-pnpm deploy:faucet:local      # Anvil
-pnpm deploy:faucet:sepolia    # Base Sepolia
-```
-
-The deploy script seeds 0.1 ETH on Sepolia automatically. Local seeds 0 (Anvil-funded wallets don't need it).
-
-**Check the balance:**
+**Check the relayer balance:**
 
 ```bash
-cast balance <ONBOARDING_FAUCET> --rpc-url base-sepolia
+cast balance $(cast wallet address --private-key $HOT_SIGNER_PRIVATE_KEY) --rpc-url base-sepolia
 ```
 
-**Refill ETH** (any wallet — `fund()` is permissionless, but the team uses the QUOTE_SIGNER key by convention so refill txs come from the same address that owns the contract):
+**Top it up** from your funding wallet:
 
 ```bash
-cast send <ONBOARDING_FAUCET> "fund()" --value 0.1ether \
-  --rpc-url base-sepolia --private-key $QUOTE_SIGNER_PRIVATE_KEY
+cast send $(cast wallet address --private-key $HOT_SIGNER_PRIVATE_KEY) --value 0.1ether \
+  --rpc-url base-sepolia --private-key $WARM_DEPLOYER_PRIVATE_KEY
 ```
-
-**Tune drip parameters or withdraw** (owner-only — must be `QUOTE_SIGNER`):
-
-```bash
-cast send <ONBOARDING_FAUCET> "setDripParams(uint256,uint256,uint256)" \
-  5000000000000000 10000000000 86400 \
-  --rpc-url base-sepolia --private-key $QUOTE_SIGNER_PRIVATE_KEY
-
-cast send <ONBOARDING_FAUCET> "withdrawEth(uint256)" 100000000000000000 \
-  --rpc-url base-sepolia --private-key $QUOTE_SIGNER_PRIVATE_KEY
-```
-
-Address lives in `packages/nextjs/src/contracts/deployedContracts.ts` after the first deploy run, alongside the protocol contracts.
 
 ### Check Vault Stats
 ```bash

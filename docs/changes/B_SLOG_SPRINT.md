@@ -41,7 +41,7 @@ Feature mechanics live in the main architecture docs (`docs/ARCHITECTURE.md` + t
 
 **Why the faucet contract is excluded from `Deploy.s.sol`.** The faucet is operationally distinct from the protocol — it can be redeployed, drained, refilled, paused independently. A re-deploy of the protocol must not reset the faucet's `claimed` map or risk forgetting to fund it. Its own `script/DeployOnboardingFaucet.s.sol` keeps the lifecycle separate.
 
-**Why the faucet is funded + owned by `QUOTE_SIGNER_PRIVATE_KEY`, not `DEPLOYER_PRIVATE_KEY`.** Refilling is a routine, repeated ops task that wants a hot key. The deployer is intended to be cold on mainnet. `QUOTE_SIGNER_PRIVATE_KEY` is already the project's "always-online" signer, so reusing it for faucet ops avoids introducing a third operational key. On testnet the two keys collapse onto the same address by default, so day-to-day nothing changes; on mainnet the split is meaningful.
+**Why the faucet is funded + owned by `HOT_SIGNER_PRIVATE_KEY`, not `WARM_DEPLOYER_PRIVATE_KEY`.** Refilling is a routine, repeated ops task that wants a hot key. The deployer is intended to be cold on mainnet. `HOT_SIGNER_PRIVATE_KEY` is already the project's "always-online" signer, so reusing it for faucet ops avoids introducing a third operational key. On testnet the two keys collapse onto the same address by default, so day-to-day nothing changes; on mainnet the split is meaningful.
 
 **Why one-time ETH but daily USDC.** ETH is precious testnet inventory and a one-time bound makes refilling a manageable ops task. MockUSDC is unlimited supply and the only real cost is a tx fee, so a daily drip lets returning users top up without redeploying anything.
 

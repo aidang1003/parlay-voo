@@ -3,9 +3,9 @@ pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {UmaOracleAdapter} from "../../src/oracle/UmaOracleAdapter.sol";
-import {IOptimisticOracleV3} from "../../src/interfaces/IOptimisticOracleV3.sol";
-import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
+import {UmaOracleAdapter} from "../../contracts/oracle/UmaOracleAdapter.sol";
+import {IOptimisticOracleV3} from "../../contracts/interfaces/IOptimisticOracleV3.sol";
+import {LegStatus} from "../../contracts/interfaces/IOracleAdapter.sol";
 
 /// @notice Fork test against the real UMA OOv3 deployment on Base Sepolia.
 ///         Requires BASE_SEPOLIA_RPC_URL (or NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL)
@@ -28,9 +28,7 @@ contract UmaOracleSepoliaForkTest is Test {
     address asserter = makeAddr("asserter");
 
     function setUp() public {
-        string memory rpc = vm.envOr(
-            "BASE_SEPOLIA_RPC_URL", vm.envOr("NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL", string(""))
-        );
+        string memory rpc = vm.envOr("BASE_SEPOLIA_RPC_URL", vm.envOr("NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL", string("")));
         if (bytes(rpc).length == 0) {
             vm.skip(true);
             return;
@@ -50,8 +48,7 @@ contract UmaOracleSepoliaForkTest is Test {
     }
 
     function test_happyPath_assertSettle() public {
-        bytes memory claim =
-            bytes("ParlayVoo leg 1 (Polymarket conditionId 0xdeadbeef) resolved YES per Polymarket.");
+        bytes memory claim = bytes("ParlayVoo leg 1 (Polymarket conditionId 0xdeadbeef) resolved YES per Polymarket.");
 
         vm.prank(asserter);
         bytes32 assertionId = adapter.assertOutcome(1, LegStatus.Won, bytes32(uint256(0xa1)), claim);

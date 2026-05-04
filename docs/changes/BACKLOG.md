@@ -117,12 +117,45 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 
 ---
 
+## 8. Compromised-key detection + auto-pause
+
+**Why this is on the radar.** `WARM_DEPLOYER_PRIVATE_KEY` and `HOT_SIGNER_PRIVATE_KEY` both have well-defined "honest behavior" envelopes (see `docs/THREAT_MODEL.md` T7, T9). Manual recovery from a leak depends on a human noticing fast, which is the slow path — meanwhile the attacker is on-chain. We want to detect anomalous behavior automatically and pause the protocol before they can drain meaningfully.
+
+**Honest signals to watch (warm key):**
+- `setEngine` called to any address that isn't our pre-registered legitimate engine.
+- `setTrustedQuoteSigner` called within a short window of a quote-pattern anomaly (T9 ↔ T7 cascade).
+- `setMaxUtilizationBps` / `setMaxPayoutBps` raised significantly in one tx.
+- `AdminOracleAdapter.resolve()` called by an EOA that hasn't called it before, or with a status that contradicts a Polymarket result already in the DB.
+- Owner transactions originating from a new IP / region / time-of-day vs. deployer baseline.
+
+**Honest signals to watch (hot key):**
+- Quote-signing rate spike (e.g., > N quotes/minute, or > X% of recent quotes for a single user).
+- Quotes with multipliers that disagree with the server's own `computeQuote` for the same leg set, by > tolerance.
+- Quotes signed for nonces server-side never issued (signer key used outside the server).
+
+**Two-tier response:**
+- *Tier 1, soft brake:* server-side rate-limit signing, refuse to issue further quotes, page the operator. Doesn't require any on-chain tx, so safe to trigger on noisy signals.
+- *Tier 2, hard brake:* `pause()` `ParlayEngine` and `HouseVault` from a separate "guardian" key — a multisig or single-purpose key whose only power is `pause`. Triggered only on high-confidence signals (forged signer = not us, or owner-call from a new origin).
+
+**The guardian-pause design.** Add a `pauseGuardian` role to `HouseVault` and `ParlayEngine`. Guardian can `pause` but **not** `unpause` and **not** call any other owner setter. Compromise of the guardian key → DoS, not drain. Compromise of warm key → still bad, but guardian gives us a separate shutoff that the attacker doesn't control. Implementation: add `onlyGuardianOrOwner` modifier to `pause()`; leave `unpause()` as `onlyOwner`.
+
+**Watcher topology.** Off-chain watcher (a Vercel cron + Discord/PagerDuty hook) tails the Engine + Vault contract events and the JIT-quote endpoint logs. Anomaly heuristics run on the watcher; on Tier 2 trigger the watcher signs and broadcasts a `pause()` tx with the guardian key (kept in a different secrets store from the warm key — ideally an HSM).
+
+**Why deferred.** Hackathon scope accepts the manual-rotation runbook in `THREAT_MODEL.md`. The auto-pause is architecturally clean (`pauseGuardian` role + watcher loop) but not load-bearing until we have meaningful TVL. When the TVL crosses the threshold where a 5-minute manual response window is too slow, this becomes a real change doc and lands.
+
+**Out of scope for this entry:**
+- Multisig-with-timelock for the warm key (separate, larger initiative).
+- Auto-unpause / auto-rotate. Recovery should stay manual; we don't want a buggy heuristic to ship rotation calls.
+
+---
+
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
 2. Early-resolve tickets once a leg is lost — quick win, frees reserves sooner.
-3. Dynamic fee scaling — medium effort, strong DeFi mechanic.
-4. Dynamic max payout — medium effort, unlocks larger tickets.
-5. Jackpot pool — high effort, major feature expansion.
-6. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
-7. RFQ — only when real flow + a concrete maker set are in hand.
+3. Compromised-key detection + auto-pause — picks up real urgency once TVL crosses a threshold.
+4. Dynamic fee scaling — medium effort, strong DeFi mechanic.
+5. Dynamic max payout — medium effort, unlocks larger tickets.
+6. Jackpot pool — high effort, major feature expansion.
+7. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
+8. RFQ — only when real flow + a concrete maker set are in hand.

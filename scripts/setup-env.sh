@@ -2,7 +2,16 @@
 # Installs symlinks that point each package's local env file at the root .env,
 # so the project has a single source of truth for env vars across nextjs +
 # foundry. Idempotent — safe to re-run from postinstall / predev / predeploy.
+#
+# Vercel and other CI platforms inject env vars directly into the process
+# environment (no .env file), so the symlink dance is a no-op there. We bail
+# early to keep build logs quiet and avoid printing misleading "copy
+# .env.example" guidance on managed deploys.
 set -e
+
+if [ -n "$VERCEL" ] || [ -n "$CI" ]; then
+  exit 0
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."

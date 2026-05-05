@@ -1,3 +1,13 @@
 {
-  "installCommand": "yarn install"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/polymarket/sync",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/settlement/run",
+      "schedule": "0 20 * * *"
+    }
+  ]
 }

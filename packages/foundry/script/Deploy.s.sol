@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {console} from "forge-std/Script.sol";
-import {MockUSDC} from "../src/MockUSDC.sol";
+import {MockUSDC} from "../contracts/MockUSDC.sol";
 import {HelperConfig, CodeConstants} from "./HelperConfig.s.sol";
 import {CoreStep} from "./steps/CoreStep.sol";
 import {LockVaultStep} from "./steps/LockVaultStep.sol";

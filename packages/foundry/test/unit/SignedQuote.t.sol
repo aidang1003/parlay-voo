@@ -2,11 +2,11 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LegRegistry} from "../../src/core/LegRegistry.sol";
-import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LegRegistry} from "../../contracts/core/LegRegistry.sol";
+import {ParlayEngine} from "../../contracts/core/ParlayEngine.sol";
+import {AdminOracleAdapter} from "../../contracts/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {FeeRouterSetup} from "../helpers/FeeRouterSetup.sol";
 
@@ -81,13 +81,7 @@ contract SignedQuoteTest is FeeRouterSetup {
         ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
         legs[0] = _leg("poly:a", 500_000, bytes32(uint256(1)));
         legs[1] = _leg("poly:b", 250_000, bytes32(uint256(1)));
-        q = ParlayEngine.Quote({
-            buyer: buyer,
-            stake: stake,
-            legs: legs,
-            deadline: deadline,
-            nonce: nonce
-        });
+        q = ParlayEngine.Quote({buyer: buyer, stake: stake, legs: legs, deadline: deadline, nonce: nonce});
     }
 
     function _sign(uint256 pk, ParlayEngine.Quote memory q) internal view returns (bytes memory) {
@@ -122,14 +116,7 @@ contract SignedQuoteTest is FeeRouterSetup {
             );
         }
         bytes32 structHash = keccak256(
-            abi.encode(
-                quoteTypeHash,
-                q.buyer,
-                q.stake,
-                keccak256(abi.encodePacked(legHashes)),
-                q.deadline,
-                q.nonce
-            )
+            abi.encode(quoteTypeHash, q.buyer, q.stake, keccak256(abi.encodePacked(legHashes)), q.deadline, q.nonce)
         );
         bytes32 separator = engine.domainSeparator();
         return keccak256(abi.encodePacked("\x19\x01", separator, structHash));
@@ -236,13 +223,8 @@ contract SignedQuoteTest is FeeRouterSetup {
         ParlayEngine.SourceLeg[] memory legs = new ParlayEngine.SourceLeg[](2);
         legs[0] = _leg("poly:a", 500_000, bytes32(uint256(1)));
         legs[1] = _leg("poly:c", 400_000, bytes32(uint256(1)));
-        ParlayEngine.Quote memory q2 = ParlayEngine.Quote({
-            buyer: alice,
-            stake: 10e6,
-            legs: legs,
-            deadline: 550_000,
-            nonce: 11
-        });
+        ParlayEngine.Quote memory q2 =
+            ParlayEngine.Quote({buyer: alice, stake: 10e6, legs: legs, deadline: 550_000, nonce: 11});
         bytes memory sig2 = _sign(signerPk, q2);
         vm.prank(alice);
         uint256 t2 = engine.buyTicketSigned(q2, sig2);

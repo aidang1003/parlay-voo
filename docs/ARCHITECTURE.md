@@ -38,7 +38,6 @@ flowchart TB
         OO[UmaOracleAdapter<br/>UMA OOv3 wrapper<br/>mainnet]
         PM[ParlayMath<br/>pure library]
         YA[YieldAdapter<br/>Aave (mainnet) /<br/>Mock (testnet)]
-        OF[OnboardingFaucet<br/>peripheral · testnet drip<br/>(separate deploy)]
     end
 
     subgraph "Human Users"
@@ -106,8 +105,8 @@ Pluggable settlement via `IOracleAdapter` interface. Per-leg adapter address sna
 ### Yield Adapter
 HouseVault holds USDC; idle balance can be deployed via `setYieldAdapter()` to any `IYieldAdapter` implementation. `MockYieldAdapter` is the testnet/CI default (returns USDC unchanged). `AaveYieldAdapter` is the production adapter — wraps Aave V3 supply/withdraw on Base mainnet. Permissionless `recallFromAdapter()` exists so depositors can force liquidity back into the vault if the adapter ever stalls.
 
-### OnboardingFaucet (peripheral, testnet only)
-Stand-alone testnet drip: one-shot ETH per address + 24h MockUSDC drip. Lives in `peripheral/`, deployed by its own `script/DeployOnboardingFaucet.s.sol`, **not** part of `Deploy.s.sol`. Owned + funded by `QUOTE_SIGNER_PRIVATE_KEY` so the cold deployer key stays offline. The frontend's onboarding page calls it; if the contract isn't deployed for the current chain, the USDC step gracefully degrades to the existing `useMintTestUSDC` direct mint.
+### Onboarding ETH drip (testnet only)
+The onboarding step at `/` POSTs to `/api/onboarding/claim-eth`, which relays a 0.005 ETH transfer from a server-funded wallet (anvil#0 locally, `HOT_SIGNER_PRIVATE_KEY` on testnet). No contract — direct value transfer. The USDC step uses `useMintTestUSDC` (permissionless `MockUSDC.mint` from the user's wallet, which now has gas).
 
 ## Crons
 
@@ -126,7 +125,7 @@ Odds are **frozen at sign time** — deterministic pricing is required by the ma
 
 Daily Vercel cron at 20:00 UTC. Iterates `ticketCount`; for each active ticket whose legs all return `canResolve=true`, calls `ParlayEngine.settleTicket()` to finalize payouts and release vault reserves. Idempotent — already-settled tickets are skipped. Per-leg path branches on the snapshotted `oracleAdapter`: Admin legs settle one-shot; UMA legs are two-phase (assert → wait liveness → settle).
 
-Signed with `DEPLOYER_PRIVATE_KEY`. Manual trigger via `/api/settlement/trigger` exists for ops.
+Signed with `WARM_DEPLOYER_PRIVATE_KEY`. Manual trigger via `/api/settlement/trigger` exists for ops.
 
 ## MCP Server & AI Chat
 
@@ -203,4 +202,4 @@ Key properties:
 - Pausable emergency stop on all contracts
 - Permissionless settlement (no keeper dependency)
 - Engine never holds USDC (stateless routing layer)
-- JIT quote signer is a dedicated hot key; `DEPLOYER_PRIVATE_KEY` is the admin/cron cold fallback.
+- JIT quote signer is a dedicated hot key; `WARM_DEPLOYER_PRIVATE_KEY` is the admin/cron cold fallback.

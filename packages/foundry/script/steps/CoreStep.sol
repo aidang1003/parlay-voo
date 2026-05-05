@@ -2,13 +2,13 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LegRegistry} from "../../src/core/LegRegistry.sol";
-import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
-import {UmaOracleAdapter} from "../../src/oracle/UmaOracleAdapter.sol";
-import {IOptimisticOracleV3} from "../../src/interfaces/IOptimisticOracleV3.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LegRegistry} from "../../contracts/core/LegRegistry.sol";
+import {ParlayEngine} from "../../contracts/core/ParlayEngine.sol";
+import {AdminOracleAdapter} from "../../contracts/oracle/AdminOracleAdapter.sol";
+import {UmaOracleAdapter} from "../../contracts/oracle/UmaOracleAdapter.sol";
+import {IOptimisticOracleV3} from "../../contracts/interfaces/IOptimisticOracleV3.sol";
 import {HelperConfig} from "../HelperConfig.s.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -31,6 +31,14 @@ abstract contract CoreStep is Script {
             d.usdc = IERC20(address(new MockUSDC()));
             d.deployedMockUsdc = true;
             console.log("Deployed MockUSDC:      ", address(d.usdc));
+            if (block.chainid == 1 || block.chainid == 8453) {
+                console.log("!! WARNING: MockUSDC deployed on a MAINNET chain.");
+                console.log("!! Vault will hold a worthless mock token. Set USE_REAL_USDC=true if unintended.");
+            } else if (block.chainid != 31337) {
+                console.log("!! WARNING: Fresh MockUSDC deployed on a non-local chain.");
+                console.log("!! Any previously-deployed contracts referencing MockUSDC now point to the OLD address.");
+                console.log("!! To reuse an existing MockUSDC, set MOCK_USDC_ADDRESS in your env.");
+            }
         }
 
         d.vault = new HouseVault(d.usdc, cfg.corrAsymptoteBps, cfg.corrHalfSatPpm, cfg.maxLegsPerGroup);

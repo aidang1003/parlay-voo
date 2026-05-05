@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: ESLint (Next.js)
+        run: pnpm next:lint --max-warnings=0
+
+      - name: forge fmt --check
+        run: pnpm foundry:lint
+
+  contracts:
+    name: Contracts (Forge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build
+        working-directory: packages/foundry
+        run: forge build
+
+      - name: Test
+        working-directory: packages/foundry
+        run: forge test -vvv --no-match-path 'test/fork/**'
+
+      - name: Coverage (soft, summary only)
+        continue-on-error: true
+        working-directory: packages/foundry
+        run: forge coverage --report summary
+
+      - name: Gas snapshot (soft, informational)
+        continue-on-error: true
+        working-directory: packages/foundry
+        run: forge snapshot
+
+  web:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Root build wrapper expects a .env (it's invoked via `dotenv -c --`).
+      # CI uses placeholder values from the example; runtime env injection
+      # happens on Vercel, not here.
+      - name: Stub .env from .env.example
+        run: cp .env.example .env
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Vitest
+        run: pnpm test:web
+
+      - name: Coverage (soft, 30% stmts informational)
+        continue-on-error: true
+        working-directory: packages/nextjs
+        run: pnpm exec vitest run --coverage

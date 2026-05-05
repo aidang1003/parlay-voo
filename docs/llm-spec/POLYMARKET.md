@@ -169,6 +169,6 @@ vercel.json                                            (cron registration)
 ```
 DATABASE_URL            Neon Postgres connection string
 CRON_SECRET             shared secret for Vercel cron auth
-DEPLOYER_PRIVATE_KEY    signs AdminOracleAdapter.resolve() calls
+WARM_DEPLOYER_PRIVATE_KEY    signs AdminOracleAdapter.resolve() calls
 BASE_SEPOLIA_RPC_URL    RPC endpoint
 ```

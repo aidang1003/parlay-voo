@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
+import {ParlayEngine} from "../../contracts/core/ParlayEngine.sol";
 
 /// @notice Shared test helper for building + signing EIP-712 Quotes and buying
 ///         tickets through ParlayEngine.buyTicketSigned. Maintains a per-test
@@ -21,11 +21,14 @@ abstract contract SignedBuy is Test {
 
     // ── Quote builders ───────────────────────────────────────────────────
 
-    function _mkLeg(string memory sourceRef, bytes32 outcome, uint256 ppm, address oracleAdapter, uint256 cutoffTime, uint256 earliestResolve)
-        internal
-        pure
-        returns (ParlayEngine.SourceLeg memory)
-    {
+    function _mkLeg(
+        string memory sourceRef,
+        bytes32 outcome,
+        uint256 ppm,
+        address oracleAdapter,
+        uint256 cutoffTime,
+        uint256 earliestResolve
+    ) internal pure returns (ParlayEngine.SourceLeg memory) {
         return ParlayEngine.SourceLeg({
             sourceRef: sourceRef,
             outcome: outcome,
@@ -36,11 +39,13 @@ abstract contract SignedBuy is Test {
         });
     }
 
-    function _mkQuote(address buyer, uint256 stake, ParlayEngine.SourceLeg[] memory legs, uint256 deadline, uint256 nonce)
-        internal
-        pure
-        returns (ParlayEngine.Quote memory q)
-    {
+    function _mkQuote(
+        address buyer,
+        uint256 stake,
+        ParlayEngine.SourceLeg[] memory legs,
+        uint256 deadline,
+        uint256 nonce
+    ) internal pure returns (ParlayEngine.Quote memory q) {
         q = ParlayEngine.Quote({buyer: buyer, stake: stake, legs: legs, deadline: deadline, nonce: nonce});
     }
 

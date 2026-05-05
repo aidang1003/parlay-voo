@@ -4,11 +4,11 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {UmaOracleAdapter} from "../../src/oracle/UmaOracleAdapter.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {UmaOracleAdapter} from "../../contracts/oracle/UmaOracleAdapter.sol";
 import {MockOptimisticOracleV3} from "../helpers/MockOptimisticOracleV3.sol";
-import {IOptimisticOracleV3} from "../../src/interfaces/IOptimisticOracleV3.sol";
-import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
+import {IOptimisticOracleV3} from "../../contracts/interfaces/IOptimisticOracleV3.sol";
+import {LegStatus} from "../../contracts/interfaces/IOracleAdapter.sol";
 
 contract UmaOracleAdapterTest is Test {
     MockUSDC usdc;

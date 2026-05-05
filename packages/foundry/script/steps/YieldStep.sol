@@ -2,9 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {MockYieldAdapter} from "../../src/yield/MockYieldAdapter.sol";
-import {IYieldAdapter} from "../../src/interfaces/IYieldAdapter.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {MockYieldAdapter} from "../../contracts/yield/MockYieldAdapter.sol";
+import {IYieldAdapter} from "../../contracts/interfaces/IYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 abstract contract YieldStep is Script {

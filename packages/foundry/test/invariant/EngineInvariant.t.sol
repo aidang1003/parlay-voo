@@ -2,13 +2,13 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LegRegistry} from "../../src/core/LegRegistry.sol";
-import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LegRegistry} from "../../contracts/core/LegRegistry.sol";
+import {ParlayEngine} from "../../contracts/core/ParlayEngine.sol";
+import {AdminOracleAdapter} from "../../contracts/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
+import {LegStatus} from "../../contracts/interfaces/IOracleAdapter.sol";
 import {FeeRouterSetup} from "../helpers/FeeRouterSetup.sol";
 import {SignedBuy} from "../helpers/SignedBuy.sol";
 
@@ -161,13 +161,8 @@ contract EngineHandler is Test {
         uint256 freeLiq = vault.freeLiquidity();
         if (maxPay == 0 || freeLiq < 1e6) return;
 
-        ParlayEngine.Quote memory q = ParlayEngine.Quote({
-            buyer: bettor,
-            stake: stake,
-            legs: sourceLegs,
-            deadline: DEADLINE,
-            nonce: _nonce++
-        });
+        ParlayEngine.Quote memory q =
+            ParlayEngine.Quote({buyer: bettor, stake: stake, legs: sourceLegs, deadline: DEADLINE, nonce: _nonce++});
         bytes memory sig = _signQuote(q);
 
         vm.prank(bettor);
@@ -175,7 +170,9 @@ contract EngineHandler is Test {
             activeTickets.push(ticketId);
             totalTickets++;
             buyCount++;
-            for (uint256 i = 0; i < picked; i++) legExists[picks[i]] = true;
+            for (uint256 i = 0; i < picked; i++) {
+                legExists[picks[i]] = true;
+            }
         } catch {
             // expected: vault capacity, etc.
         }

@@ -1,64 +1,32 @@
-# Dependencies
-node_modules/
-.pnpm-store/
+# dependencies
+node_modules
 
-# Build outputs
-out/
-cache/
-.next/
-dist/
+# yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
 
-# Foundry
-packages/foundry/out/
-packages/foundry/cache/
-packages/foundry/lib/
-packages/foundry/broadcast/
+# eslint
+.eslintcache
 
-# Environment
+# misc
+.DS_Store
 .env
-.env.*
-!.env.example
+.npmrc
+
+# secrets & credentials
+.env.local
+.env.*.local
+*.pem
+*.key
 
 # IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+.vscode
+.idea
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-npm-debug.log*
-
-# Coverage
-coverage/
-lcov.info
-
-# ETHSkills (vendored, regenerate with vendor script)
-.claude/skills/ethskills/
-
-# MCP state
-.mcp-state/
-.mcp.json
-
-# Build info
-*.tsbuildinfo
-
-# Task tracking
-TASKS.md
-
-# Dev PID files
-.pids/
-
-# Reference articles (local-only, not redistributable)
-docs/learning/
+# cli
+dist
 .vercel
-
-
-
-# Don't track Claude folder
-.claude/

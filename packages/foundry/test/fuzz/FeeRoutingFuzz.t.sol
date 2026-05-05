@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LegRegistry} from "../../src/core/LegRegistry.sol";
-import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
-import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LegRegistry} from "../../contracts/core/LegRegistry.sol";
+import {ParlayEngine} from "../../contracts/core/ParlayEngine.sol";
+import {LockVaultV2} from "../../contracts/core/LockVaultV2.sol";
+import {AdminOracleAdapter} from "../../contracts/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
+import {LegStatus} from "../../contracts/interfaces/IOracleAdapter.sol";
 import {FeeRouterSetup} from "../helpers/FeeRouterSetup.sol";
 import {SignedBuy} from "../helpers/SignedBuy.sol";
 
@@ -154,8 +154,8 @@ contract FeeRoutingFuzzTest is FeeRouterSetup, SignedBuy {
         uint256 t2 = _buySigned(engine, alice, _legs(), stake2, DEADLINE);
         uint256 t3 = _buySigned(engine, alice, _legs(), stake3, DEADLINE);
 
-        uint256 expected = (engine.getTicket(t1).feePaid * 9000) / 10_000
-            + (engine.getTicket(t2).feePaid * 9000) / 10_000 + (engine.getTicket(t3).feePaid * 9000) / 10_000;
+        uint256 expected = (engine.getTicket(t1).feePaid * 9000) / 10_000 + (engine.getTicket(t2).feePaid * 9000)
+            / 10_000 + (engine.getTicket(t3).feePaid * 9000) / 10_000;
 
         assertEq(usdc.balanceOf(address(lockVault)) - lockBefore, expected, "cumulative");
     }
@@ -233,8 +233,8 @@ contract FeeRoutingFuzzTest is FeeRouterSetup, SignedBuy {
 
         _buySigned(engine, alice, _legs(), stake, DEADLINE);
 
-        uint256 totalAfter = usdc.balanceOf(alice) + usdc.balanceOf(address(vault))
-            + usdc.balanceOf(address(lockVault)) + usdc.balanceOf(safetyModule);
+        uint256 totalAfter = usdc.balanceOf(alice) + usdc.balanceOf(address(vault)) + usdc.balanceOf(address(lockVault))
+            + usdc.balanceOf(safetyModule);
 
         assertEq(totalAfter, totalBefore, "conservation");
     }

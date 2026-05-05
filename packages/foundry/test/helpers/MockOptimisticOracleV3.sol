@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {
     IOptimisticOracleV3,
     IOptimisticOracleV3CallbackRecipient
-} from "../../src/interfaces/IOptimisticOracleV3.sol";
+} from "../../contracts/interfaces/IOptimisticOracleV3.sol";
 
 /// @notice Minimal UMA OOv3 stand-in for unit tests. Lets a test drive the
 ///         callback path deterministically without depending on UMA's real

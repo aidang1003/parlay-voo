@@ -12,10 +12,10 @@ contract SetTrustedSigner is Script {
     /// Called as a composable step from Deploy.s.sol (passes its own deployerKey in)
     /// and standalone via `forge script ... --sig "run()"` (reads env).
     function run(uint256 ownerKey, address engineAddress) public {
-        // Defaults to the owner key when QUOTE_SIGNER_PRIVATE_KEY is unset, so a single
+        // Defaults to the owner key when HOT_SIGNER_PRIVATE_KEY is unset, so a single
         // funded wallet works across local + testnet. Mainnet should set this explicitly
         // to keep the quote signer (hot) separate from the owner (cold).
-        uint256 signerPrivateKey = vm.envOr("QUOTE_SIGNER_PRIVATE_KEY", ownerKey);
+        uint256 signerPrivateKey = vm.envOr("HOT_SIGNER_PRIVATE_KEY", ownerKey);
         address signerAddress = vm.addr(signerPrivateKey);
 
         require(engineAddress != address(0), "ParlayEngine address required");
@@ -30,7 +30,7 @@ contract SetTrustedSigner is Script {
 
     /// @notice Standalone entrypoint — reads owner key + engine address from env.
     function run() external {
-        uint256 ownerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 ownerKey = vm.envUint("WARM_DEPLOYER_PRIVATE_KEY");
         address engineAddress = vm.envAddress("NEXT_PUBLIC_PARLAY_ENGINE_ADDRESS");
         run(ownerKey, engineAddress);
     }

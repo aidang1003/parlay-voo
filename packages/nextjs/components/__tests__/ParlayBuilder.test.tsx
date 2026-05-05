@@ -1,0 +1,694 @@
+import { ParlayBuilder } from "../ParlayBuilder";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// ── Mocks ─────────────────────────────────────────────────────────────────
+
+// Mock wagmi
+const mockUseAccount = vi.fn(() => ({
+  isConnected: false as boolean,
+  address: undefined as string | undefined,
+}));
+vi.mock("wagmi", () => ({
+  useAccount: () => mockUseAccount(),
+}));
+
+// Mock connectkit
+const mockSetOpen = vi.fn();
+vi.mock("connectkit", () => ({
+  useModal: vi.fn(() => ({ setOpen: mockSetOpen })),
+}));
+
+// Mock hooks
+const mockBuyTicket = vi.fn(() => Promise.resolve(true));
+const mockResetSuccess = vi.fn();
+const mockUseBuyTicket = vi.fn(() => ({
+  buyTicket: mockBuyTicket,
+  resetSuccess: mockResetSuccess,
+  isPending: false,
+  isConfirming: false,
+  isSuccess: false,
+  error: null as Error | null,
+}));
+const mockUseUSDCBalance = vi.fn(() => ({
+  balance: undefined as bigint | undefined,
+  refetch: vi.fn(),
+}));
+const mockUseVaultStats = vi.fn(() => ({
+  freeLiquidity: undefined as bigint | undefined,
+  totalAssets: undefined as bigint | undefined,
+  totalReserved: undefined as bigint | undefined,
+  maxPayout: undefined as bigint | undefined,
+  refetch: vi.fn(),
+}));
+const mockUseParlayConfig = vi.fn(() => ({
+  protocolFeeBps: undefined as number | undefined,
+  correlationAsymptoteBps: undefined as number | undefined,
+  correlationHalfSatPpm: undefined as number | undefined,
+  maxLegsPerGroup: undefined as number | undefined,
+  maxLegs: undefined as number | undefined,
+  minStakeUSDC: undefined as number | undefined,
+  isLoading: false,
+  refetch: vi.fn(),
+}));
+
+vi.mock("~~/lib/hooks", () => ({
+  useBuyTicket: () => mockUseBuyTicket(),
+  useBuyLosslessParlay: () => ({
+    buyLossless: vi.fn(() => Promise.resolve(true)),
+    resetSuccess: vi.fn(),
+    isPending: false,
+    isConfirming: false,
+    isSuccess: false,
+    error: null,
+    lastTicketId: null,
+  }),
+  useCreditBalance: () => ({ credit: 0n, isLoading: false, refetch: vi.fn() }),
+  useUSDCBalance: () => mockUseUSDCBalance(),
+  useVaultStats: () => mockUseVaultStats(),
+  useParlayConfig: () => mockUseParlayConfig(),
+  useMintTestUSDC: () => ({ mint: vi.fn(), isPending: false, isConfirming: false, isSuccess: false }),
+  useLegDescriptions: () => new Map(),
+  useLegStatuses: () => new Map(),
+}));
+
+// Mock MultiplierClimb
+vi.mock("../MultiplierClimb", () => ({
+  MultiplierClimb: ({ legMultipliers }: { legMultipliers: number[] }) => (
+    <div data-testid="multiplier-climb">legs: {legMultipliers.length}</div>
+  ),
+}));
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Configure mocks for a connected user with vault liquidity and USDC balance. */
+function setupConnectedUser(
+  overrides: {
+    balance?: bigint;
+    freeLiquidity?: bigint;
+    maxPayout?: bigint;
+  } = {},
+) {
+  mockUseAccount.mockReturnValue({
+    isConnected: true as boolean,
+    address: "0x1234" as string | undefined,
+  });
+  mockUseUSDCBalance.mockReturnValue({
+    balance: overrides.balance ?? 100_000_000n, // 100 USDC
+    refetch: vi.fn(),
+  });
+  mockUseVaultStats.mockReturnValue({
+    freeLiquidity: overrides.freeLiquidity ?? 500_000_000_000n, // 500k USDC
+    totalAssets: 500_000_000_000n,
+    totalReserved: 0n,
+    maxPayout: overrides.maxPayout ?? 25_000_000_000n, // 25k USDC
+    refetch: vi.fn(),
+  });
+}
+
+/** Wait for legs to load from API, then select N legs by clicking their Yes buttons. */
+async function selectLegs(count: number): Promise<HTMLElement[]> {
+  await waitFor(() => {
+    expect(screen.getAllByText("Yes").length).toBeGreaterThan(0);
+  });
+  const yesButtons = screen.getAllByText("Yes");
+  for (let i = 0; i < count && i < yesButtons.length; i++) {
+    fireEvent.click(yesButtons[i]);
+  }
+  return yesButtons;
+}
+
+/** Type a value into the stake input. */
+function setStakeInput(value: string) {
+  const input = screen.getByPlaceholderText("Min 1 USDC");
+  fireEvent.change(input, { target: { value } });
+}
+
+// ── Test market data (replaces MOCK_LEGS) ────────────────────────────────
+
+const TEST_MARKETS = [
+  {
+    id: "test-crypto",
+    title: "Crypto Predictions",
+    description: "Crypto price markets",
+    category: "crypto",
+    legs: [
+      {
+        id: 0,
+        noId: 10,
+        question: "Will ETH hit $5000 by end of March?",
+        sourceRef: "0xeth",
+        cutoffTime: Math.floor(Date.now() / 1000) + 86400,
+        earliestResolve: Math.floor(Date.now() / 1000) + 86400,
+        probabilityPPM: 400000,
+        noProbabilityPPM: 600000,
+        active: true,
+      },
+      {
+        id: 1,
+        noId: 11,
+        question: "Will BTC hit $150k by end of March?",
+        sourceRef: "0xbtc",
+        cutoffTime: Math.floor(Date.now() / 1000) + 86400,
+        earliestResolve: Math.floor(Date.now() / 1000) + 86400,
+        probabilityPPM: 350000,
+        noProbabilityPPM: 650000,
+        active: true,
+      },
+      {
+        id: 2,
+        noId: 12,
+        question: "Will SOL hit $300 by end of March?",
+        sourceRef: "0xsol",
+        cutoffTime: Math.floor(Date.now() / 1000) + 86400,
+        earliestResolve: Math.floor(Date.now() / 1000) + 86400,
+        probabilityPPM: 350000,
+        noProbabilityPPM: 650000,
+        active: true,
+      },
+    ],
+  },
+];
+
+/** Default fetch mock: returns TEST_MARKETS for /api/markets, rejects everything else. */
+function defaultFetchMock(url: string | URL | Request): Promise<Response> {
+  const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+  if (urlStr === "/api/markets") {
+    return Promise.resolve(
+      new Response(JSON.stringify(TEST_MARKETS), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+  }
+  return Promise.reject(new Error("no network in test"));
+}
+
+// ── Session storage mock ──────────────────────────────────────────────────
+
+let sessionStore: Record<string, string>;
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(defaultFetchMock));
+
+  sessionStore = {};
+  vi.stubGlobal("sessionStorage", {
+    getItem: vi.fn((key: string) => sessionStore[key] ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      sessionStore[key] = value;
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete sessionStore[key];
+    }),
+    clear: vi.fn(() => {
+      sessionStore = {};
+    }),
+    length: 0,
+    key: vi.fn(() => null),
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  mockUseAccount.mockReturnValue({ isConnected: false as boolean, address: undefined as string | undefined });
+  mockUseUSDCBalance.mockReturnValue({ balance: undefined as bigint | undefined, refetch: vi.fn() });
+  mockUseVaultStats.mockReturnValue({
+    freeLiquidity: undefined as bigint | undefined,
+    totalAssets: undefined as bigint | undefined,
+    totalReserved: undefined as bigint | undefined,
+    maxPayout: undefined as bigint | undefined,
+    refetch: vi.fn(),
+  });
+  mockUseParlayConfig.mockReturnValue({
+    protocolFeeBps: undefined as number | undefined,
+    correlationAsymptoteBps: undefined as number | undefined,
+    correlationHalfSatPpm: undefined as number | undefined,
+    maxLegsPerGroup: undefined as number | undefined,
+    maxLegs: undefined as number | undefined,
+    minStakeUSDC: undefined as number | undefined,
+    isLoading: false,
+    refetch: vi.fn(),
+  });
+  mockUseBuyTicket.mockReturnValue({
+    buyTicket: mockBuyTicket,
+    resetSuccess: mockResetSuccess,
+    isPending: false,
+    isConfirming: false,
+    isSuccess: false,
+    error: null as Error | null,
+  });
+});
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+describe("ParlayBuilder", () => {
+  // --- Core rendering ---
+
+  it("renders without crashing", () => {
+    render(<ParlayBuilder />);
+    expect(screen.getByText("Pick Your Legs")).toBeInTheDocument();
+  });
+
+  it("shows Connect Wallet when not connected", async () => {
+    render(<ParlayBuilder />);
+    await waitFor(() => {
+      expect(screen.getByText("Connect Wallet")).toBeInTheDocument();
+    });
+  });
+
+  it("renders all legs from API", async () => {
+    render(<ParlayBuilder />);
+    await waitFor(() => {
+      expect(screen.getByText("Will ETH hit $5000 by end of March?")).toBeInTheDocument();
+      expect(screen.getByText("Will BTC hit $150k by end of March?")).toBeInTheDocument();
+      expect(screen.getByText("Will SOL hit $300 by end of March?")).toBeInTheDocument();
+    });
+  });
+
+  it("renders Yes/No buttons for each leg", async () => {
+    render(<ParlayBuilder />);
+    await waitFor(() => {
+      expect(screen.getAllByText("Yes").length).toBe(3);
+      expect(screen.getAllByText("No").length).toBe(3);
+    });
+  });
+
+  it("updates leg count when selecting legs", async () => {
+    const { container } = render(<ParlayBuilder />);
+    await selectLegs(2);
+    const filledDots = container.querySelectorAll(".rounded-md.gradient-bg");
+    expect(filledDots.length).toBe(2);
+  });
+
+  // --- Vault empty state ---
+
+  describe("when vault is empty", () => {
+    beforeEach(() => {
+      setupConnectedUser({ freeLiquidity: 0n });
+    });
+
+    it("shows 'No Vault Liquidity' on buy button", async () => {
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("No Vault Liquidity")).toBeInTheDocument();
+      });
+    });
+
+    it("shows vault empty warning banner", async () => {
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText(/No liquidity in the vault/)).toBeInTheDocument();
+      });
+    });
+
+    it("disables leg buttons", async () => {
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        const yesButtons = screen.getAllByText("Yes");
+        yesButtons.forEach(btn => {
+          expect(btn.closest("button")).toBeDisabled();
+        });
+      });
+    });
+  });
+
+  // --- BigInt zero balance handling ---
+
+  describe("BigInt zero balance", () => {
+    it("shows balance of 0.00 when usdcBalance is 0n", async () => {
+      setupConnectedUser({ balance: 0n });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("Balance: 0.00")).toBeInTheDocument();
+      });
+    });
+
+    it("does not show MAX button when balance is 0n", async () => {
+      setupConnectedUser({ balance: 0n });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("Balance: 0.00")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("MAX")).not.toBeInTheDocument();
+    });
+
+    it("shows MAX button when balance > 0n", async () => {
+      setupConnectedUser({ balance: 1_000_000n }); // 1 USDC
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("MAX")).toBeInTheDocument();
+      });
+    });
+
+    it("MAX button sets stake via formatUnits (not Number division)", async () => {
+      // 123.456789 USDC = 123_456_789n (6 decimals)
+      setupConnectedUser({ balance: 123_456_789n });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("MAX")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("MAX"));
+      const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
+      // formatUnits(123_456_789n, 6) = "123.456789"
+      expect(input.value).toBe("123.456789");
+    });
+
+    it("displays balance via formatUnits", async () => {
+      // 50.123456 USDC
+      setupConnectedUser({ balance: 50_123_456n });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        // parseFloat(formatUnits(50_123_456n, 6)).toFixed(2) = "50.12"
+        expect(screen.getByText("Balance: 50.12")).toBeInTheDocument();
+      });
+    });
+
+    it("shows 'Insufficient USDC Balance' when stake exceeds zero balance", async () => {
+      setupConnectedUser({ balance: 0n });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("Balance: 0.00")).toBeInTheDocument();
+      });
+      await selectLegs(2);
+      setStakeInput("10");
+      await waitFor(() => {
+        expect(screen.getByText("Insufficient USDC Balance")).toBeInTheDocument();
+      });
+    });
+  });
+
+  // --- NaN protection on partial input ---
+
+  describe("NaN protection", () => {
+    it("disables buy when stake is '.' (parseFloat returns NaN)", async () => {
+      setupConnectedUser();
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
+      });
+      await selectLegs(2);
+      setStakeInput(".");
+      // stakeNum = parseFloat(".") || 0 = 0, which is < minStakeUSDC=1
+      // so button should show "Select at least 2 legs" or min stake message
+      // Actually with 2 legs selected it should show the min stake issue
+      await waitFor(() => {
+        const buyBtn = screen.getByText("Buy Ticket");
+        expect(buyBtn.closest("button")).toBeDisabled();
+      });
+    });
+
+    it("disables buy when stake is empty", async () => {
+      setupConnectedUser();
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
+      });
+      await selectLegs(2);
+      // Empty stake = stakeNum 0, below minStake
+      const buyBtn = screen.getByText(/Buy Ticket|Select at least/);
+      expect(buyBtn.closest("button")).toBeDisabled();
+    });
+  });
+
+  // --- Session storage persistence ---
+
+  describe("session storage persistence", () => {
+    it("persists stake to sessionStorage on change", async () => {
+      setupConnectedUser();
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText("Min 1 USDC")).toBeInTheDocument();
+      });
+      setStakeInput("42");
+      // useSessionState writes on value change after hydration
+      await waitFor(() => {
+        expect(sessionStorage.setItem).toHaveBeenCalledWith("parlay:stake", '"42"');
+      });
+    });
+
+    // payoutMode selector is currently hidden (fixed to Classic=0), so no UI toggle to test.
+
+    it("persists selectedLegs to sessionStorage on selection", async () => {
+      render(<ParlayBuilder />);
+      // Wait for mount effect so mounted=true before selecting
+      await waitFor(() => {
+        expect(sessionStorage.setItem).toHaveBeenCalled();
+      });
+      await selectLegs(2);
+      await waitFor(() => {
+        // Find the LAST call with the legs key (first calls may be initial empty array)
+        const calls = (sessionStorage.setItem as ReturnType<typeof vi.fn>).mock.calls.filter(
+          (c: unknown[]) => c[0] === "parlay:selectedLegs",
+        );
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall).toBeDefined();
+        const parsed = JSON.parse(lastCall[1] as string);
+        expect(parsed.length).toBeGreaterThanOrEqual(2);
+        expect(parsed[0]).toHaveProperty("legId");
+        expect(parsed[0]).toHaveProperty("outcomeChoice");
+      });
+    });
+
+    it("restores stake from sessionStorage on mount", async () => {
+      sessionStore["parlay:stake"] = '"25"';
+      setupConnectedUser();
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        const input = screen.getByPlaceholderText("Min 1 USDC") as HTMLInputElement;
+        expect(input.value).toBe("25");
+      });
+    });
+
+    it("restores selectedLegs from sessionStorage on mount", async () => {
+      // Store serialized legs (legId 0 and 1 with Yes choices)
+      sessionStore["parlay:selectedLegs"] = JSON.stringify([
+        { legId: "0", outcomeChoice: 1 },
+        { legId: "1", outcomeChoice: 1 },
+      ]);
+      const { container } = render(<ParlayBuilder />);
+      await waitFor(() => {
+        // Leg counter squares (rounded-md + gradient-bg) = filled slots
+        const filledDots = container.querySelectorAll(".rounded-md.gradient-bg");
+        expect(filledDots.length).toBe(2);
+      });
+    });
+
+    it("clears sessionStorage on successful buy", async () => {
+      setupConnectedUser();
+      mockBuyTicket.mockResolvedValueOnce(true);
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
+      });
+      await selectLegs(2);
+      setStakeInput("10");
+
+      await waitFor(() => {
+        const buyBtn = screen.getByText("Buy Ticket");
+        expect(buyBtn.closest("button")).not.toBeDisabled();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Buy Ticket"));
+      });
+
+      // After buy, state resets to defaults. Persist effects write defaults
+      // to sessionStorage (no explicit clearSessionState needed).
+      await waitFor(() => {
+        expect(sessionStore["parlay:stake"]).toBe('""');
+      });
+    });
+
+    it("ignores invalid sessionStorage data gracefully", async () => {
+      sessionStore["parlay:selectedLegs"] = "not-json{{{";
+      // Should not crash
+      render(<ParlayBuilder />);
+      expect(screen.getByText("Pick Your Legs")).toBeInTheDocument();
+    });
+  });
+
+  // --- Payout mode ---
+  // Payout mode selector is currently hidden (fixed to Classic=0).
+  // Re-enable these tests when the selector is restored.
+
+  // --- Transaction state ---
+
+  describe("transaction feedback", () => {
+    it("shows pending state", async () => {
+      setupConnectedUser();
+      mockUseBuyTicket.mockReturnValue({
+        buyTicket: mockBuyTicket,
+        resetSuccess: mockResetSuccess,
+        isPending: true,
+        isConfirming: false,
+        isSuccess: false,
+        error: null,
+      });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("Waiting for approval...")).toBeInTheDocument();
+        expect(screen.getByText("Transaction submitted...")).toBeInTheDocument();
+      });
+    });
+
+    it("shows confirming state", async () => {
+      setupConnectedUser();
+      mockUseBuyTicket.mockReturnValue({
+        buyTicket: mockBuyTicket,
+        resetSuccess: mockResetSuccess,
+        isPending: false,
+        isConfirming: true,
+        isSuccess: false,
+        error: null,
+      });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("Confirming...")).toBeInTheDocument();
+        expect(screen.getByText("Waiting for confirmation...")).toBeInTheDocument();
+      });
+    });
+
+    it("shows success state", async () => {
+      setupConnectedUser();
+      mockUseBuyTicket.mockReturnValue({
+        buyTicket: mockBuyTicket,
+        resetSuccess: mockResetSuccess,
+        isPending: false,
+        isConfirming: false,
+        isSuccess: true,
+        error: null,
+      });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getByText("Ticket Bought!")).toBeInTheDocument();
+        expect(screen.getByText("Your parlay ticket is live!")).toBeInTheDocument();
+      });
+    });
+
+    it("shows error message (truncated if > 100 chars)", async () => {
+      setupConnectedUser();
+      const longMsg = "a".repeat(150);
+      mockUseBuyTicket.mockReturnValue({
+        buyTicket: mockBuyTicket,
+        resetSuccess: mockResetSuccess,
+        isPending: false,
+        isConfirming: false,
+        isSuccess: false,
+        error: new Error(longMsg) as Error | null,
+      });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        const errorEl = screen.getByText(/\.\.\.$/);
+        expect(errorEl.textContent).toHaveLength(103); // 100 chars + "..."
+      });
+    });
+
+    it("buy button is disabled during pending", async () => {
+      setupConnectedUser();
+      mockUseBuyTicket.mockReturnValue({
+        buyTicket: mockBuyTicket,
+        resetSuccess: mockResetSuccess,
+        isPending: true,
+        isConfirming: false,
+        isSuccess: false,
+        error: null,
+      });
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        const btn = screen.getByText("Waiting for approval...");
+        expect(btn.closest("button")).toBeDisabled();
+      });
+    });
+  });
+
+  // --- SSR hydration / flicker prevention ---
+
+  describe("SSR hydration", () => {
+    it("renders with opacity-0 before mount then becomes visible", async () => {
+      const { container } = render(<ParlayBuilder />);
+      // Before useEffect runs, mounted=false, so opacity-0 + pointer-events-none
+      const outerDiv = container.firstElementChild as HTMLElement;
+      // After mount effect fires, opacity-0 should be removed
+      await waitFor(() => {
+        expect(outerDiv.className).not.toContain("opacity-0");
+      });
+    });
+
+    it("does not use transition-opacity (flicker prevention)", () => {
+      const { container } = render(<ParlayBuilder />);
+      const outerDiv = container.firstElementChild as HTMLElement;
+      expect(outerDiv.className).not.toContain("transition-opacity");
+      expect(outerDiv.className).not.toContain("duration-");
+    });
+  });
+
+  // --- Leg toggle behavior ---
+
+  describe("leg toggle", () => {
+    it("toggles a leg off when clicking the same outcome again", async () => {
+      const { container } = render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Yes").length).toBe(3);
+      });
+      const yesButtons = screen.getAllByText("Yes");
+      fireEvent.click(yesButtons[0]);
+      expect(container.querySelectorAll(".rounded-md.gradient-bg").length).toBe(1);
+      // Click same leg/outcome again -> deselect
+      fireEvent.click(yesButtons[0]);
+      expect(container.querySelectorAll(".rounded-md.gradient-bg").length).toBe(0);
+    });
+
+    it("switches outcome when clicking No on a Yes-selected leg", async () => {
+      const { container } = render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Yes").length).toBe(3);
+      });
+      const yesButtons = screen.getAllByText("Yes");
+      const noButtons = screen.getAllByText("No");
+      fireEvent.click(yesButtons[0]); // Select first leg Yes
+      expect(screen.getByText("YES")).toBeInTheDocument();
+      fireEvent.click(noButtons[0]); // Switch to No
+      expect(screen.getByText("NO")).toBeInTheDocument();
+      expect(container.querySelectorAll(".rounded-md.gradient-bg").length).toBe(1); // Still 1 leg
+    });
+
+    it("enforces max legs limit", async () => {
+      mockUseParlayConfig.mockReturnValue({
+        protocolFeeBps: undefined,
+        correlationAsymptoteBps: undefined,
+        correlationHalfSatPpm: undefined,
+        maxLegsPerGroup: undefined,
+        maxLegs: 2,
+        minStakeUSDC: undefined,
+        isLoading: false,
+        refetch: vi.fn(),
+      });
+      const { container } = render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.getAllByText("Yes").length).toBe(3);
+      });
+      const yesButtons = screen.getAllByText("Yes");
+      fireEvent.click(yesButtons[0]);
+      fireEvent.click(yesButtons[1]);
+      fireEvent.click(yesButtons[2]); // Should be ignored (max 2)
+      // With maxLegs=2, there are 2 numbered squares, both filled
+      const filledDots = container.querySelectorAll(".rounded-md.gradient-bg");
+      expect(filledDots.length).toBe(2);
+    });
+  });
+
+  // --- Cart display ---
+  // Per docs/changes/B_SLOG_SPRINT.md the cart only surfaces the final
+  // multiplier and payout — no fee row, no correlation row.
+
+  describe("cart display", () => {
+    it("does not surface a separate fee row", async () => {
+      setupConnectedUser();
+      render(<ParlayBuilder />);
+      await waitFor(() => {
+        expect(screen.queryByText("Connect Wallet")).not.toBeInTheDocument();
+      });
+      await selectLegs(2);
+      setStakeInput("100");
+      expect(screen.queryByText(/^Fee \(/)).not.toBeInTheDocument();
+      expect(screen.getByText("Combined Odds")).toBeInTheDocument();
+    });
+  });
+});

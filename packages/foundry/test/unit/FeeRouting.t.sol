@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {MockUSDC} from "../../src/MockUSDC.sol";
-import {HouseVault} from "../../src/core/HouseVault.sol";
-import {LegRegistry} from "../../src/core/LegRegistry.sol";
-import {ParlayEngine} from "../../src/core/ParlayEngine.sol";
-import {LockVaultV2} from "../../src/core/LockVaultV2.sol";
-import {ILockVault} from "../../src/interfaces/ILockVault.sol";
-import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
+import {MockUSDC} from "../../contracts/MockUSDC.sol";
+import {HouseVault} from "../../contracts/core/HouseVault.sol";
+import {LegRegistry} from "../../contracts/core/LegRegistry.sol";
+import {ParlayEngine} from "../../contracts/core/ParlayEngine.sol";
+import {LockVaultV2} from "../../contracts/core/LockVaultV2.sol";
+import {ILockVault} from "../../contracts/interfaces/ILockVault.sol";
+import {AdminOracleAdapter} from "../../contracts/oracle/AdminOracleAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
+import {LegStatus} from "../../contracts/interfaces/IOracleAdapter.sol";
 import {FeeRouterSetup} from "../helpers/FeeRouterSetup.sol";
 import {SignedBuy} from "../helpers/SignedBuy.sol";
 
@@ -88,9 +88,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         uint256 expectedToSafety = (feePaid * 500) / 10_000;
         uint256 expectedToVault = feePaid - expectedToLockers - expectedToSafety;
 
-        assertEq(
-            usdc.balanceOf(address(lockVault)) - lockVaultUsdcBefore, expectedToLockers, "LockVault 90%"
-        );
+        assertEq(usdc.balanceOf(address(lockVault)) - lockVaultUsdcBefore, expectedToLockers, "LockVault 90%");
         assertEq(usdc.balanceOf(safetyModule) - safetyUsdcBefore, expectedToSafety, "SafetyModule 5%");
 
         uint256 expectedVaultAssets = vaultAssetsBefore + 50e6 - expectedToLockers - expectedToSafety;
@@ -228,8 +226,7 @@ contract FeeRoutingTest is FeeRouterSetup, SignedBuy {
         uint256 fee1 = (10e6 * 1900) / 10_000;
         uint256 fee2 = (20e6 * 1900) / 10_000;
         uint256 fee3 = (30e6 * 1900) / 10_000;
-        uint256 piecewiseLockers =
-            (fee1 * 9000) / 10_000 + (fee2 * 9000) / 10_000 + (fee3 * 9000) / 10_000;
+        uint256 piecewiseLockers = (fee1 * 9000) / 10_000 + (fee2 * 9000) / 10_000 + (fee3 * 9000) / 10_000;
 
         assertEq(usdc.balanceOf(address(lockVault)) - lockVaultBefore, piecewiseLockers, "cumulative");
     }

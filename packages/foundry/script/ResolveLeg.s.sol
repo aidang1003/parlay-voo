@@ -3,9 +3,9 @@ pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
-import {LegRegistry} from "../src/core/LegRegistry.sol";
-import {AdminOracleAdapter} from "../src/oracle/AdminOracleAdapter.sol";
-import {LegStatus} from "../src/interfaces/IOracleAdapter.sol";
+import {LegRegistry} from "../contracts/core/LegRegistry.sol";
+import {AdminOracleAdapter} from "../contracts/oracle/AdminOracleAdapter.sol";
+import {LegStatus} from "../contracts/interfaces/IOracleAdapter.sol";
 import {CodeConstants} from "./HelperConfig.s.sol";
 
 /// @notice Force-resolve a single leg on the AdminOracleAdapter, simulating a
@@ -32,8 +32,7 @@ contract ResolveLeg is Script, CodeConstants {
     using stdJson for string;
 
     function _readAddressFromBroadcast(string memory contractName) internal view returns (address) {
-        string memory path =
-            string.concat("broadcast/Deploy.s.sol/", vm.toString(block.chainid), "/run-latest.json");
+        string memory path = string.concat("broadcast/Deploy.s.sol/", vm.toString(block.chainid), "/run-latest.json");
         string memory json = vm.readFile(path);
         bytes32 target = keccak256(bytes(contractName));
         for (uint256 i = 0; i < 256; i++) {
@@ -67,8 +66,8 @@ contract ResolveLeg is Script, CodeConstants {
         require(exists, "leg not found for sourceRef");
 
         uint256 key = block.chainid == LOCAL_CHAIN_ID
-            ? vm.envOr("DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY)
-            : vm.envUint("DEPLOYER_PRIVATE_KEY");
+            ? vm.envOr("WARM_DEPLOYER_PRIVATE_KEY", ANVIL_ACCOUNT_0_KEY)
+            : vm.envUint("WARM_DEPLOYER_PRIVATE_KEY");
 
         vm.startBroadcast(key);
         AdminOracleAdapter(oracle).resolve(legId, status, outcome);

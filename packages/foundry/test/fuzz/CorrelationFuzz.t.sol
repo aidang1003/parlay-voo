@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {ParlayMath} from "../../src/libraries/ParlayMath.sol";
+import {ParlayMath} from "../../contracts/libraries/ParlayMath.sol";
 
 /// @notice Property-based tests for the correlation engine. Locks down the
 ///         invariants that fee + correlation can only ever discount the
@@ -46,13 +46,10 @@ contract CorrelationFuzz is Test {
     /// @notice applyCorrelation only ever discounts the multiplier — n_g < 2
     ///         groups are skipped, every other group contributes a factor in
     ///         (0, 1]. Composing them must produce result <= input.
-    function testFuzz_applyCorrelation_neverInflates(
-        uint256 mul,
-        uint256 g0,
-        uint256 g1,
-        uint256 d,
-        uint256 k
-    ) public pure {
+    function testFuzz_applyCorrelation_neverInflates(uint256 mul, uint256 g0, uint256 g1, uint256 d, uint256 k)
+        public
+        pure
+    {
         mul = bound(mul, PPM, 1e15);
         g0 = bound(g0, 0, 8);
         g1 = bound(g1, 0, 8);

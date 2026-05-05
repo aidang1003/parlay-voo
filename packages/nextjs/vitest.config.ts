@@ -1,17 +1,17 @@
-import { defineConfig } from "vitest/config";
 import path from "path";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
+    setupFiles: ["./test/setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
       reportsDirectory: "./coverage",
-      include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/test/**", "src/app/layout.tsx", "src/lib/wagmi.ts"],
+      include: ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}", "utils/**/*.{ts,tsx}"],
+      exclude: ["test/**", "app/layout.tsx", "services/**"],
       thresholds: {
         statements: 30,
       },
@@ -19,7 +19,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "~~": path.resolve(__dirname, "."),
     },
   },
   esbuild: {

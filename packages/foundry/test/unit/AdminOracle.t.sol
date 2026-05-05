@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {AdminOracleAdapter} from "../../src/oracle/AdminOracleAdapter.sol";
-import {LegStatus} from "../../src/interfaces/IOracleAdapter.sol";
+import {AdminOracleAdapter} from "../../contracts/oracle/AdminOracleAdapter.sol";
+import {LegStatus} from "../../contracts/interfaces/IOracleAdapter.sol";
 
 contract AdminOracleTest is Test {
     AdminOracleAdapter oracle;

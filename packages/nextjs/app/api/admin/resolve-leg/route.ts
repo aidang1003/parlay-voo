@@ -74,15 +74,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "WARM_DEPLOYER_PRIVATE_KEY not set" }, { status: 500 });
   }
 
-  const chain: Chain = chainId === LOCAL_CHAIN_ID ? foundry : baseSepolia;
-  const rpcUrl = process.env.RPC_URL ?? getRpcUrl(chainId);
-  const account = privateKeyToAccount(pk);
-  const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
-  const walletClient = createWalletClient({ chain, transport: http(rpcUrl), account });
-
   const outcome = status === 1 ? YES_OUTCOME : status === 2 ? NO_OUTCOME : VOID_OUTCOME;
 
   try {
+    const chain: Chain = chainId === LOCAL_CHAIN_ID ? foundry : baseSepolia;
+    const rpcUrl = process.env.RPC_URL ?? getRpcUrl(chainId);
+    const account = privateKeyToAccount(pk);
+    const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+    const walletClient = createWalletClient({ chain, transport: http(rpcUrl), account });
+
     const alreadyResolved = (await publicClient.readContract({
       address: oracleAddr,
       abi: ADMIN_ORACLE_ABI,

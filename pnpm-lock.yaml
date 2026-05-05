@@ -17,6 +17,9 @@ importers:
       lint-staged:
         specifier: ~13.2.2
         version: 13.2.3
+      next:
+        specifier: ~15.2.9
+        version: 15.2.9(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
 
   packages/foundry:
     devDependencies:

@@ -62,7 +62,8 @@
   "devDependencies": {
     "dotenv-cli": "^7.4.2",
     "husky": "~9.1.6",
-    "lint-staged": "~13.2.2"
+    "lint-staged": "~13.2.2",
+    "next": "~15.2.9"
   },
   "lint-staged": {
     "packages/nextjs/**/*.{js,jsx,ts,tsx}": "pnpm --filter @se-2/nextjs exec eslint --fix --max-warnings=0",

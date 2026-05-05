@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @se-2/nextjs build",
+  "outputDirectory": "packages/nextjs/.next",
   "crons": [
     {
       "path": "/api/polymarket/sync",

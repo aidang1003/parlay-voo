@@ -47,9 +47,12 @@ const scaffoldConfig = {
     process.env.NEXT_PUBLIC_WC_PROJECT_ID ||
     process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID ||
     "3a8170812b534d0ff9d794f19a901d64",
-  // "allNetworks" so the in-browser burner wallet shows up on Base Sepolia too
-  // (handy for one-click testing without configuring Anvil in MetaMask/Rabby).
-  burnerWalletMode: "allNetworks",
+  // Burner wallets are useful for fast local iteration but a footgun in
+  // production (browser-storage EOA = anyone with devtools access has the
+  // key). "localNetworksOnly" gates on NEXT_PUBLIC_CHAIN_ID — burner shows
+  // only when the deploy is pinned to anvil (31337); hidden on every
+  // testnet/mainnet deploy.
+  burnerWalletMode: "localNetworksOnly",
 } as const satisfies ScaffoldConfig;
 
 export default scaffoldConfig;

@@ -8,14 +8,21 @@ import {
   walletConnectWallet,
 } from "@rainbow-me/rainbowkit/wallets";
 import { rainbowkitBurnerWallet } from "burner-connector";
-import * as chains from "viem/chains";
 import scaffoldConfig, { type ScaffoldConfig } from "~~/scaffold.config";
+import { LOCAL_CHAIN_ID } from "~~/utils/parlay";
 
-const { burnerWalletMode, targetNetworks } = scaffoldConfig as ScaffoldConfig;
+const { burnerWalletMode } = scaffoldConfig as ScaffoldConfig;
 
-const hasOnlyLocalTargetNetworks = targetNetworks.every(network => network.id === (chains.hardhat as chains.Chain).id);
-const showBurnerWallet =
-  burnerWalletMode !== "disabled" && (burnerWalletMode === "allNetworks" || hasOnlyLocalTargetNetworks);
+// Build-time signal: which chain this deployment is pinned to. Local dev sets
+// this to 31337 (anvil); preview/prod set it to 84532/8453/etc.
+const pinnedChainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || LOCAL_CHAIN_ID);
+const isLocalDeployment = pinnedChainId === LOCAL_CHAIN_ID;
+
+const showBurnerWallet = (() => {
+  if (burnerWalletMode === "disabled") return false;
+  if (burnerWalletMode === "allNetworks" || burnerWalletMode === "allNetworksOnly") return true;
+  return isLocalDeployment;
+})();
 
 const wallets = [
   metaMaskWallet,

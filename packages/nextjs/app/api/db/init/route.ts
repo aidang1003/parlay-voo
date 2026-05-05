@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { isAuthorizedCronRequest } from "~~/lib/cron-auth";
 import { sql, upsertMarket } from "~~/lib/db/client";
+import { SCHEMA_SQL } from "~~/lib/db/schema";
 import { SEED_MARKETS } from "~~/utils/parlay";
 
 export const runtime = "nodejs";
@@ -22,10 +21,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const schemaPath = join(process.cwd(), "src/lib/db/schema.sql");
-    const schema = await readFile(schemaPath, "utf8");
     const db = sql();
-    for (const stmt of splitStatements(schema)) {
+    for (const stmt of splitStatements(SCHEMA_SQL)) {
       await db.unsafe(stmt);
     }
 

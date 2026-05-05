@@ -77,11 +77,20 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
   };
 }
 
+// Two predicates compose "bettable right now":
+//   blnactive       — registered + not admin-disabled (sticky on conflict so
+//                     a re-sync can't clobber admin state)
+//   bigcutofftime   — still in the future (transient — sync doesn't toggle
+//                     this; the clock does)
+// Settlement uses blnactive only (it needs to find past-cutoff markets to
+// resolve them on-chain), so we filter cutoff at the listing layer instead
+// of mutating blnactive in the upsert.
 export async function getActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
+      AND bigcutofftime > EXTRACT(EPOCH FROM NOW())::BIGINT
     ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
@@ -93,6 +102,7 @@ export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
+      AND bigcutofftime > EXTRACT(EPOCH FROM NOW())::BIGINT
       AND (intyeslegid IS NOT NULL OR intnolegid IS NOT NULL)
     ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;

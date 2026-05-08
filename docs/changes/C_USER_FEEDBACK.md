@@ -2,11 +2,31 @@
 
 The first sprint after putting the testnet build in front of real users. Where A-Day was about making the app feel fast and B-Slog was about making the math right, this one is about removing the rough edges that show up when someone who *isn't on the team* opens the app and clicks around. Each item starts as a piece of feedback, not a feature spec — the doc is organized that way too.
 
+## Status
+
+Two items already shipped on this branch (the original admin-gate work that named the branch `feedback/admin-wallet`). Eleven new items came out of round-1 user feedback and are queued for the rest of the sprint. Items 3 and 4 — the leg-resolver redesign — are the load-bearing ones; the rest are visible polish.
+
+| # | Item | Status |
+| --- | --- | --- |
+| 1 | Admin wallet gate (debug + admin routes) | **shipped** (commit `23c30a3`) |
+| 2 | Database flexibility (Supabase ↔ Neon) + dropping `jsonbapipayload` | **shipped** (commit `1760345`) |
+| 3 | Ticket-native demo resolver (any wallet) | planned |
+| 4 | Per-user demo overrides for leg resolution | planned — **largest item** |
+| 5 | Hide legs whose payout is below the entrance fee | planned |
+| 6 | Specialize MLB tab around the CLOB MLB endpoint | planned |
+| 7 | Display event start time on legs | planned |
+| 8 | Clarify which side YES vs NO commits the user to | planned |
+| 9 | De-duplicate question text in the Yes/No box | planned |
+| 10 | Click-through from question header to Polymarket | planned |
+| 11 | Truth-up About + (probably retire) Agents page | planned |
+| 12 | Vault page nuanced corrections | planned — specifics TBD |
+| 13 | Safari-friendly onboarding (Rabby gap) | planned |
+
 ---
 
 ## Part 1 — Human Spec
 
-### Admin wallet gate (debug + admin routes)
+### 1. Admin wallet gate (debug + admin routes) — *shipped*
 
 **Why this exists.** `/debug` (auto-generated contract debugger) and `/admin/debug` (mint MockUSDC, run DB init / Polymarket sync, manually resolve legs) were reachable by any wallet on testnet. The `WARM_DEPLOYER_PRIVATE_KEY` signer is the on-chain choke point for resolutions — so an outside wallet *clicking* the YES/NO/VOID button doesn't change the outcome by itself — but the route still spends the deployer's gas, the UI implies privilege the visitor doesn't have, and the broader admin surface (DB init, settlement trigger) shouldn't even be visible to a casual user. The fix is a wallet-address allow-list that gates the UI before the route is rendered.
 
@@ -32,7 +52,7 @@ What landed:
 - No wallet → block screen with the connect button.
 - Empty `tbadminwallet` (e.g. fresh DB or local Anvil that never ran the init) → any connected wallet passes; the admin page shows a yellow notice that the gate is currently open.
 
-### Database flexibility (Supabase ↔ Neon) + dropping `jsonbapipayload`
+### 2. Database flexibility (Supabase ↔ Neon) + dropping `jsonbapipayload` — *shipped*
 
 **Why this exists.** Storing the raw Polymarket Gamma payload in `tblegmapping.jsonbapipayload` was carrying its weight at the time we shipped curation scoring (A-Day), but the column has had no readers since then. With the Supabase free-tier storage cap blowing past, the JSONB column was the largest single item we owned — and the only way to keep paying $0 was either drop the column or move providers. We did both: drop the dead data, and make the swap one env-var away.
 
@@ -44,6 +64,105 @@ What landed:
 - **`.env.example` documents both providers** with the URL shapes (Supabase pooler on 6543, Neon pooled endpoint with the `-pooler` host suffix).
 
 **What this unlocks.** Free-tier headroom on both providers: switching to Neon is now a one-line env edit; staying on Supabase costs less because the largest column is gone. Either way the app code doesn't know which one is live.
+
+### 3. Ticket-native demo resolver (any wallet) — *planned*
+
+**Why this exists.** Leg resolution today sits behind the admin gate from item #1, and the surface is a debug-page-style grid of YES / NO / VOID buttons per leg. That UI was fine when the only consumer was the team flipping outcomes for testing — it's the wrong shape for users. Per-leg controls leak the protocol's plumbing (legs, sides, void semantics) into a flow that should be about a single ticket's outcome, and the only useful demo question for a regular user is "what does winning this ticket feel like?" / "what does losing feel like?". Combined with the per-user deviation model (#4), there's no reason to keep this gated, debug-styled, or per-leg.
+
+**Sketch of the fix.** The resolver becomes a first-class part of the ticket flow, not a utility tab:
+
+- **Lives on `/ticket/{id}`.** The detail page already shows the legs, status pills, and payout — add a small "Simulate outcome" panel inline (likely below the leg list, above the settle / claim section). No new top-level route, no `/legs` tab, no admin-debug carve-out.
+- **Two buttons only: `Mark as WIN` and `Mark as LOSS`.** No YES / NO / VOID per leg. The user is telling us what they want the *ticket* to do; the server figures out which leg-level deviations make that happen.
+- **Third button: `Reset demo outcome`.** Clears the deviations for this ticket's legs (scoped to the caller's wallet). Visible only when at least one leg of this ticket has an active deviation.
+- **Expansion rule (server-side).** For each leg in the ticket, look up the side the user bet on (`YES` or `NO` per leg). `WIN` ⇒ deviate every leg to that bound side. `LOSS` ⇒ deviate every leg to the opposite side. Symmetric, easy to clear, and every leg lights up green or red so the visual feedback is decisive. (Alternative considered: flip only one leg for LOSS — closer to how a real parlay loses, but less dramatic and harder to explain in the UI; reject for now.)
+- **Demo-state labelling.** Wherever a leg is showing a deviation, render a small "demo" badge alongside the resolved status pill so the user (and any screenshot viewer) can tell the simulated outcome apart from a real chain resolution.
+- **Optional surface on `/tickets`.** Each row could grow a small overflow menu with "Simulate WIN / LOSS / Reset" so users don't have to drill into the detail page. Defer if it crowds the row; the detail page is the canonical place.
+
+**Relationship to the existing admin per-leg resolver.** The raw per-leg YES / NO / VOID grid stays where it is — `/admin/debug`, behind `<AdminGate>`, calling the on-chain `/api/admin/resolve-leg` route. That's the path the cron and manual recovery still need. The new ticket-page panel is *additive*: it doesn't touch on-chain state, it isn't gated, and it doesn't expose leg-level controls.
+
+### 4. Per-user demo overrides for leg resolution — *planned, biggest item*
+
+**Why this exists.** Today, "resolve a leg" signs a transaction through `WARM_DEPLOYER_PRIVATE_KEY` against `AdminOracleAdapter`. So one user clicking YES on a leg moves the state for *every* ticket in the system. That's wrong for the demo experience — we want a visiting user's UI to immediately reflect the outcome they chose so they can walk through the full win/loss flow without waiting for a real game, but their click shouldn't cascade into other users' tickets, the cron, or the on-chain settler. The cron-driven Polymarket resolver should remain the only source of truth for chain state. Any UI deviation has to be local, scoped to one wallet, and short-lived (real resolution eventually catches up).
+
+**Sketch of the fix.** New table `tbuserlegdeviation` keyed by `(txtwallet, txtsourceref)` storing an outcome (`YES` / `NO` / `VOIDED`) and a timestamp. The user-facing API is **ticket-scoped**, not per-leg — `POST /api/tickets/{id}/demo-resolve` with `{ outcome: "WIN" | "LOSS" }`. The server reads the ticket's legs and bound sides, expands the intent into per-leg deviation writes (WIN ⇒ each leg deviates to its bound side; LOSS ⇒ each leg deviates to the opposite), and upserts rows scoped to the caller's wallet. `DELETE` on the same route clears the ticket's deviations. Per-leg writes never leave the server — clients only see ticket-level intents (#3). Read-time: every UI surface that reads a leg's status (parlay slip, ticket detail, ticket list, builder) layers the user's deviation row over the on-chain status before rendering. The on-chain `LegRegistry.resolved()` keeps the same value — only the *display* changes.
+
+**Chain truth wins on resolution.** As soon as the chain resolves a leg (`LegRegistry.resolved()` returns non-Unresolved), the deviation for that leg is suppressed at read time — period. Two cases collapse into one rule:
+
+- *Deviation matched reality.* User saw a YES demo, leg actually resolved YES — display doesn't change, ticket processes normally.
+- *Deviation contradicted reality.* User saw a YES demo, leg actually resolved NO — the demo outcome falls away, the real outcome takes over, and the ticket processes normally against chain truth.
+
+Either way the user lands in the real flow. No conflict warnings, no manual clear step, no "your demo disagrees with reality" notice — agreement is invisible, disagreement is just the demo expiring into truth. Implementation note: this falls out of the read-time layering for free (`if chainStatus !== Unresolved return chainStatus, else maybe-return deviation`); deviation rows can be garbage-collected lazily, since they're already invisible once the chain resolves.
+
+**Important boundary.** A deviation cannot pay out a real ticket. Settlement still calls on-chain `settleTicket`, which reads chain truth. The deviation only changes what the user *sees*; if they actually hold a ticket on that leg, the cash hits their wallet only when the chain resolves their way. We make this distinction visible by labelling deviated legs with a "demo" badge (#3) until chain truth catches up.
+
+**Decisions.**
+- *Live tickets included.* Deviations apply to legs on tickets the user already holds — that's the whole demo point ("show me what winning this would feel like"). The demo badge keeps it honest.
+- *Chain wins on resolution.* As soon as a leg resolves on-chain, the deviation is suppressed at read time, agreement or disagreement. See the dedicated paragraph above.
+- *Pricing untouched.* Deviations don't reach `computeQuote` — pricing is global and computed pre-buy, before any wallet has a deviation to apply.
+
+### 5. Hide legs whose payout is below the entrance fee — *planned*
+
+**Why this exists.** At very high leg probabilities (>~99%) the implied multiplier approaches 1. After the per-leg fee (`baseFee + perLegFee × numLegs`), the user pays more than they could ever take home — the leg is dead money. The builder still surfaces these because the curation score doesn't model fees. Showing a leg you can't profit on is a UX trap, and once a user notices the trap once it erodes trust in the rest of the list.
+
+**Sketch of the fix.** Add a payout-vs-fee check to the curation pipeline: skip any leg whose single-leg payout (at min stake) doesn't clear the marginal entrance fee. The fee model is already accessible via `ParlayEngine` config; do the math at sync time so the row gets dropped before it lands in the UI, or at render time so it tracks live fee config — pick based on how often the fee schedule actually moves (almost never, so sync time is fine).
+
+### 6. Specialize MLB tab around the CLOB MLB endpoint — *planned*
+
+**Why this exists.** The MLB tab currently renders the same generic question cards as every other sport, sourced via Gamma. Polymarket's CLOB endpoint exposes richer per-market data (order book, fills, cleaner pricing) and MLB has a tightly defined per-game market set (moneyline, spread, total, run line, props) that maps well to a structured layout. Building one specialized tab as a proof-of-concept lets us see whether the CLOB-fed structured-by-game approach is worth doing for NBA / NFL too.
+
+**Sketch of the fix.** New CLOB-fed sync path (extend `polymarket/sync` or add `/api/polymarket/clob-mlb`). Pull MLB games + their associated CLOB markets, group rows by `txtgamegroup` (already on `tblegmapping`), and render an MLB-specific tab that shows games as cards with embedded "moneyline / total / run line / props" rows. Where CLOB exposes a tight bid/ask, quote off the midpoint of those instead of the Gamma midpoint.
+
+### 7. Display event start time on legs — *planned*
+
+**Why this exists.** We show `bigcutofftime` (when the leg becomes ineligible) but never the actual game / event start. "When is this game?" is a basic prediction-market UX expectation, and without it users have to flip to Polymarket to find the time and come back.
+
+**Sketch of the fix.** Add `bigeventstart` (BIGINT, unix seconds) to `tblegmapping`. Populate from the Polymarket event/CLOB payload at sync time. Render in the leg card and the parlay slip. `bigcutofftime` and `bigearliestresolve` stay where they are; the new column sits next to them.
+
+### 8. Clarify which side YES vs NO commits the user to — *planned*
+
+**Why this exists.** Some Polymarket questions are phrased ambiguously enough that "YES" and "NO" don't communicate which side the user is taking. "Will the Lakers win game 3?" — clear. "Lakers vs. Celtics — first to 100" — what does YES mean? The current UI only shows the question text + YES / NO buttons, leaving the user to infer.
+
+**Sketch of the fix.** Surface the resolved outcome string alongside each button — e.g. `YES = Lakers`, `NO = Celtics`. Source the labels from the Polymarket payload (`outcomes` array on the Gamma response). Where the payload doesn't disambiguate, fall back to YES / NO but keep the slot present so the layout doesn't shift between markets.
+
+### 9. De-duplicate question text in the Yes/No box — *planned*
+
+**Why this exists.** The current bet box shows the question both as the card title and inside the YES / NO box body. Same string twice, ~20px apart. It looks like a bug, even when it isn't.
+
+**Sketch of the fix.** Render the question once. Pick the version that includes the most context (typically the title) and drop the duplicate from the box body. Replace the inner string with the YES / NO outcome label from item #8, or with the leg's category and event start time so the slot earns its space.
+
+### 10. Click-through from question header to Polymarket — *planned*
+
+**Why this exists.** A user who wants to dig into a market — read comments, see the order book, validate the odds — can't get there from our UI. They have to open Polymarket and search by title. A direct link removes that friction and is also a small honesty signal: we're not hiding where the data comes from.
+
+**Sketch of the fix.** Wrap the question header in an external link to `https://polymarket.com/event/{slug}` (or `/market/{conditionid}` if no slug is on the row). We dropped `jsonbapipayload`, so add `txtpolymarketslug` (TEXT, nullable) to `tblegmapping` and populate from the Gamma payload at sync. Open in a new tab with `noopener noreferrer`.
+
+### 11. Truth-up About + (probably retire) Agents page — *planned*
+
+**Why this exists.** About and Agents were written for an earlier project narrative. Agents in particular reads as if there are autonomous on-chain agents driving market discovery (BallDontLie, NBA games) and a separate Settler bot — neither matches today. Markets come from Polymarket via Gamma; the settler is a Vercel cron in `/api/settlement/run`; "Market Discovery Agent" is gone. The Agents page mostly reflects the deployer wallet's basescan stats with an "agent" label, which is worse than not having the page at all.
+
+**My take (you asked).** Delete `/agents`. Absorb the small bit of useful content (ERC-8021 builder-code attribution, links to ParlayEngine + LegRegistry on Basescan, the deployer wallet) into a short "Behind the scenes" subsection on About. Reasoning:
+- The page promises an agent dashboard but renders wallet stats.
+- The "Discovery Agent + Settler Bot" framing doesn't reflect the JIT-quote / cron-settle flow that A-Day shipped.
+- Maintaining a page that asserts things the code doesn't do is worse than removing it.
+- About already covers protocol explainer; an honest "the deployer EOA submits resolutions; a Vercel cron settles tickets" paragraph is more useful than a fake dashboard.
+
+About itself needs lighter edits — verify protocol facts (vault model, fee routing, oracle path), strip leftover hackathon-pitch phrasing that doesn't match current architecture.
+
+### 12. Vault page nuanced corrections — *planned, partially scoped*
+
+**Why this exists.** Vault page has rough edges that surface during a walkthrough rather than from a single piece of feedback. We're starting with one concrete miss and expect to add items as the page gets a closer read.
+
+**Identified items.**
+
+1. **"Vault VOO" tile excludes locked VOO.** In `components/MyPositionPanel.tsx:82`, the "Vault VOO" `PositionBox` renders only `userShares` — and its own tooltip admits as much ("Unlocked VOO. Withdrawable any time… No fee-share boost — lock to earn"). Locked VOO across Full / Partial / Least tiers shows up further down in the "Lock Hierarchy" block but never rolls up into the headline number. The tile labelled "Vault VOO" should answer "how much VOO do I have in this vault?" — today it answers "how much liquid VOO do I have?" Promote the headline to the total: `userShares + fullShares + partialShares + leastShares`. Tooltip text stays accurate by clarifying "Total VOO held across liquid + all lock tiers; the breakdown is in Lock Hierarchy below." Lock Hierarchy section keeps the per-tier numbers and is still the place to inspect what's locked where. (Alternative considered: rename the tile to "Liquid Vault VOO" and leave the value alone — rejected, because the headline is the place a returning LP looks for "what do I have here?" and that's the more useful question to answer up top.)
+
+**TBD items.** More vault-page corrections to come once we walk the page together — placeholder so they land here when identified, instead of as scattered commits.
+
+### 13. Safari-friendly onboarding (Rabby gap) — *planned*
+
+**Why this exists.** Onboarding currently funnels new users to install Rabby. Rabby ships Chrome / Firefox / Brave / Edge extensions and a desktop app, but **no Safari extension** — Safari users hit a dead-end at install time. The funnel needs a Safari-specific branch.
+
+**Sketch of the fix.** Detect Safari in `/_onboard` (User-Agent regex like `/^((?!chrome|android).)*safari/i`). On Safari, swap the install path to a wallet that supports it — Coinbase Wallet on iOS / macOS, MetaMask Mobile via WalletConnect, or the WalletConnect QR path itself — and rewrite the copy so we're not telling Safari users to install something that doesn't exist for them. Keep the Rabby path for everyone else.
 
 ---
 
@@ -155,3 +274,57 @@ Behavior matrix:
 - Empty `tbadminwallet` keeps Anvil + burner-wallet local dev working with zero config.
 - `/api/db/init` (markets) and `/api/db/init-admins` (admin allowlist) are independent — running one never touches the other.
 - Seed list is a floor, not a ceiling. Re-running `pnpm db:init-admins` after removing a row from `hardcodedAdminAddresses` (or after changing `USER_WALLET_ADDRESS`) won't delete the dropped address from the DB — only `removeAdmin()` (UI or DELETE route) does that.
+
+---
+
+### Planned-items implementation hints (#3–#13)
+
+Light-touch reference for the items still ahead. Concrete schemas only where direction is settled (#4 deviation table, new `tblegmapping` columns for #7 and #10). Everything else stays in Part 1 narrative until the spec lands.
+
+**New table — `tbuserlegdeviation` (item #4).** Composite primary key. Outcome enum mirrors `tbpolymarketresolution` so layered reads can compare strings directly.
+
+```sql
+CREATE TABLE tbuserlegdeviation (
+  txtwallet      TEXT NOT NULL CHECK (txtwallet ~ '^0x[0-9a-f]{40}$'),
+  txtsourceref   TEXT NOT NULL REFERENCES tblegmapping(txtsourceref) ON DELETE CASCADE,
+  txtoutcome     TEXT NOT NULL CHECK (txtoutcome IN ('YES', 'NO', 'VOIDED')),
+  tscreatedat    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (txtwallet, txtsourceref)
+);
+CREATE INDEX IF NOT EXISTS ixuserlegdeviation_wallet ON tbuserlegdeviation (txtwallet);
+```
+
+**New columns on `tblegmapping`.**
+
+| Column | Type | For item | Notes |
+| --- | --- | --- | --- |
+| `bigeventstart` | BIGINT | #7 | Unix seconds; populate at Polymarket sync. Nullable on legacy rows. |
+| `txtpolymarketslug` | TEXT | #10 | Nullable; falls back to `/market/{conditionid}` when absent. |
+
+Both via `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` migrations in `lib/db/schema.ts`, same pattern as the `bigexclusiongroup` add.
+
+**Likely API surface for the new items.**
+
+| Route | Method | Auth | Item | Purpose |
+| --- | --- | --- | --- | --- |
+| `/api/tickets/[id]/demo-resolve` | POST | none (any wallet, write keyed to caller) | #3 + #4 | upsert deviations for every leg of this ticket; body `{ outcome: "WIN" \| "LOSS" }` |
+| `/api/tickets/[id]/demo-resolve` | DELETE | none | #3 + #4 | clear the caller's deviations for every leg of this ticket |
+| `/api/legs/deviations` | GET | none | #4 | list the caller's active deviations for read-time layering (keyed off `txtwallet` query / connected-wallet header) |
+| `/api/polymarket/clob-mlb` | GET | cron | #6 | new sync path; mirrors `polymarket/sync` shape but reads CLOB |
+
+The raw per-leg POST is intentionally absent — leg-level writes are an internal-only fan-out from the ticket route, never exposed to the client.
+
+**Files most likely to move.**
+
+- `lib/db/schema.ts`, `lib/db/client.ts` — table + columns above.
+- `app/api/tickets/[id]/demo-resolve/route.ts` (new), `app/api/legs/deviations/route.ts` (new) — items #3 + #4.
+- `app/ticket/[id]/page.tsx` — embed the WIN / LOSS / Reset panel; item #3.
+- `lib/hooks/leg.ts` — fold deviation lookup into the per-leg status read.
+- `app/admin/debug/page.tsx` — left alone; existing per-leg admin grid is the cron / recovery path and stays gated.
+- `components/parlay/*` (bet box / question header) — items #5, #7, #8, #9, #10.
+- `utils/parlay/polymarket/*` — items #6, #7, #10 sync changes.
+- `app/agents/page.tsx` — delete (item #11). `app/about/page.tsx` — edit.
+- `app/_onboard/*` — item #13 Safari branch.
+- `app/vault/*` — item #12, scope TBD.
+
+**Out-of-scope (still).** Server-side admin auth (SIWE / signed-nonce header) for `/api/db/admins` etc. — already flagged under the shipped section's "Out of scope". Untouched by this round.

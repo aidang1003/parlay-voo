@@ -84,4 +84,19 @@ CREATE TABLE IF NOT EXISTS tbpolymarketresolution (
   txtnotxhash     TEXT,
   tsresolvedat    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- tbuserlegdeviation: per-user demo overrides for leg resolution.
+-- Ticket-native demo flow (item #3) writes one row per (wallet, leg sourceRef)
+-- when a user simulates a WIN or LOSS from /ticket/[id]. The display layer
+-- reads from here when chain truth is still Unresolved; once the chain
+-- resolves, deviations are suppressed at read time (chain wins). No on-chain
+-- effect — settlement still calls settleTicket against the real LegRegistry.
+CREATE TABLE IF NOT EXISTS tbuserlegdeviation (
+  txtwallet     TEXT NOT NULL CHECK (txtwallet ~ '^0x[0-9a-f]{40}$'),
+  txtsourceref  TEXT NOT NULL,
+  txtoutcome    TEXT NOT NULL CHECK (txtoutcome IN ('YES', 'NO', 'VOIDED')),
+  tscreatedat   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (txtwallet, txtsourceref)
+);
+CREATE INDEX IF NOT EXISTS ixuserlegdeviation_wallet ON tbuserlegdeviation (txtwallet);
 `;

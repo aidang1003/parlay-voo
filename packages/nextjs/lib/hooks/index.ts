@@ -24,3 +24,4 @@ export * from "./lock";
 export * from "./parlay";
 export * from "./ticket";
 export * from "./onboarding";
+export * from "./deviations";

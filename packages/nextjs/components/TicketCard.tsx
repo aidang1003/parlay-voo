@@ -15,6 +15,10 @@ export interface TicketLeg {
   probabilityPPM?: number;
   /** On-chain legId, surfaced on hover for provenance. */
   legId?: bigint;
+  /** True when the resolved/result fields are coming from the user's local
+   *  demo deviation rather than chain truth. Powers the "demo" badge so the
+   *  simulated outcome is visibly distinct from a real settlement. */
+  demo?: boolean;
 }
 
 export interface TicketData {
@@ -124,6 +128,14 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
                   >
                     {leg.outcomeChoice === 1 ? "YES" : leg.outcomeChoice === 2 ? "NO" : "?"}
                   </span>
+                  {leg.demo && (
+                    <span
+                      title="Simulated outcome only — chain truth has not resolved this leg yet. No effect on settlement."
+                      className="ml-2 rounded-full border border-brand-purple/40 bg-brand-purple/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-purple-1"
+                    >
+                      Demo
+                    </span>
+                  )}
                 </p>
               </div>
             </div>

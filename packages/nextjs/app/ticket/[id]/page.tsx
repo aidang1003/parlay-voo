@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { DemoResolvePanel } from "~~/components/DemoResolvePanel";
 import { MultiplierClimb } from "~~/components/MultiplierClimb";
 import { RehabCTA } from "~~/components/RehabCTA";
 import { TicketCard, type TicketData, type TicketLeg } from "~~/components/TicketCard";
 import { BASE_CASHOUT_PENALTY_BPS, PPM, computeClientCashoutValue } from "~~/lib/cashout";
-import { useLegDescriptions, useLegStatuses, useTicket, useUserTickets } from "~~/lib/hooks";
+import { useLegDescriptions, useLegStatuses, useTicket, useUserLegDeviations, useUserTickets } from "~~/lib/hooks";
 import { formatUSDC, isLegWon, mapStatus, parseOutcomeChoice } from "~~/lib/utils";
 
 /** Hook to replay the rocket climb animation on settled tickets */
@@ -66,6 +67,7 @@ export default function TicketPage() {
   const legMap = useLegDescriptions(onChainTicket?.legIds ?? []);
   const isActive = onChainTicket?.status === 0;
   const legStatuses = useLegStatuses(onChainTicket?.legIds ?? [], legMap, isActive ? 2000 : 5000);
+  const { deviations } = useUserLegDeviations();
 
   const sortedIds = userTickets.map(t => t.id).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const currentIdx = ticketId !== undefined ? sortedIds.findIndex(id => id === ticketId) : -1;
@@ -98,6 +100,7 @@ export default function TicketPage() {
   const wonProbsPPM: number[] = [];
   let unresolvedCount = 0;
 
+  let demoActive = false;
   const legs: TicketLeg[] = onChainTicket.legIds.map((legId, i): TicketLeg => {
     const leg = legMap.get(legId.toString());
     const rawPPM = leg ? Number(leg.probabilityPPM) : 0;
@@ -105,8 +108,29 @@ export default function TicketPage() {
     const effectivePPM = outcomeChoice === 2 ? PPM - rawPPM : outcomeChoice === 1 ? rawPPM : 0;
     const odds = effectivePPM > 0 ? PPM / effectivePPM : multiplier ** (1 / onChainTicket.legIds.length);
     const oracleResult = legStatuses.get(legId.toString());
-    const resolved = oracleResult?.resolved ?? false;
-    const result = oracleResult?.status ?? 0;
+    let resolved = oracleResult?.resolved ?? false;
+    let result = oracleResult?.status ?? 0;
+    let demo = false;
+
+    // Layer the demo deviation only when chain truth is still Unresolved.
+    // Once on-chain resolution lands, it wins regardless of agreement.
+    if (!resolved && leg?.sourceRef) {
+      const deviation = deviations.get(leg.sourceRef);
+      if (deviation === "VOIDED") {
+        resolved = true;
+        result = 3;
+        demo = true;
+      } else if (deviation === "YES") {
+        resolved = true;
+        result = 1;
+        demo = true;
+      } else if (deviation === "NO") {
+        resolved = true;
+        result = 2;
+        demo = true;
+      }
+    }
+    if (demo) demoActive = true;
 
     if (resolved && result !== 3) {
       if (isLegWon(outcomeChoice, result) && effectivePPM > 0) {
@@ -124,6 +148,7 @@ export default function TicketPage() {
       result,
       probabilityPPM: effectivePPM,
       legId,
+      demo,
     };
   });
 
@@ -242,6 +267,12 @@ export default function TicketPage() {
       {ticket.status === "Lost" && <RehabCTA stake={ticket.stake} />}
 
       <TicketCard ticket={ticket} />
+
+      {/* Demo resolver — shown for active tickets so users can preview a win
+       *  or loss without waiting for the real game. */}
+      {ticket.status === "Active" && ticketId !== undefined && (
+        <DemoResolvePanel ticketId={ticketId} hasActiveDeviations={demoActive} />
+      )}
     </div>
   );
 }

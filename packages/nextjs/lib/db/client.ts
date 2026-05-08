@@ -321,3 +321,62 @@ export async function removeAdmin(address: string): Promise<{ removed: number }>
   `;
   return { removed: result.count };
 }
+
+// ── User leg deviations (tbuserlegdeviation) ────────────────────────────────
+//
+// Per-user demo overrides for leg outcomes. Powers the ticket-native demo
+// resolver (item #3) on top of the deviation table from item #4. Read-time
+// layering: the UI prefers chain truth when a leg has resolved on-chain;
+// the deviation only shows through while the chain is still Unresolved.
+
+export type DeviationOutcome = "YES" | "NO" | "VOIDED";
+
+export interface UserLegDeviation {
+  sourceRef: string;
+  outcome: DeviationOutcome;
+}
+
+export async function getUserLegDeviations(wallet: string): Promise<UserLegDeviation[]> {
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const rows = await db`
+    SELECT txtsourceref, txtoutcome FROM tbuserlegdeviation
+    WHERE txtwallet = ${w}
+  `;
+  return (rows as Record<string, unknown>[]).map(r => ({
+    sourceRef: r.txtsourceref as string,
+    outcome: r.txtoutcome as DeviationOutcome,
+  }));
+}
+
+export async function upsertUserLegDeviations(
+  wallet: string,
+  deviations: UserLegDeviation[],
+): Promise<{ written: number }> {
+  if (deviations.length === 0) return { written: 0 };
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  let count = 0;
+  for (const dev of deviations) {
+    await db`
+      INSERT INTO tbuserlegdeviation (txtwallet, txtsourceref, txtoutcome)
+      VALUES (${w}, ${dev.sourceRef}, ${dev.outcome})
+      ON CONFLICT (txtwallet, txtsourceref) DO UPDATE SET
+        txtoutcome  = EXCLUDED.txtoutcome,
+        tscreatedat = now()
+    `;
+    count++;
+  }
+  return { written: count };
+}
+
+export async function deleteUserLegDeviations(wallet: string, sourceRefs: string[]): Promise<{ removed: number }> {
+  if (sourceRefs.length === 0) return { removed: 0 };
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const result = await db`
+    DELETE FROM tbuserlegdeviation
+    WHERE txtwallet = ${w} AND txtsourceref IN ${db(sourceRefs)}
+  `;
+  return { removed: result.count };
+}

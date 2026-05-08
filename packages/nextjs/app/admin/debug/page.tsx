@@ -2,10 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Code2, Wrench } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Code2, Trash2, Wrench } from "lucide-react";
 import { formatUnits, parseUnits } from "viem";
+import { useAccount } from "wagmi";
 import { useMintTestUSDC, useUSDCBalance } from "~~/lib/hooks";
-import { type OpenLeg, useIsTestnet, useOpenLegs, useRecentResolutions } from "~~/lib/hooks/debug";
+import { type OpenLeg, useAdminList, useIsTestnet, useOpenLegs, useRecentResolutions } from "~~/lib/hooks/debug";
 import { formatUSDC } from "~~/lib/utils";
 
 type ResolveStatus = 1 | 2 | 3;
@@ -32,11 +34,180 @@ export default function AdminDebugPage() {
       </header>
 
       <DeveloperToolsSection />
+      <AdminWalletsSection />
       <MintSection />
       <DatabaseSection />
       <LegResolverSection />
       <RecentResolutionsSection />
     </div>
+  );
+}
+
+// ── Admin wallets ─────────────────────────────────────────────────────────
+
+function AdminWalletsSection() {
+  const { data: admins, isLoading, refetch } = useAdminList();
+  const { address: currentAddress } = useAccount();
+  const queryClient = useQueryClient();
+  const [newAddress, setNewAddress] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [initState, setInitState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [initMsg, setInitMsg] = useState<string | null>(null);
+
+  const addMutation = useMutation({
+    mutationFn: async (input: { address: string; note: string | null; addedBy: string | null }) => {
+      const res = await fetch("/api/admin/admins", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => {
+      setNewAddress("");
+      setNewNote("");
+      setAddError(null);
+      queryClient.invalidateQueries({ queryKey: ["admin-list"] });
+    },
+    onError: (e: unknown) => setAddError(e instanceof Error ? e.message : String(e)),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (address: string) => {
+      const res = await fetch(`/api/admin/admins?address=${encodeURIComponent(address)}`, { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      return body;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-list"] }),
+  });
+
+  async function runInit() {
+    setInitState("loading");
+    setInitMsg(null);
+    try {
+      const res = await fetch("/api/admin/init-admins", { method: "POST" });
+      const body = await res.text();
+      setInitMsg(body);
+      setInitState(res.ok ? "done" : "error");
+      queryClient.invalidateQueries({ queryKey: ["admin-list"] });
+    } catch (e) {
+      setInitMsg(e instanceof Error ? e.message : String(e));
+      setInitState("error");
+    }
+  }
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(newAddress.trim())) {
+      setAddError("address must be 0x + 40 hex");
+      return;
+    }
+    addMutation.mutate({
+      address: newAddress.trim(),
+      note: newNote.trim() || null,
+      addedBy: currentAddress?.toLowerCase() ?? null,
+    });
+  }
+
+  return (
+    <Section
+      title="Admin Wallets"
+      action={
+        <div className="flex items-center gap-2">
+          <button
+            onClick={runInit}
+            disabled={initState === "loading"}
+            className="btn btn-outline btn-xs"
+            title="Re-run /api/db/init-admins (idempotent)"
+          >
+            {initState === "loading" ? "Initializing…" : "Init table"}
+          </button>
+          <button onClick={() => refetch()} className="btn btn-ghost btn-xs">
+            Refresh
+          </button>
+        </div>
+      }
+    >
+      <p className="mb-4 text-xs text-gray-500">
+        Wallets that pass the <code className="text-gray-300">useIsAdmin()</code> gate. Sourced from{" "}
+        <code className="text-gray-300">tbadminwallet</code>; seeded by{" "}
+        <code className="text-gray-300">pnpm db:init-admins</code>. Empty list ⇒ gate falls open for any connected
+        wallet (so you can&apos;t lock yourself out).
+      </p>
+
+      {initMsg && (
+        <pre
+          className={`mb-4 max-h-32 overflow-auto rounded bg-black/40 p-3 text-[11px] ${
+            initState === "error" ? "text-neon-red" : "text-gray-300"
+          }`}
+        >
+          {initMsg}
+        </pre>
+      )}
+
+      <form onSubmit={handleAdd} className="mb-4 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+        <input
+          value={newAddress}
+          onChange={e => setNewAddress(e.target.value)}
+          placeholder="0x…"
+          className="input input-bordered input-sm font-mono"
+          aria-label="New admin address"
+        />
+        <input
+          value={newNote}
+          onChange={e => setNewNote(e.target.value)}
+          placeholder="note (optional)"
+          className="input input-bordered input-sm"
+          aria-label="Note"
+        />
+        <button type="submit" disabled={addMutation.isPending} className="btn btn-primary btn-sm">
+          {addMutation.isPending ? "Adding…" : "Add"}
+        </button>
+      </form>
+      {addError && <p className="mb-3 text-xs text-neon-red">{addError}</p>}
+
+      {isLoading && <div className="py-6 text-center text-xs text-gray-500">Loading…</div>}
+
+      {!isLoading && admins && admins.length === 0 && (
+        <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3 text-xs text-yellow-300">
+          No admins configured. Gate is currently open to any connected wallet on testnet.
+        </div>
+      )}
+
+      {!isLoading && admins && admins.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-white/5 bg-gray-900/40">
+          <table className="table table-sm">
+            <thead className="text-xs uppercase tracking-wider text-gray-500">
+              <tr>
+                <th>Address</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {admins.map(addr => (
+                <tr key={addr} className="text-gray-300">
+                  <td className="font-mono text-xs">{addr}</td>
+                  <td className="text-right">
+                    <button
+                      onClick={() => removeMutation.mutate(addr)}
+                      disabled={removeMutation.isPending}
+                      className="btn btn-ghost btn-xs text-neon-red"
+                      title="Remove admin"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
   );
 }
 

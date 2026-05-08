@@ -168,12 +168,28 @@ All offchain services run as Next.js serverless routes under `packages/nextjs/sr
 | `/api/polymarket/sync` | Daily cron — catalog refresh + resolution relay |
 | `/api/settlement/run` | Daily cron — settle tickets whose legs are all resolved |
 | `/api/settlement/trigger` | Manual trigger — same body as `/api/settlement/run` |
-| `/api/db/init` | One-shot — apply Neon schema + backfill seed legs |
+| `/api/db/init` | One-shot — apply main schema + backfill seed legs |
+| `/api/db/init-admins` | One-shot — apply admin schema + seed `tbadminwallet`. Modular; never touches market tables |
+| `/api/db/admins` | CRUD on `tbadminwallet` (cron-gated; called via the admin proxy) |
+| `/api/admin/list` | Public testnet read of admin addresses; powers `useIsAdmin()` |
+| `/api/admin/admins` | Testnet-gated browser proxy for `/api/db/admins` (POST add / DELETE remove) |
+| `/api/admin/init-admins` | Testnet-gated proxy that calls `/api/db/init-admins` from `/admin/debug` |
 | `/api/admin/db-init` | Testnet-gated proxy that calls `/api/db/init` from `/admin/debug` |
 | `/api/admin/sync` | Testnet-gated proxy that calls `/api/polymarket/sync` from `/admin/debug` |
 | `/api/admin/resolve-leg` | Testnet-gated — signs `AdminOracleAdapter.resolve()` for the debug page |
 
 Admin routes 404 off testnet (`useIsTestnet()` gate; chains 31337 / 84532 only). Live NBA markets are fetched inline from BallDontLie (`packages/nextjs/src/lib/bdl.ts`, 5-min cache). Seed markets live in `packages/shared/src/seed.ts`. Curated Polymarket entries live in `packages/shared/src/polymarket/curated.ts`.
+
+### Admin Allowlist
+
+Source of truth for "is this wallet an admin" is the `tbadminwallet` Postgres table — **not** an env var, not an on-chain role. The full *why* lives in [`changes/C_USER_FEEDBACK.md`](changes/C_USER_FEEDBACK.md); this section is the snapshot of what's wired up:
+
+- **Schema** — `lib/db/admin-schema.ts` exports `ADMIN_SCHEMA_SQL` and `INITIAL_ADMIN_ADDRESSES`. Schema is intentionally separate from `lib/db/schema.ts` so admin-table init and market-table init never entangle.
+- **Seed list** — `INITIAL_ADMIN_ADDRESSES` = `hardcodedAdminAddresses` (committed array) ∪ optional `USER_WALLET_ADDRESS` env var, lowercased + deduped. `USER_WALLET_ADDRESS` lets a contributor seed their own wallet without committing it; not `NEXT_PUBLIC_*` so it stays server-side.
+- **Init paths** — `pnpm db:init-admins` runs `scripts/init-admins.ts` (standalone `tsx`) or `/api/db/init-admins` (cron-gated route, also reachable via the "Init table" button on `/admin/debug`). Both call the same `initAdmins(sql)` and use `ON CONFLICT DO NOTHING` — the seed list is a floor, never a delete.
+- **Frontend gate** — `useIsAdmin()` (in `lib/hooks/debug.ts`) fetches `/api/admin/list` via React Query and returns `{ isAdmin, isLoading, unconfigured }`. `<AdminGate>` (in `components/AdminGate.tsx`) wraps `/debug` directly and `/admin/*` via `app/admin/layout.tsx`. Empty table ⇒ gate falls open so a fresh DB doesn't lock everyone out.
+- **Mutation path** — UI on `/admin/debug` → `Admin Wallets` section calls `POST/DELETE /api/admin/admins`, which proxies to the cron-gated `/api/db/admins` and attaches `CRON_SECRET` server-side.
+- **Not yet a security boundary** — server mutation routes are still UX-grade (proxy attaches the secret for any caller inside the SSO bubble). A real signature-based admin auth is on the [`changes/C_USER_FEEDBACK.md`](changes/C_USER_FEEDBACK.md) follow-up list.
 
 ## Protocol Parameters
 

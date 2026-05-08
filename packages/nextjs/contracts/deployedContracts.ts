@@ -355,7 +355,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 27,
+      deployedOnBlock: 2,
     },
     HouseVault: {
       address: "0xc232129fa72304ec630c2a6ee0757edd704e6ca3",
@@ -2176,7 +2176,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 28,
+      deployedOnBlock: 3,
     },
     LegRegistry: {
       address: "0x774d67193b331df28aecd22f644ea30bb66bdd5e",
@@ -2750,7 +2750,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 29,
+      deployedOnBlock: 4,
     },
     AdminOracleAdapter: {
       address: "0x9d2a52b29e509884ac172cc26f3ef8dce2840ed9",
@@ -2927,7 +2927,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 30,
+      deployedOnBlock: 5,
     },
     ParlayEngine: {
       address: "0x4d4b7dc9ea36595e1379c15f55efe243dd77e30a",
@@ -4676,7 +4676,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 31,
+      deployedOnBlock: 6,
     },
     LockVaultV2: {
       address: "0x2deccfaf7864353d4f6ff535576dce9a6ddef0a9",
@@ -5691,7 +5691,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 34,
+      deployedOnBlock: 9,
     },
     MockYieldAdapter: {
       address: "0xb8cd5f56705fa03ff56e9e5c824fdaa2e8b1d7bd",
@@ -5910,7 +5910,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 38,
+      deployedOnBlock: 13,
     },
   },
   84532: {

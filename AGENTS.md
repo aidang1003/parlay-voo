@@ -276,7 +276,7 @@ export default Home;
 
 ### Comments
 
-Make comments that add information. Avoid redundant JSDoc for simple functions.
+Make high value one-line comments in code you write that are short and concise. If the comment takes multiple lines it should be documented in the architecture or change docs instead. Avoid redundant JSDoc for simple functions.
 
 ## Documentation
 

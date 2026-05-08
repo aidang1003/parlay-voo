@@ -234,3 +234,60 @@ export async function recordResolution(input: RecordResolutionInput): Promise<vo
     ON CONFLICT (txtconditionid) DO NOTHING
   `;
 }
+
+// ── Admin allowlist (tbadminwallet) ─────────────────────────────────────────
+
+export interface AdminRow {
+  address: string;
+  note: string | null;
+  addedBy: string | null;
+  createdAt: string;
+}
+
+const ADDRESS_RE = /^0x[0-9a-f]{40}$/;
+
+function normalizeAddress(raw: string): string {
+  const addr = raw.trim().toLowerCase();
+  if (!ADDRESS_RE.test(addr)) {
+    throw new Error(`invalid address: ${JSON.stringify(raw)}`);
+  }
+  return addr;
+}
+
+export async function listAdmins(): Promise<AdminRow[]> {
+  const db = sql();
+  const rows = await db`
+    SELECT txtaddress, txtnote, txtaddedby, tscreatedat FROM tbadminwallet
+    ORDER BY tscreatedat ASC
+  `;
+  return (rows as Record<string, unknown>[]).map(r => ({
+    address: r.txtaddress as string,
+    note: (r.txtnote as string | null) ?? null,
+    addedBy: (r.txtaddedby as string | null) ?? null,
+    createdAt: r.tscreatedat as string,
+  }));
+}
+
+export async function addAdmin(input: {
+  address: string;
+  note?: string | null;
+  addedBy?: string | null;
+}): Promise<void> {
+  const db = sql();
+  const addr = normalizeAddress(input.address);
+  const addedBy = input.addedBy ? normalizeAddress(input.addedBy) : null;
+  await db`
+    INSERT INTO tbadminwallet (txtaddress, txtnote, txtaddedby)
+    VALUES (${addr}, ${input.note ?? null}, ${addedBy})
+    ON CONFLICT (txtaddress) DO NOTHING
+  `;
+}
+
+export async function removeAdmin(address: string): Promise<{ removed: number }> {
+  const db = sql();
+  const addr = normalizeAddress(address);
+  const result = await db`
+    DELETE FROM tbadminwallet WHERE txtaddress = ${addr}
+  `;
+  return { removed: result.count };
+}

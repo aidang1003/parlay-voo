@@ -31,6 +31,7 @@ export async function GET(req: Request) {
       correlationGroupId: l.correlationGroupId ?? 0,
       exclusionGroupId: l.exclusionGroupId ?? 0,
       eventStart: l.eventStart,
+      polymarketSlug: l.polymarketSlug,
     })),
   }));
 

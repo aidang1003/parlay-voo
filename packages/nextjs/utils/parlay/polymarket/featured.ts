@@ -125,6 +125,7 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
         negRisk: event.negRisk === true,
         eventId: event.id,
         eventStart,
+        polymarketSlug: event.slug,
       });
     }
   }

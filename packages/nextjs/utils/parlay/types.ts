@@ -51,6 +51,10 @@ export interface Leg {
    *  N hours" on the leg card so users can see when the game tips off
    *  without leaving the app. */
   eventStart?: number;
+  /** Polymarket event slug. Powers the question-text click-through to
+   *  https://polymarket.com/event/<slug>. Polymarket-only; seed markets
+   *  leave it undefined and the UI renders the question without a link. */
+  polymarketSlug?: string;
 }
 
 export interface Market {

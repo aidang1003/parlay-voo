@@ -24,6 +24,9 @@ export interface CuratedMarket {
    *  leg card so users can answer "when is this game?" without opening
    *  Polymarket. Sourced from GammaEvent.startDate. */
   eventStart?: number;
+  /** Polymarket event slug. Powers the question-header click-through to
+   *  https://polymarket.com/event/<slug>. Sourced from GammaEvent.slug. */
+  polymarketSlug?: string;
 }
 
 export interface PolymarketMetadata {

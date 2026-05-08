@@ -59,6 +59,11 @@ ALTER TABLE tblegmapping DROP COLUMN IF EXISTS jsonbapipayload;
 -- silently omits the line.
 ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigeventstart BIGINT;
 
+-- Migration: Polymarket event slug, used to deep-link the question header
+-- to https://polymarket.com/event/<slug>. Nullable; legacy rows fall back
+-- to /market/<conditionid> in the UI, and seed markets stay null entirely.
+ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtpolymarketslug TEXT;
+
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);
 CREATE INDEX IF NOT EXISTS ixlegmapping_noid         ON tblegmapping (intnolegid);

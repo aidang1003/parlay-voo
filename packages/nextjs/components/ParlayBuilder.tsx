@@ -55,6 +55,7 @@ interface DisplayLeg {
   correlationGroupId: number;
   exclusionGroupId: number;
   eventStart?: number;
+  polymarketSlug?: string;
 }
 
 interface SelectedLeg {
@@ -112,6 +113,15 @@ function ppmToOdds(ppm: number): number {
   return 1_000_000 / ppm;
 }
 
+/** Build a Polymarket link for the leg. Falls back to the conditionId-based
+ *  /market/<id> URL when the slug is missing (legacy rows). Seed markets
+ *  return null and the UI renders the question without a link. */
+function polymarketHref(leg: { polymarketSlug?: string; sourceRef: string }): string | null {
+  if (leg.polymarketSlug) return `https://polymarket.com/event/${leg.polymarketSlug}`;
+  if (/^0x[0-9a-fA-F]{64}$/.test(leg.sourceRef)) return `https://polymarket.com/market/${leg.sourceRef}`;
+  return null;
+}
+
 /** Compact "starts in 3h" / "starts Mon 7pm" / "live" label for the badge row. */
 function formatEventStart(unixSec: number): string {
   const diffSec = unixSec - Math.floor(Date.now() / 1000);
@@ -156,6 +166,7 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         correlationGroupId: leg.correlationGroupId ?? 0,
         exclusionGroupId: leg.exclusionGroupId ?? 0,
         eventStart: leg.eventStart,
+        polymarketSlug: leg.polymarketSlug,
       });
     }
   }
@@ -745,7 +756,20 @@ export function ParlayBuilder() {
                                 </span>
                               </button>
                               <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
-                                <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
+                                {polymarketHref(leg) ? (
+                                  <a
+                                    href={polymarketHref(leg) ?? undefined}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    title="Open on Polymarket"
+                                    className="min-w-0 text-sm text-gray-200 underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                                  >
+                                    {leg.description}
+                                  </a>
+                                ) : (
+                                  <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
+                                )}
                               </div>
                               {hasNo && (
                                 <button

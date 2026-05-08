@@ -74,6 +74,8 @@ export interface MarketRow {
   bigexclusiongroup: number | null;
   /** Event start (unix seconds). Polymarket-only; null for seed markets. */
   bigeventstart: number | null;
+  /** Polymarket event slug (no leading slash). Null for seed markets. */
+  txtpolymarketslug: string | null;
   tscreatedat: string;
 }
 
@@ -103,6 +105,7 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     txtgamegroup: (r.txtgamegroup as string | null | undefined) ?? null,
     bigexclusiongroup: r.bigexclusiongroup == null ? null : Number(r.bigexclusiongroup),
     bigeventstart: r.bigeventstart == null ? null : Number(r.bigeventstart),
+    txtpolymarketslug: (r.txtpolymarketslug as string | null | undefined) ?? null,
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -158,6 +161,8 @@ export interface UpsertMarketInput {
   exclusionGroupId?: number | null;
   /** Event start (unix seconds). Polymarket only. */
   eventStart?: number | null;
+  /** Polymarket event slug. Polymarket only. */
+  polymarketSlug?: string | null;
 }
 
 /**
@@ -176,17 +181,20 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const exclusionGroupId =
     input.exclusionGroupId != null && input.exclusionGroupId !== 0 ? input.exclusionGroupId : null;
   const eventStart = input.eventStart ?? null;
+  const polymarketSlug = input.polymarketSlug ?? null;
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
       bigcutofftime, bigearliestresolve, blnactive,
-      bigcurationscore, txtgamegroup, bigexclusiongroup, bigeventstart
+      bigcurationscore, txtgamegroup, bigexclusiongroup,
+      bigeventstart, txtpolymarketslug
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
       ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
-      ${curationScore}, ${gameGroup}, ${exclusionGroupId}, ${eventStart}
+      ${curationScore}, ${gameGroup}, ${exclusionGroupId},
+      ${eventStart}, ${polymarketSlug}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyesprobppm      = EXCLUDED.intyesprobppm,
@@ -197,7 +205,8 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       -- didn't have one yet, so a re-sync can never silently re-tag a leg
       -- that admins already accepted on-chain.
       bigexclusiongroup  = COALESCE(tblegmapping.bigexclusiongroup, EXCLUDED.bigexclusiongroup),
-      bigeventstart      = COALESCE(EXCLUDED.bigeventstart, tblegmapping.bigeventstart)
+      bigeventstart      = COALESCE(EXCLUDED.bigeventstart, tblegmapping.bigeventstart),
+      txtpolymarketslug  = COALESCE(EXCLUDED.txtpolymarketslug, tblegmapping.txtpolymarketslug)
   `;
 }
 

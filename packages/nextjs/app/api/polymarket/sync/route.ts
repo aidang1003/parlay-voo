@@ -119,6 +119,8 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     exclusionGroupId,
     eventStart: entry.eventStart ?? null,
     polymarketSlug: entry.polymarketSlug ?? null,
+    yesOutcome: entry.yesOutcome ?? null,
+    noOutcome: entry.noOutcome ?? null,
   });
 }
 

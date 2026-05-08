@@ -56,6 +56,8 @@ interface DisplayLeg {
   exclusionGroupId: number;
   eventStart?: number;
   polymarketSlug?: string;
+  yesOutcome?: string;
+  noOutcome?: string;
 }
 
 interface SelectedLeg {
@@ -167,6 +169,8 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         exclusionGroupId: leg.exclusionGroupId ?? 0,
         eventStart: leg.eventStart,
         polymarketSlug: leg.polymarketSlug,
+        yesOutcome: leg.yesOutcome,
+        noOutcome: leg.noOutcome,
       });
     }
   }
@@ -751,6 +755,11 @@ export function ParlayBuilder() {
                                 } ${gated ? "cursor-not-allowed" : ""}`}
                               >
                                 <span>Yes</span>
+                                {leg.yesOutcome && (
+                                  <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                    {leg.yesOutcome}
+                                  </span>
+                                )}
                                 <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
                                   {(leg.yesOdds * netLegFactor).toFixed(2)}x
                                 </span>
@@ -782,6 +791,11 @@ export function ParlayBuilder() {
                                   } ${gated ? "cursor-not-allowed" : ""}`}
                                 >
                                   <span>No</span>
+                                  {leg.noOutcome && (
+                                    <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                      {leg.noOutcome}
+                                    </span>
+                                  )}
                                   <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
                                     {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
                                   </span>

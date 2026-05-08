@@ -113,6 +113,7 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
     for (const mkt of markets) {
       if (!isUsable(mkt, cfg)) continue;
       const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
+      const [yesOutcome, noOutcome] = parseOutcomeLabels(mkt.outcomes);
 
       results.push({
         conditionId: mkt.conditionId,
@@ -126,6 +127,8 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
         eventId: event.id,
         eventStart,
         polymarketSlug: event.slug,
+        yesOutcome,
+        noOutcome,
       });
     }
   }
@@ -182,6 +185,18 @@ function parsePrices(raw: string[] | string): [number | undefined, number | unde
   const yes = Number(arr[0]);
   const no = Number(arr[1]);
   return [Number.isFinite(yes) ? yes : undefined, Number.isFinite(no) ? no : undefined];
+}
+
+/** Pull outcome labels from the Gamma payload. Returns undefined for the
+ *  default "Yes"/"No" so the UI can fall back to its built-in copy. */
+function parseOutcomeLabels(raw: string[] | string): [string | undefined, string | undefined] {
+  const arr = parseJsonField<string[]>(raw);
+  if (!Array.isArray(arr) || arr.length < 2) return [undefined, undefined];
+  const norm = (s: unknown) => (typeof s === "string" ? s.trim() : "");
+  const yes = norm(arr[0]);
+  const no = norm(arr[1]);
+  const isDefault = (s: string) => s.toLowerCase() === "yes" || s.toLowerCase() === "no" || s.length === 0;
+  return [isDefault(yes) ? undefined : yes, isDefault(no) ? undefined : no];
 }
 
 export async function fetchTopEvent(

@@ -32,6 +32,8 @@ export async function GET(req: Request) {
       exclusionGroupId: l.exclusionGroupId ?? 0,
       eventStart: l.eventStart,
       polymarketSlug: l.polymarketSlug,
+      yesOutcome: l.yesOutcome,
+      noOutcome: l.noOutcome,
     })),
   }));
 

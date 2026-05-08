@@ -27,6 +27,12 @@ export interface CuratedMarket {
   /** Polymarket event slug. Powers the question-header click-through to
    *  https://polymarket.com/event/<slug>. Sourced from GammaEvent.slug. */
   polymarketSlug?: string;
+  /** Outcome label for the YES side. Undefined when the market ships the
+   *  default "Yes" — we only persist labels that add information (team,
+   *  candidate, etc.). */
+  yesOutcome?: string;
+  /** Outcome label for the NO side. Same convention as yesOutcome. */
+  noOutcome?: string;
 }
 
 export interface PolymarketMetadata {

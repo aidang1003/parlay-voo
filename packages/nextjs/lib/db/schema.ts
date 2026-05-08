@@ -64,6 +64,14 @@ ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigeventstart BIGINT;
 -- to /market/<conditionid> in the UI, and seed markets stay null entirely.
 ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtpolymarketslug TEXT;
 
+-- Migration: outcome labels. Polymarket markets carry an outcomes array
+-- ("Yes"/"No" for binary, but team / candidate names for sports / politics).
+-- We persist both sides so the YES/NO buttons can show "YES = Lakers" etc.
+-- Stored verbatim from the payload; nullable when the market only ships the
+-- default Yes/No labels.
+ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtyesoutcome TEXT;
+ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtnooutcome  TEXT;
+
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);
 CREATE INDEX IF NOT EXISTS ixlegmapping_noid         ON tblegmapping (intnolegid);

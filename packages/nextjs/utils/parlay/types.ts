@@ -55,6 +55,12 @@ export interface Leg {
    *  https://polymarket.com/event/<slug>. Polymarket-only; seed markets
    *  leave it undefined and the UI renders the question without a link. */
   polymarketSlug?: string;
+  /** YES-side outcome label (e.g. "Lakers"). Undefined when the upstream
+   *  market only carries the default "Yes" — the UI falls back to the
+   *  generic copy. */
+  yesOutcome?: string;
+  /** NO-side outcome label. Same convention as yesOutcome. */
+  noOutcome?: string;
 }
 
 export interface Market {

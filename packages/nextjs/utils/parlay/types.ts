@@ -47,6 +47,10 @@ export interface Leg {
    *  cart — the builder greys out conflicting legs and the engine reverts
    *  on duplicate non-zero ids. 0 = no exclusion. */
   exclusionGroupId?: number;
+  /** Event start (unix seconds). Polymarket-only; rendered as "starts in
+   *  N hours" on the leg card so users can see when the game tips off
+   *  without leaving the app. */
+  eventStart?: number;
 }
 
 export interface Market {

@@ -53,6 +53,7 @@ function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
     active: true,
     correlationGroupId: corrId,
     exclusionGroupId: exclusionId,
+    eventStart: row.bigeventstart ?? undefined,
   };
   if (row.txtsource === "polymarket" && row.intnoprobppm != null) {
     leg.noId = row.intnolegid ?? nextSyntheticId();

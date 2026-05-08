@@ -54,6 +54,7 @@ interface DisplayLeg {
   noProbabilityPPM?: number;
   correlationGroupId: number;
   exclusionGroupId: number;
+  eventStart?: number;
 }
 
 interface SelectedLeg {
@@ -111,6 +112,17 @@ function ppmToOdds(ppm: number): number {
   return 1_000_000 / ppm;
 }
 
+/** Compact "starts in 3h" / "starts Mon 7pm" / "live" label for the badge row. */
+function formatEventStart(unixSec: number): string {
+  const diffSec = unixSec - Math.floor(Date.now() / 1000);
+  if (diffSec <= 0) return "live";
+  const hours = diffSec / 3600;
+  if (hours < 1) return `starts in ${Math.max(1, Math.round(diffSec / 60))}m`;
+  if (hours < 24) return `starts in ${Math.round(hours)}h`;
+  const d = new Date(unixSec * 1000);
+  return `starts ${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
 /** Falls back to yes-side complement if noOdds is missing — defensive for single-sided seed markets. */
 function effectiveOdds(leg: DisplayLeg, outcome: number): number {
   if (outcome === 2) {
@@ -143,6 +155,7 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         noProbabilityPPM: leg.noProbabilityPPM,
         correlationGroupId: leg.correlationGroupId ?? 0,
         exclusionGroupId: leg.exclusionGroupId ?? 0,
+        eventStart: leg.eventStart,
       });
     }
   }
@@ -677,6 +690,14 @@ export function ParlayBuilder() {
                           className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
                         >
                           Odds locked
+                        </span>
+                      )}
+                      {legs[0]?.eventStart !== undefined && (
+                        <span
+                          title={new Date(legs[0].eventStart * 1000).toLocaleString()}
+                          className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-gray-400"
+                        >
+                          {formatEventStart(legs[0].eventStart)}
                         </span>
                       )}
                     </div>

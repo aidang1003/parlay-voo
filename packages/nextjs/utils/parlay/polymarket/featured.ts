@@ -106,6 +106,7 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
     const markets = event.markets ?? [];
     const fallbackCategory = resolveCategory(event, cfg.category);
     const eventVolume24hr = parseNumOrUndef(event.volume24hr);
+    const eventStart = parseIsoToUnix(event.startDate);
     const sport = classifySport(event);
     const resolvedCategory = sport.category ?? fallbackCategory;
     const gameGroup = sport.gameGroup ?? undefined;
@@ -123,6 +124,7 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
         gameGroup,
         negRisk: event.negRisk === true,
         eventId: event.id,
+        eventStart,
       });
     }
   }
@@ -155,6 +157,12 @@ function parseNumOrUndef(raw: string | number | undefined): number | undefined {
   if (raw == null) return undefined;
   const n = typeof raw === "number" ? raw : Number(raw);
   return Number.isFinite(n) ? n : undefined;
+}
+
+function parseIsoToUnix(iso: string | undefined): number | undefined {
+  if (!iso) return undefined;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
 }
 
 function resolveCategory(event: GammaEvent, fallback: string): string {

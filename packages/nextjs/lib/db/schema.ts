@@ -54,6 +54,11 @@ ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigexclusiongroup BIGINT;
 DROP INDEX IF EXISTS ixlegmapping_payload;
 ALTER TABLE tblegmapping DROP COLUMN IF EXISTS jsonbapipayload;
 
+-- Migration: event start time (unix seconds), populated from Polymarket
+-- event.startDate at sync. Nullable; legacy rows leave it null and the UI
+-- silently omits the line.
+ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigeventstart BIGINT;
+
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);
 CREATE INDEX IF NOT EXISTS ixlegmapping_noid         ON tblegmapping (intnolegid);

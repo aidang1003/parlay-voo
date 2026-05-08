@@ -20,6 +20,10 @@ export interface CuratedMarket {
   /** Polymarket event id. Stable across child markets in the same event;
    *  used as the seed for the exclusion-group hash when `negRisk` is true. */
   eventId?: string;
+  /** Event start time (unix seconds). When present, the UI shows it on the
+   *  leg card so users can answer "when is this game?" without opening
+   *  Polymarket. Sourced from GammaEvent.startDate. */
+  eventStart?: number;
 }
 
 export interface PolymarketMetadata {

@@ -1,6 +1,17 @@
 import { type MarketRow, getActiveMarkets } from "~~/lib/db/client";
 import type { Leg, Market } from "~~/utils/parlay";
-import { PPM } from "~~/utils/parlay";
+import { BPS, PPM, PROTOCOL_FEE_BPS } from "~~/utils/parlay";
+
+/** A side is profitable if its post-fee multiplier exceeds 1.0 — i.e. winning
+ *  pays out more than was staked. We use this to drop markets where neither
+ *  side could ever profit; showing them is a UX trap (item #5). */
+function isSideProfitable(probPpm: number | null, feeBps: number): boolean {
+  if (probPpm == null || probPpm <= 0) return false;
+  // multiplier = PPM / probPpm; post-fee factor = (BPS - feeBps) / BPS.
+  // Profitable when (PPM / probPpm) * (BPS - feeBps) > BPS, i.e.
+  //   probPpm * BPS < PPM * (BPS - feeBps)
+  return probPpm * BPS < PPM * (BPS - feeBps);
+}
 
 /** One row per sourceRef with yes/no flattened. Display only — checkout re-verifies prices/leg-ids on-chain. */
 export async function fetchMarketsFromDb(): Promise<Market[]> {
@@ -12,6 +23,10 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
   const nextSynthetic = () => syntheticId--;
 
   for (const row of rows) {
+    const yesProfitable = isSideProfitable(row.intyesprobppm, PROTOCOL_FEE_BPS);
+    const noProfitable = isSideProfitable(row.intnoprobppm, PROTOCOL_FEE_BPS);
+    if (!yesProfitable && !noProfitable) continue; // both sides dead money
+
     if (row.txtsource === "seed") {
       markets.push({
         id: row.txtsourceref,

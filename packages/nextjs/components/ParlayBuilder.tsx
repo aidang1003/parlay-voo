@@ -654,97 +654,102 @@ export function ParlayBuilder() {
               {game.gameGroup && (
                 <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">{game.gameGroup}</h2>
               )}
-              {game.markets.map(({ title, legs }) => (
-                <div key={`${game.gameGroup}::${title}`} className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h3>
-                    {legs[0] && (
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                          CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
-                        }`}
-                      >
-                        {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
-                      </span>
-                    )}
-                    {legs[0]?.sourceRef.startsWith("0x") && (
-                      <span
-                        title="Odds captured when this market was registered on-chain. They don't update mid-flight."
-                        className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
-                      >
-                        Odds locked
-                      </span>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {legs.map((leg, legIdx) => {
-                      const selected = selectedLegs.find(s => s.leg.id === leg.id);
-                      const hasNo = leg.noId !== undefined;
-                      const gateInfo = legGate.get(leg.id.toString());
-                      const gated = gateInfo !== undefined && !selected;
-                      const tooltip = gated
-                        ? gateInfo.reason === "conflict"
-                          ? `Conflicts with: ${gateInfo.conflictsWith ?? ""}`
-                          : "Leg limit reached"
-                        : undefined;
-                      return (
-                        <div
-                          key={leg.id.toString()}
-                          id={legIdx === 0 ? "ftue-market-card" : undefined}
-                          title={tooltip}
-                          className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
-                            selected
-                              ? selected.outcomeChoice === 1
-                                ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
-                                : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-                              : gated
-                                ? "opacity-40 grayscale"
-                                : "hover:border-white/10"
+              {game.markets.map(({ title, legs }) => {
+                const titleRedundant = legs.length === 1 && legs[0].description.trim() === title.trim();
+                return (
+                  <div key={`${game.gameGroup}::${title}`} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {!titleRedundant && (
+                        <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h3>
+                      )}
+                      {legs[0] && (
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                            CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
                           }`}
-                          style={{ animationDelay: `${legIdx * 50}ms` }}
                         >
-                          {/* Yes / Question / No — question centered, sides flanking */}
-                          <div className="flex items-stretch">
-                            <button
-                              disabled={vaultEmpty || gated}
-                              onClick={() => toggleLeg(leg, 1)}
-                              className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                                selected?.outcomeChoice === 1
-                                  ? "bg-brand-green/20 text-brand-green"
-                                  : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
-                              } ${gated ? "cursor-not-allowed" : ""}`}
-                            >
-                              <span>Yes</span>
-                              <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                                {(leg.yesOdds * netLegFactor).toFixed(2)}x
-                              </span>
-                            </button>
-                            <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
-                              <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
-                            </div>
-                            {hasNo && (
+                          {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
+                        </span>
+                      )}
+                      {legs[0]?.sourceRef.startsWith("0x") && (
+                        <span
+                          title="Odds captured when this market was registered on-chain. They don't update mid-flight."
+                          className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
+                        >
+                          Odds locked
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {legs.map((leg, legIdx) => {
+                        const selected = selectedLegs.find(s => s.leg.id === leg.id);
+                        const hasNo = leg.noId !== undefined;
+                        const gateInfo = legGate.get(leg.id.toString());
+                        const gated = gateInfo !== undefined && !selected;
+                        const tooltip = gated
+                          ? gateInfo.reason === "conflict"
+                            ? `Conflicts with: ${gateInfo.conflictsWith ?? ""}`
+                            : "Leg limit reached"
+                          : undefined;
+                        return (
+                          <div
+                            key={leg.id.toString()}
+                            id={legIdx === 0 ? "ftue-market-card" : undefined}
+                            title={tooltip}
+                            className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
+                              selected
+                                ? selected.outcomeChoice === 1
+                                  ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
+                                  : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
+                                : gated
+                                  ? "opacity-40 grayscale"
+                                  : "hover:border-white/10"
+                            }`}
+                            style={{ animationDelay: `${legIdx * 50}ms` }}
+                          >
+                            {/* Yes / Question / No — question centered, sides flanking */}
+                            <div className="flex items-stretch">
                               <button
                                 disabled={vaultEmpty || gated}
-                                onClick={() => toggleLeg(leg, 2)}
-                                className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                                  selected?.outcomeChoice === 2
-                                    ? "bg-brand-amber/20 text-brand-amber"
-                                    : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                                onClick={() => toggleLeg(leg, 1)}
+                                className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                  selected?.outcomeChoice === 1
+                                    ? "bg-brand-green/20 text-brand-green"
+                                    : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
                                 } ${gated ? "cursor-not-allowed" : ""}`}
                               >
-                                <span>No</span>
+                                <span>Yes</span>
                                 <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                                  {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
+                                  {(leg.yesOdds * netLegFactor).toFixed(2)}x
                                 </span>
                               </button>
-                            )}
+                              <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
+                                <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
+                              </div>
+                              {hasNo && (
+                                <button
+                                  disabled={vaultEmpty || gated}
+                                  onClick={() => toggleLeg(leg, 2)}
+                                  className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                    selected?.outcomeChoice === 2
+                                      ? "bg-brand-amber/20 text-brand-amber"
+                                      : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                                  } ${gated ? "cursor-not-allowed" : ""}`}
+                                >
+                                  <span>No</span>
+                                  <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
+                                    {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
+                                  </span>
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>

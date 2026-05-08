@@ -4,11 +4,38 @@ import postgres, { type Sql } from "postgres";
  * Postgres client (postgres.js). One shared instance per server lambda.
  * Throws on first use if DATABASE_URL is missing so misconfiguration fails fast.
  *
- * Configured for Supabase's transaction pooler (port 6543), which does not
- * support prepared statements — hence `prepare: false`. `max: 1` keeps the
- * pool footprint minimal under Vercel's serverless concurrency model.
+ * Provider-agnostic: same driver works for Supabase and Neon. We sniff the URL
+ * to pick safe defaults — pgBouncer-fronted endpoints (Supabase port 6543,
+ * Neon `-pooler` host) don't support prepared statements, so we set
+ * `prepare: false` for those. `max: 1` keeps the pool footprint minimal under
+ * Vercel's serverless concurrency model.
  */
 let cached: Sql | null = null;
+
+type DbProvider = "supabase" | "neon" | "unknown";
+
+function detectProvider(url: string): { provider: DbProvider; pooled: boolean } {
+  let host = "";
+  let port = "";
+  try {
+    const u = new URL(url);
+    host = u.hostname.toLowerCase();
+    port = u.port;
+  } catch {
+    return { provider: "unknown", pooled: true };
+  }
+
+  let provider: DbProvider = "unknown";
+  if (host.includes("supabase.")) provider = "supabase";
+  else if (host.includes("neon.tech")) provider = "neon";
+
+  // Supabase pooler: port 6543. Neon pooler: hostname contains `-pooler`.
+  // When unknown, default to pooled (`prepare: false`) since it's the safer
+  // failure mode — prepared statements over pgBouncer fail at query time.
+  const pooled = port === "6543" || host.includes("-pooler") || host.includes(".pooler.") || provider === "unknown";
+
+  return { provider, pooled };
+}
 
 export function sql(): Sql {
   if (!cached) {
@@ -16,10 +43,12 @@ export function sql(): Sql {
     if (!url) {
       throw new Error("DATABASE_URL is not set. See .env.example");
     }
+    const { provider, pooled } = detectProvider(url);
     cached = postgres(url, {
-      prepare: false,
+      prepare: !pooled,
       max: 1,
     });
+    console.log(`[db] connected (provider=${provider}, pooled=${pooled})`);
   }
   return cached;
 }
@@ -38,7 +67,6 @@ export interface MarketRow {
   bigcutofftime: number;
   bigearliestresolve: number;
   blnactive: boolean;
-  jsonbapipayload: unknown;
   bigcurationscore: number | null;
   txtgamegroup: string | null;
   /** Non-zero ⇒ this market is part of a mutually-exclusive group. Legs
@@ -69,7 +97,6 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     bigcutofftime: Number(r.bigcutofftime),
     bigearliestresolve: Number(r.bigearliestresolve),
     blnactive: r.blnactive as boolean,
-    jsonbapipayload: r.jsonbapipayload ?? null,
     bigcurationscore: r.bigcurationscore == null ? null : Number(r.bigcurationscore),
     txtgamegroup: (r.txtgamegroup as string | null | undefined) ?? null,
     bigexclusiongroup: r.bigexclusiongroup == null ? null : Number(r.bigexclusiongroup),
@@ -121,7 +148,6 @@ export interface UpsertMarketInput {
   cutoffTime: number;
   earliestResolve: number;
   active?: boolean;
-  apiPayload?: unknown;
   curationScore?: number | null;
   gameGroup?: string | null;
   /** Stable hash of the source's exclusion identifier (Polymarket negRisk
@@ -131,14 +157,13 @@ export interface UpsertMarketInput {
 
 /**
  * Upsert a market row. On conflict we refresh only the volatile fields a sync
- * needs (probs, cutoff, curation score, payload). Registration metadata —
- * leg ids, question, category, earliestResolve, active flag, game group — is
- * preserved once written so a re-sync can't clobber a registered id or rename
- * a market the catalog has already advertised.
+ * needs (probs, cutoff, curation score). Registration metadata — leg ids,
+ * question, category, earliestResolve, active flag, game group — is preserved
+ * once written so a re-sync can't clobber a registered id or rename a market
+ * the catalog has already advertised.
  */
 export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
-  const payloadJson = input.apiPayload == null ? null : JSON.stringify(input.apiPayload);
   const curationScore = input.curationScore ?? null;
   const gameGroup = input.gameGroup ?? null;
   // 0 collapses to null in the DB so non-exclusion markets stay sparse and
@@ -149,20 +174,18 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
-      bigcutofftime, bigearliestresolve, blnactive, jsonbapipayload,
+      bigcutofftime, bigearliestresolve, blnactive,
       bigcurationscore, txtgamegroup, bigexclusiongroup
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
       ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
-      ${payloadJson}::jsonb,
       ${curationScore}, ${gameGroup}, ${exclusionGroupId}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyesprobppm      = EXCLUDED.intyesprobppm,
       intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
-      jsonbapipayload    = COALESCE(EXCLUDED.jsonbapipayload, tblegmapping.jsonbapipayload),
       bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore),
       -- Preserve a registered exclusion group; only fill in when the row
       -- didn't have one yet, so a re-sync can never silently re-tag a leg

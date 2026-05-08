@@ -8,7 +8,6 @@ export interface CuratedMarket {
   /** When sourced from Gamma, carry prices so sync can skip per-token orderbook. */
   yesPrice?: number;
   noPrice?: number;
-  apiPayload?: unknown;
   volume24hr?: number;
   curationScore?: number;
   gameGroup?: string;

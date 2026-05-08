@@ -1,8 +1,8 @@
-// Canonical schema for the parlay-voo Neon Postgres database.
-// Imported by app/api/db/init/route.ts and applied via the splitStatements
-// helper there. Stored as a TS string (not a .sql file) so Next.js bundles
-// it with the function — readFile against process.cwd() doesn't survive
-// Vercel's serverless tracing.
+// Canonical schema for the parlay-voo Postgres database. Provider-agnostic —
+// works on either Supabase or Neon. Imported by app/api/db/init/route.ts and
+// applied via the splitStatements helper there. Stored as a TS string (not a
+// .sql file) so Next.js bundles it with the function — readFile against
+// process.cwd() doesn't survive Vercel's serverless tracing.
 //
 // Naming convention:
 //   Tables:  tb<lowername>           e.g. tblegmapping
@@ -37,7 +37,6 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   bigcutofftime      BIGINT NOT NULL,
   bigearliestresolve BIGINT NOT NULL,
   blnactive          BOOLEAN NOT NULL DEFAULT true,
-  jsonbapipayload    JSONB,
   bigcurationscore   BIGINT,
   txtgamegroup       TEXT,
   bigexclusiongroup  BIGINT,
@@ -48,10 +47,16 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
 -- landed. Safe to re-run; no-op when the column exists.
 ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigexclusiongroup BIGINT;
 
+-- Migration: drop the legacy jsonbapipayload column (and its GIN index).
+-- The raw API payload was bulky and pushed Supabase's free-tier storage cap;
+-- nothing reads it. DROP COLUMN is idempotent via IF EXISTS. Existing tables
+-- still need a VACUUM FULL to reclaim disk on Postgres.
+DROP INDEX IF EXISTS ixlegmapping_payload;
+ALTER TABLE tblegmapping DROP COLUMN IF EXISTS jsonbapipayload;
+
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);
 CREATE INDEX IF NOT EXISTS ixlegmapping_noid         ON tblegmapping (intnolegid);
-CREATE INDEX IF NOT EXISTS ixlegmapping_payload      ON tblegmapping USING GIN (jsonbapipayload jsonb_path_ops);
 
 -- tbpolymarketresolution: audit log of resolutions relayed to AdminOracleAdapter.
 CREATE TABLE IF NOT EXISTS tbpolymarketresolution (

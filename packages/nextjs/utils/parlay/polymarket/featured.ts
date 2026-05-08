@@ -119,7 +119,6 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
         displayTitle: mkt.groupItemTitle ? `${event.title}: ${mkt.groupItemTitle}` : mkt.question,
         yesPrice,
         noPrice,
-        apiPayload: buildApiPayload(event, mkt),
         volume24hr: eventVolume24hr,
         gameGroup,
         negRisk: event.negRisk === true,
@@ -156,16 +155,6 @@ function parseNumOrUndef(raw: string | number | undefined): number | undefined {
   if (raw == null) return undefined;
   const n = typeof raw === "number" ? raw : Number(raw);
   return Number.isFinite(n) ? n : undefined;
-}
-
-function buildApiPayload(event: GammaEvent, market: GammaMarket): Record<string, unknown> {
-  // Strip siblings off the event copy so N-market groups don't balloon each row.
-  const { markets: _siblings, ...eventMeta } = event;
-  return {
-    event: eventMeta,
-    market,
-    capturedAt: new Date().toISOString(),
-  };
 }
 
 function resolveCategory(event: GammaEvent, fallback: string): string {

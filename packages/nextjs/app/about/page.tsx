@@ -207,8 +207,8 @@ export default function AboutPage() {
               {[
                 { label: "Vault Type", value: "ERC-4626" },
                 { label: "Utilization Cap", value: "80%" },
-                { label: "Lock Tiers", value: "30/60/90d" },
-                { label: "Boost", value: "Up to 1.5x" },
+                { label: "Lock", value: "≥7 days" },
+                { label: "Boost", value: "1× → 4×" },
               ].map(stat => (
                 <div key={stat.label} className="rounded-lg bg-white/5 px-3 py-2">
                   <p className="text-[10px] uppercase tracking-wider text-gray-500">{stat.label}</p>
@@ -219,25 +219,26 @@ export default function AboutPage() {
           </div>
         </div>
 
-        {/* AI Curated */}
+        {/* Agent API */}
         <div className="grid items-center gap-8 lg:grid-cols-2">
           <div>
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-purple/20 bg-brand-purple/5 px-3 py-1 text-xs font-semibold text-brand-purple-1">
-              <Brain className="h-3 w-3" /> AI-Powered
+              <Brain className="h-3 w-3" /> Agent-Friendly
             </div>
             <h3 className="mb-3 text-2xl font-bold text-white">
-              AI Risk <span className="gradient-text">Analysis</span>
+              x402 <span className="gradient-text">Agent API</span>
             </h3>
             <p className="mb-4 text-sm leading-relaxed text-gray-400">
-              x402-gated AI risk assessment powered by 0G Network inference. Kelly criterion sizing, win probability
-              analysis, and autonomous agent quotes. The first parlay engine with built-in AI risk tooling.
+              An x402-gated quote endpoint that returns a Kelly-sized stake recommendation, composite win probability,
+              and edge for any leg set. Built so external autonomous agents can pay per call and integrate parlays
+              without scraping a UI. Pricing for human users runs through the same engine but on the unmetered path.
             </p>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "Protocol", value: "x402" },
-                { label: "Inference", value: "0G Network" },
-                { label: "Sizing", value: "Kelly Criterion" },
-                { label: "Agent API", value: "Autonomous" },
+                { label: "Payment", value: "x402 / USDC" },
+                { label: "Sizing", value: "Kelly criterion" },
+                { label: "Output", value: "stake + win prob" },
+                { label: "Caller", value: "Any agent" },
               ].map(stat => (
                 <div key={stat.label} className="rounded-lg bg-white/5 px-3 py-2">
                   <p className="text-[10px] uppercase tracking-wider text-gray-500">{stat.label}</p>
@@ -247,31 +248,22 @@ export default function AboutPage() {
             </div>
           </div>
           <div className="glass-card-glow flex items-center justify-center p-8">
-            <div className="w-full space-y-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-neon-green">
-                <CheckCircle className="h-4 w-4" /> Recommended: BUY
-              </div>
-              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs">
-                <p className="text-gray-300">
-                  &ldquo;Positive expected value with 62% composite win probability. Kelly fraction suggests 3.2% of
-                  bankroll.&rdquo;
-                </p>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <p className="text-[10px] text-gray-500">Win Prob</p>
-                  <p className="text-sm font-bold text-brand-pink">62%</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-gray-500">Kelly</p>
-                  <p className="text-sm font-bold text-brand-purple-1">3.2%</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-gray-500">Edge</p>
-                  <p className="text-sm font-bold text-neon-green">+8.4%</p>
-                </div>
-              </div>
-            </div>
+            <pre className="w-full overflow-x-auto text-xs text-gray-300">
+              <code>{`POST /api/premium/agent-quote
+x402: 0.10 USDC
+
+{
+  "legs": [...],
+  "stake": "100"
+}
+
+→ {
+  "kellyFraction": 0.032,
+  "winProbability": 0.62,
+  "suggestedStake": "3.20",
+  "reasoning": "..."
+}`}</code>
+            </pre>
           </div>
         </div>
       </section>
@@ -294,8 +286,8 @@ export default function AboutPage() {
             },
             {
               icon: Cpu,
-              title: "0G AI Inference",
-              desc: "Decentralized risk analysis",
+              title: "JIT Quote Signer",
+              desc: "Odds locked at buy time, not registration",
               color: "text-brand-purple-1",
             },
             {
@@ -325,6 +317,46 @@ export default function AboutPage() {
             );
           })}
         </div>
+      </section>
+
+      {/* Behind the scenes */}
+      <section className="mx-auto max-w-3xl">
+        <h2 className="mb-3 text-center text-2xl font-bold text-white">
+          Behind the <span className="gradient-text">Scenes</span>
+        </h2>
+        <p className="mx-auto mb-8 max-w-lg text-center text-sm text-gray-400">
+          Markets sync from Polymarket. A single deployer EOA submits resolutions to the on-chain admin oracle. A Vercel
+          cron settles tickets once their legs resolve. Every ticket carries a builder code attribution onchain.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="glass-card p-4 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Source</p>
+            <p className="mt-1 text-sm font-bold text-white">Polymarket Gamma</p>
+            <p className="text-[10px] text-gray-500">Curation + odds</p>
+          </div>
+          <div className="glass-card p-4 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Settlement</p>
+            <p className="mt-1 text-sm font-bold text-white">Vercel cron</p>
+            <p className="text-[10px] text-gray-500">Permissionless on-chain</p>
+          </div>
+          <div className="glass-card p-4 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Builder code</p>
+            <p className="mt-1 text-sm font-bold text-white">parlayvoo</p>
+            <p className="text-[10px] text-gray-500">Stamped on every ticket</p>
+          </div>
+        </div>
+        <p className="mt-6 text-center text-xs text-gray-600">
+          Source on{" "}
+          <a
+            href="https://github.com/aidang1003/scaffold-eth-parlay-voo"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-brand-pink hover:underline"
+          >
+            GitHub
+          </a>
+          .
+        </p>
       </section>
 
       {/* Bottom CTA */}

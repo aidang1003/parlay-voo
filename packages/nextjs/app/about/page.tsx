@@ -348,7 +348,7 @@ x402: 0.10 USDC
         <p className="mt-6 text-center text-xs text-gray-600">
           Source on{" "}
           <a
-            href="https://github.com/aidang1003/scaffold-eth-parlay-voo"
+            href="https://github.com/aidang1003/parlay-voo"
             target="_blank"
             rel="noopener noreferrer"
             className="text-brand-pink hover:underline"

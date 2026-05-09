@@ -156,6 +156,7 @@ export default function TicketPage() {
       probabilityPPM: effectivePPM,
       legId,
       demo,
+      eventStart: leg?.eventStart,
     };
   });
 

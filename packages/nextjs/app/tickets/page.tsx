@@ -109,6 +109,7 @@ function toTicketData(
       probabilityPPM: effectivePPM,
       legId,
       demo,
+      eventStart: leg?.eventStart,
     };
   });
 

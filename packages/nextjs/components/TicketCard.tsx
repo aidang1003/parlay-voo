@@ -2,7 +2,7 @@
 
 import { useCashoutEarly, useClaimPayout, useSettleTicket } from "~~/lib/hooks";
 import type { TicketStatus } from "~~/lib/ticket-status";
-import { formatUSDC } from "~~/lib/utils";
+import { formatEventStart, formatUSDC } from "~~/lib/utils";
 
 export type { TicketStatus };
 
@@ -19,6 +19,7 @@ export interface TicketLeg {
    *  demo deviation rather than chain truth. Powers the "demo" badge so the
    *  simulated outcome is visibly distinct from a real settlement. */
   demo?: boolean;
+  eventStart?: number;
 }
 
 export interface TicketData {
@@ -131,6 +132,7 @@ export function TicketCard({
       <div className="flex-1 divide-y divide-white/5 px-6">
         {ticket.legs.map((leg, i) => {
           const status = getLegStatus(leg);
+          const startLabel = !leg.resolved ? formatEventStart(leg.eventStart) : null;
           return (
             <div key={i} className="flex items-center gap-3 py-3">
               <div className="group relative flex-shrink-0">
@@ -172,6 +174,14 @@ export function TicketCard({
                       className="ml-2 rounded-full border border-brand-purple/40 bg-brand-purple/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-purple-1"
                     >
                       Demo
+                    </span>
+                  )}
+                  {startLabel && (
+                    <span
+                      title={leg.eventStart ? new Date(leg.eventStart * 1000).toLocaleString() : undefined}
+                      className="ml-2 text-[10px] text-gray-500"
+                    >
+                      &middot; {startLabel}
                     </span>
                   )}
                 </p>

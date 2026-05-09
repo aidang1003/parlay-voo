@@ -17,7 +17,7 @@ import {
   useUSDCBalance,
   useVaultStats,
 } from "~~/lib/hooks";
-import { blockNonNumericKeys, sanitizeNumericInput, useSessionState } from "~~/lib/utils";
+import { blockNonNumericKeys, formatEventStart, sanitizeNumericInput, useSessionState } from "~~/lib/utils";
 import type { Leg, Market } from "~~/utils/parlay";
 import {
   BPS,
@@ -124,15 +124,13 @@ function polymarketHref(leg: { polymarketSlug?: string; sourceRef: string }): st
   return null;
 }
 
-/** Compact "starts in 3h" / "starts Mon 7pm" / "live" label for the badge row. */
-function formatEventStart(unixSec: number): string {
-  const diffSec = unixSec - Math.floor(Date.now() / 1000);
-  if (diffSec <= 0) return "live";
-  const hours = diffSec / 3600;
-  if (hours < 1) return `starts in ${Math.max(1, Math.round(diffSec / 60))}m`;
-  if (hours < 24) return `starts in ${Math.round(hours)}h`;
+// "5/9/2026 5:15 PM" for the MLB game-card header. null ⇒ no suffix.
+function formatGameStartSuffix(unixSec: number | undefined): string | null {
+  if (unixSec == null) return null;
   const d = new Date(unixSec * 1000);
-  return `starts ${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  const date = d.toLocaleDateString(undefined, { month: "numeric", day: "numeric", year: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${date} ${time}`;
 }
 
 /** Falls back to yes-side complement if noOdds is missing — defensive for single-sided seed markets. */
@@ -684,7 +682,7 @@ export function ParlayBuilder() {
             // list for now — proof-of-concept before rolling to NBA/NFL/NHL.
             const mlbCard = activeCategory === "mlb" && !!game.gameGroup;
             const firstLeg = game.markets.flatMap(m => m.legs).find(l => l.eventStart !== undefined);
-            const startBadge = firstLeg?.eventStart !== undefined ? formatEventStart(firstLeg.eventStart) : null;
+            const headerSuffix = formatGameStartSuffix(firstLeg?.eventStart);
             const marketCount = game.markets.length;
             const wrapperClass = mlbCard ? "glass-card space-y-3 p-4" : "space-y-3";
             return (
@@ -692,16 +690,21 @@ export function ParlayBuilder() {
                 {game.gameGroup &&
                   (mlbCard ? (
                     <div className="flex items-baseline justify-between border-b border-white/5 pb-2">
-                      <h2 className="text-base font-bold text-white">{game.gameGroup}</h2>
+                      <h2 className="text-base font-bold text-white">
+                        {game.gameGroup}
+                        {headerSuffix && <span className="font-normal text-gray-400"> - {headerSuffix}</span>}
+                      </h2>
                       <div className="flex items-center gap-3 text-[11px] text-gray-400">
-                        {startBadge && <span>{startBadge}</span>}
                         <span>
                           {marketCount} {marketCount === 1 ? "market" : "markets"}
                         </span>
                       </div>
                     </div>
                   ) : (
-                    <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">{game.gameGroup}</h2>
+                    <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">
+                      {game.gameGroup}
+                      {headerSuffix && <span className="ml-2 font-normal text-gray-500"> - {headerSuffix}</span>}
+                    </h2>
                   ))}
                 {game.markets.map(({ title, legs }) => {
                   const titleRedundant = legs.length === 1 && legs[0].description.trim() === title.trim();
@@ -855,38 +858,56 @@ export function ParlayBuilder() {
           {/* Selected legs summary with numbered badges */}
           {selectedLegs.length > 0 && (
             <div className="space-y-2">
-              {selectedLegs.map(s => (
-                <div
-                  key={s.leg.id.toString()}
-                  className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
-                >
-                  <span className="min-w-0 flex-1 truncate text-gray-300">{s.leg.description}</span>
-                  <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
-                    {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
-                  </span>
-                  <span
-                    className={`ml-2 flex-shrink-0 text-xs font-bold ${
-                      s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
-                    }`}
+              {selectedLegs.map(s => {
+                const startLabel = formatEventStart(s.leg.eventStart);
+                return (
+                  <div
+                    key={s.leg.id.toString()}
+                    className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
                   >
-                    {s.outcomeChoice === 1 ? "YES" : "NO"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
-                    aria-label={`Remove ${s.leg.description}`}
-                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3">
-                      <path
-                        fillRule="evenodd"
-                        d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-gray-300">{s.leg.description}</p>
+                      {startLabel && (
+                        <p
+                          title={s.leg.eventStart ? new Date(s.leg.eventStart * 1000).toLocaleString() : undefined}
+                          className="truncate text-[10px] text-gray-500"
+                        >
+                          {startLabel}
+                        </p>
+                      )}
+                    </div>
+                    <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
+                      {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
+                    </span>
+                    <span
+                      className={`ml-2 flex-shrink-0 text-xs font-bold ${
+                        s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
+                      }`}
+                    >
+                      {s.outcomeChoice === 1 ? "YES" : "NO"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
+                      aria-label={`Remove ${s.leg.description}`}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className="h-3 w-3"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 

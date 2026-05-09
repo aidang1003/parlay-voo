@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "~~/lib/cron-auth";
-import { upsertMarket } from "~~/lib/db/client";
+import { markPolyClosed, upsertMarket } from "~~/lib/db/client";
 import { PolymarketClient } from "~~/lib/polymarket/client";
 import { midToPpm, stableHash32 } from "~~/lib/polymarket/markets";
 import {
@@ -47,12 +47,13 @@ export async function GET(req: Request) {
     allMarkets.push(entry);
   }
 
-  const result = { upserted: 0, skipped: 0, errors: [] as string[], total: allMarkets.length };
+  const result = { upserted: 0, skipped: 0, closed: 0, errors: [] as string[], total: allMarkets.length };
 
   for (const entry of allMarkets) {
     try {
-      await syncOne(entry, poly);
-      result.upserted++;
+      const action = await syncOne(entry, poly);
+      if (action === "closed") result.closed++;
+      else result.upserted++;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       result.errors.push(`${entry.conditionId.slice(0, 10)}: ${msg}`);
@@ -63,10 +64,11 @@ export async function GET(req: Request) {
   return NextResponse.json(result);
 }
 
-async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<void> {
+async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<"upserted" | "closed"> {
   const metadata = await poly.fetchMarket(entry.conditionId);
   if (metadata.closed || metadata.archived) {
-    throw new Error("market closed/archived");
+    await markPolyClosed(entry.conditionId);
+    return "closed";
   }
 
   const cutoffSec = Math.floor(new Date(metadata.endDateIso).getTime() / 1000);
@@ -122,6 +124,7 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<vo
     yesOutcome: entry.yesOutcome ?? null,
     noOutcome: entry.noOutcome ?? null,
   });
+  return "upserted";
 }
 
 // formula: docs/POLYMARKET.md § Curation score

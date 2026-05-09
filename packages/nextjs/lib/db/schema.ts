@@ -11,13 +11,14 @@
 //   Type prefixes:
 //     txt = TEXT, int = INTEGER, bln = BOOLEAN, ts = TIMESTAMPTZ, big = BIGINT
 //
-// Shape: one row per market. txtsourceref is the primary key. Yes and no
-// sides live as sibling columns (intyeslegid/intnolegid, intyesprobppm/
-// intnoprobppm). Seed markets populate only the yes-side columns and leave
-// the no-side columns null so the UI hides the No button.
+// Per AGENTS.md: every init drops every table except tbadminwallet and
+// rebuilds. No migration scripts — change a column shape, re-init.
 
 export const SCHEMA_SQL = `
--- Drop legacy tables from earlier iterations.
+DROP TABLE IF EXISTS tblegmapping CASCADE;
+DROP TABLE IF EXISTS tbpolymarketresolution CASCADE;
+DROP TABLE IF EXISTS tbuserlegdeviation CASCADE;
+DROP TABLE IF EXISTS tbticketdeviation CASCADE;
 
 CREATE TABLE IF NOT EXISTS tblegmapping (
   txtsourceref       TEXT PRIMARY KEY,
@@ -34,37 +35,13 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   bigcurationscore   BIGINT,
   txtgamegroup       TEXT,
   bigexclusiongroup  BIGINT,
+  bigeventstart      BIGINT,
+  txtpolymarketslug  TEXT,
+  txtyesoutcome      TEXT,
+  txtnooutcome       TEXT,
+  blnpolyclosed      BOOLEAN NOT NULL DEFAULT false,
   tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- Migration: add the column on databases initialised before bigexclusiongroup
--- landed. Safe to re-run; no-op when the column exists.
-ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigexclusiongroup BIGINT;
-
--- Migration: drop the legacy jsonbapipayload column (and its GIN index).
--- The raw API payload was bulky and pushed Supabase's free-tier storage cap;
--- nothing reads it. DROP COLUMN is idempotent via IF EXISTS. Existing tables
--- still need a VACUUM FULL to reclaim disk on Postgres.
-DROP INDEX IF EXISTS ixlegmapping_payload;
-ALTER TABLE tblegmapping DROP COLUMN IF EXISTS jsonbapipayload;
-
--- Migration: event start time (unix seconds), populated from Polymarket
--- event.startDate at sync. Nullable; legacy rows leave it null and the UI
--- silently omits the line.
-ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS bigeventstart BIGINT;
-
--- Migration: Polymarket event slug, used to deep-link the question header
--- to https://polymarket.com/event/<slug>. Nullable; legacy rows fall back
--- to /market/<conditionid> in the UI, and seed markets stay null entirely.
-ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtpolymarketslug TEXT;
-
--- Migration: outcome labels. Polymarket markets carry an outcomes array
--- ("Yes"/"No" for binary, but team / candidate names for sports / politics).
--- We persist both sides so the YES/NO buttons can show "YES = Lakers" etc.
--- Stored verbatim from the payload; nullable when the market only ships the
--- default Yes/No labels.
-ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtyesoutcome TEXT;
-ALTER TABLE tblegmapping ADD COLUMN IF NOT EXISTS txtnooutcome  TEXT;
 
 CREATE INDEX IF NOT EXISTS ixlegmapping_sourceactive ON tblegmapping (txtsource, blnactive);
 CREATE INDEX IF NOT EXISTS ixlegmapping_yesid        ON tblegmapping (intyeslegid);

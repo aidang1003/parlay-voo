@@ -12,10 +12,10 @@ Two items already shipped on this branch (the original admin-gate work that name
 | 2 | Database flexibility (Supabase ↔ Neon) + dropping `jsonbapipayload` | **shipped** (commit `1760345`) |
 | 3 | Ticket-native demo resolver (any wallet) | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 4 | Per-user demo overrides for leg resolution | **shipped** (commits `449c53b`, `<demo-flow>`) |
-| 5 | Hide legs whose payout is below the entrance fee | planned |
-| 6 | Specialize MLB tab around the CLOB MLB endpoint | planned |
-| 7 | Display event start time on legs | planned |
-| 8 | Clarify which side YES vs NO commits the user to | planned |
+| 5 | Hide legs whose payout is below the entrance fee | **shipped** (commit `2944c6d`) |
+| 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commit `1ebf758`) |
+| 7 | Display event start time on legs | **shipped** |
+| 8 | Clarify which side YES vs NO commits the user to | **shipped** (commit `2c36fc1`) |
 | 9 | De-duplicate question text in the Yes/No box | planned |
 | 10 | Click-through from question header to Polymarket | planned |
 | 11 | Truth-up About + (probably retire) Agents page | planned |
@@ -120,11 +120,17 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **Sketch of the fix.** New CLOB-fed sync path (extend `polymarket/sync` or add `/api/polymarket/clob-mlb`). Pull MLB games + their associated CLOB markets, group rows by `txtgamegroup` (already on `tblegmapping`), and render an MLB-specific tab that shows games as cards with embedded "moneyline / total / run line / props" rows. Where CLOB exposes a tight bid/ask, quote off the midpoint of those instead of the Gamma midpoint.
 
-### 7. Display event start time on legs — *planned*
+### 7. Display event start time on legs — *shipped*
 
 **Why this exists.** We show `bigcutofftime` (when the leg becomes ineligible) but never the actual game / event start. "When is this game?" is a basic prediction-market UX expectation, and without it users have to flip to Polymarket to find the time and come back.
 
-**Sketch of the fix.** Add `bigeventstart` (BIGINT, unix seconds) to `tblegmapping`. Populate from the Polymarket event/CLOB payload at sync time. Render in the leg card and the parlay slip. `bigcutofftime` and `bigearliestresolve` stay where they are; the new column sits next to them.
+**What landed.** New `bigeventstart` (BIGINT, unix seconds) on `tblegmapping`, populated from `event.startDate` in the Polymarket Gamma payload at sync time. A shared `formatEventStart` helper in `lib/utils.ts` turns the timestamp into "live" / "starts in Nm" / "starts in Nh" / "starts Mon 7:00pm". Rendered in three surfaces:
+- Builder leg card — chip in the badge row next to category + Odds-locked.
+- MLB game card header — "first pitch" line on the per-game card.
+- Selected legs in the parlay slip — secondary line under the question.
+- Ticket detail / list — secondary line on each unresolved leg in `TicketCard`.
+
+`bigcutofftime` and `bigearliestresolve` stay where they are; the new column sits next to them. `useLegDescriptions` was rewired to `fetchSourceRefMap` so `LegInfo.eventStart` flows through to ticket pages without a second network hop.
 
 ### 8. Clarify which side YES vs NO commits the user to — *planned*
 

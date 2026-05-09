@@ -81,6 +81,7 @@ export interface MarketRow {
   txtyesoutcome: string | null;
   /** NO-side outcome label. Null with the same convention as txtyesoutcome. */
   txtnooutcome: string | null;
+  blnpolyclosed: boolean;
   tscreatedat: string;
 }
 
@@ -113,6 +114,7 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     txtpolymarketslug: (r.txtpolymarketslug as string | null | undefined) ?? null,
     txtyesoutcome: (r.txtyesoutcome as string | null | undefined) ?? null,
     txtnooutcome: (r.txtnooutcome as string | null | undefined) ?? null,
+    blnpolyclosed: r.blnpolyclosed === true,
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -130,6 +132,7 @@ export async function getActiveMarkets(): Promise<MarketRow[]> {
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
+      AND blnpolyclosed = false
       AND bigcutofftime > EXTRACT(EPOCH FROM NOW())::BIGINT
     ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
@@ -142,11 +145,21 @@ export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
   const rows = await db`
     SELECT * FROM tblegmapping
     WHERE blnactive = true
+      AND blnpolyclosed = false
       AND bigcutofftime > EXTRACT(EPOCH FROM NOW())::BIGINT
       AND (intyeslegid IS NOT NULL OR intnolegid IS NOT NULL)
     ORDER BY bigcurationscore DESC NULLS LAST, txtsourceref
   `;
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
+}
+
+export async function markPolyClosed(sourceRef: string): Promise<{ updated: number }> {
+  const db = sql();
+  const result = await db`
+    UPDATE tblegmapping SET blnpolyclosed = true
+    WHERE txtsourceref = ${sourceRef} AND blnpolyclosed = false
+  `;
+  return { updated: result.count };
 }
 
 export interface UpsertMarketInput {

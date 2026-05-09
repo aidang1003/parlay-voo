@@ -21,6 +21,9 @@ interface GammaMarket {
   bestAsk: number;
   clobTokenIds: string[] | string;
   endDate?: string;
+  // Per-game first-pitch / tip-off timestamp. Polymarket-native sports field;
+  // shape "YYYY-MM-DD HH:MM:SS+00". Absent for season-long markets.
+  gameStartTime?: string;
 }
 
 interface GammaTag {
@@ -106,7 +109,7 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
     const markets = event.markets ?? [];
     const fallbackCategory = resolveCategory(event, cfg.category);
     const eventVolume24hr = parseNumOrUndef(event.volume24hr);
-    const eventStart = parseIsoToUnix(event.startDate);
+    const eventStartFallback = parseIsoToUnix(event.startDate);
     const sport = classifySport(event);
     const resolvedCategory = sport.category ?? fallbackCategory;
     const gameGroup = sport.gameGroup ?? undefined;
@@ -115,6 +118,7 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
       const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
       const [yesOutcome, noOutcome] = parseOutcomeLabels(mkt.outcomes);
 
+      const eventStart = parseGameStartTime(mkt.gameStartTime) ?? eventStartFallback;
       results.push({
         conditionId: mkt.conditionId,
         category: resolvedCategory,
@@ -167,6 +171,14 @@ function parseIsoToUnix(iso: string | undefined): number | undefined {
   if (!iso) return undefined;
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+}
+
+// Polymarket ships gameStartTime as "YYYY-MM-DD HH:MM:SS+00" — non-ISO (space
+// separator, short offset). Normalize to ISO before parsing.
+function parseGameStartTime(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const iso = raw.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  return parseIsoToUnix(iso);
 }
 
 function resolveCategory(event: GammaEvent, fallback: string): string {

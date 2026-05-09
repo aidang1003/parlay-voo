@@ -12,6 +12,12 @@ interface GammaMarketResponse {
   conditionId: string;
   question: string;
   description: string;
+  /** Full timestamp (e.g. "2026-05-09T19:07:00Z"). Preferred over endDateIso. */
+  endDate?: string;
+  /** Date-only ISO (e.g. "2026-05-09"). Truncates to midnight UTC of that day,
+   *  so for sports spreads/totals (where endDate = gameStart) it lands hours
+   *  before first pitch and trips the sync's "cutoff too soon" guard. Kept
+   *  as a fallback for older markets that ship only this field. */
   endDateIso: string;
   closed: boolean;
   archived: boolean;
@@ -112,7 +118,10 @@ function normalizeMarket(raw: GammaMarketResponse): PolymarketMetadata {
     conditionId: raw.conditionId,
     question: raw.question,
     description: raw.description,
-    endDateIso: raw.endDateIso,
+    // Prefer the full endDate timestamp; endDateIso is date-only and would
+    // push spread/total cutoffs to midnight UTC of game day (hours before
+    // first pitch), tripping the sync's "cutoff too soon" guard.
+    endDateIso: raw.endDate ?? raw.endDateIso,
     closed: raw.closed,
     archived: raw.archived,
     yesTokenId: tokens.yes,

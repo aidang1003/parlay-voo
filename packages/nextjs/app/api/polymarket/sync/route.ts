@@ -79,12 +79,21 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<"u
     return "closed";
   }
 
-  const cutoffSec = Math.floor(new Date(metadata.endDateIso).getTime() / 1000);
+  // Cutoff prefers the entry's override (sports markets push it far out so
+  // the natural price filter — isSideProfitable + midToPpm clamp at 0.99 —
+  // hides settled markets without a hardcoded game-end prediction). Falls
+  // back to gamma's endDateIso for political / crypto / news markets.
+  const cutoffIso = entry.cutoffOverride ?? metadata.endDateIso;
+  const cutoffSec = Math.floor(new Date(cutoffIso).getTime() / 1000);
   const nowSec = Math.floor(Date.now() / 1000);
-  if (cutoffSec <= nowSec + 3600) {
-    throw new Error(`cutoff too soon (${cutoffSec - nowSec}s)`);
+  if (!Number.isFinite(cutoffSec) || cutoffSec <= nowSec) {
+    throw new Error(`cutoff in the past (${cutoffSec - nowSec}s)`);
   }
-  const earliestResolve = cutoffSec + 48 * 3600;
+  // earliestResolve prefers its own override so settlement timing stays
+  // realistic (game end + UMA buffer) even when cutoff is pushed far out.
+  const earliestResolve = entry.earliestResolveOverride
+    ? Math.floor(new Date(entry.earliestResolveOverride).getTime() / 1000)
+    : cutoffSec + 48 * 3600;
 
   // Gamma prices avoid thin-book clamping from per-token orderbook mid
   let yesMid: number | undefined = entry.yesPrice;

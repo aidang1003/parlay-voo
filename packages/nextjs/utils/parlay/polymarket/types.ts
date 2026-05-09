@@ -4,7 +4,17 @@ export interface CuratedMarket {
   conditionId: string;
   category: PolymarketCategory;
   displayTitle?: string;
+  /** ISO string. Override the cutoff (no-more-bets) timestamp at sync time.
+   *  When set, takes precedence over `metadata.endDateIso` from gamma. Useful
+   *  for sports markets where gamma's `endDate` = first pitch is misleading
+   *  — the market keeps trading live; we want the row to stay visible until
+   *  the natural price filter (`isSideProfitable`) hides it. */
   cutoffOverride?: string;
+  /** ISO string. Override the on-chain `earliestResolve` timestamp. When set,
+   *  decouples settlement readiness from cutoff (sports markets push cutoff
+   *  far out for visibility but want settlement to fire shortly after game
+   *  end + UMA buffer, not 48h after the visibility cutoff). */
+  earliestResolveOverride?: string;
   /** When sourced from Gamma, carry prices so sync can skip per-token orderbook. */
   yesPrice?: number;
   noPrice?: number;

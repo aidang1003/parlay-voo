@@ -75,6 +75,10 @@ interface StoredSelection {
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
+// Pills shown by default (in addition to "Featured"). Everything else hides
+// behind "+ show more" until the user expands the row.
+const PINNED_CATEGORIES = ["mlb"] as const;
+
 const CATEGORY_LABELS: Record<string, string> = {
   all: "Featured",
   crypto: "Crypto",
@@ -133,6 +137,38 @@ function formatGameStartSuffix(unixSec: number | undefined): string | null {
   const date = d.toLocaleDateString(undefined, { month: "numeric", day: "numeric", year: "numeric" });
   const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${date} ${time}`;
+}
+
+// Same-game ML+spread blocking. Polymarket's spread market puts the favorite
+// at outcomes[0] (yesOutcome) and the underdog at outcomes[1] (noOutcome),
+// with line < 0 for the favorite. The moneyline market uses the same team
+// strings on each side. Cross-product of YES/NO between an ML leg and a
+// spread leg in the same game maps to four logical outcomes:
+//
+//   case A: ML YES (fav) + Spread YES (fav covers)         → spread ⊂ ML  → BLOCK (redundant)
+//   case B: ML NO  (dog) + Spread YES (fav covers)         → disjoint     → BLOCK (impossible)
+//   case C: ML YES (fav) + Spread NO  (dog +line)          → fringe overlap (fav wins by 1) → ALLOW
+//   case D: ML NO  (dog) + Spread NO  (dog +line)          → ML ⊂ spread  → BLOCK (redundant)
+//
+// Returns true when the (a,b) pair must be blocked; false otherwise. The
+// existing same-game correlationGroupId discount continues to apply to the
+// fringe-allowed cases — fine-grained per-pair correlation tuning is a
+// separate (larger) change in the math layer.
+function selectionConflicts(a: { leg: DisplayLeg; outcome: 1 | 2 }, b: { leg: DisplayLeg; outcome: 1 | 2 }): boolean {
+  if (!a.leg.gameGroup || a.leg.gameGroup !== b.leg.gameGroup) return false;
+  const ml = a.leg.marketType === "moneyline" ? a : b.leg.marketType === "moneyline" ? b : null;
+  const sp = a.leg.marketType === "spreads" ? a : b.leg.marketType === "spreads" ? b : null;
+  if (!ml || !sp) return false;
+  const mlTeam = ml.outcome === 1 ? ml.leg.yesOutcome : ml.leg.noOutcome;
+  const spFavorite = sp.leg.yesOutcome;
+  if (!mlTeam || !spFavorite) return false;
+  const mlPickedFavorite = mlTeam.trim().toLowerCase() === spFavorite.trim().toLowerCase();
+  const spPickedYes = sp.outcome === 1;
+  // Block A (mlFav, spYes), B (mlDog, spYes), D (mlDog, spNo). Allow C (mlFav, spNo).
+  if (mlPickedFavorite && spPickedYes) return true;
+  if (!mlPickedFavorite && spPickedYes) return true;
+  if (!mlPickedFavorite && !spPickedYes) return true;
+  return false;
 }
 
 // Sports markets carry a wager type (moneyline | spreads | totals) + outcomes
@@ -248,6 +284,7 @@ export function ParlayBuilder() {
   const [marketsLoading, setMarketsLoading] = useState(true);
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useSessionState<string>(SESSION_KEYS.category, "all");
+  const [showMoreCats, setShowMoreCats] = useState(false);
 
   // ── Input state (persisted to sessionStorage) ──────────────────────────
 
@@ -460,6 +497,20 @@ export function ParlayBuilder() {
       }
       games[gi].markets[mi].legs.push(leg);
     }
+
+    // Order games by earliest first-pitch / tip-off so a same-matchup series
+    // reads chronologically (May 9 before May 10). Games with no eventStart
+    // (political markets, season-long props, missing data) sink to the end.
+    const earliestStart = (g: (typeof games)[number]): number => {
+      let min = Infinity;
+      for (const market of g.markets) {
+        for (const leg of market.legs) {
+          if (leg.eventStart != null && leg.eventStart < min) min = leg.eventStart;
+        }
+      }
+      return min;
+    };
+    games.sort((a, b) => earliestStart(a) - earliestStart(b));
     return games;
   }, [filteredLegs]);
 
@@ -508,9 +559,24 @@ export function ParlayBuilder() {
   }, [stake, stakeNum, useLossless]);
 
   // legId → disabled reason; copy stays neutral per docs/changes/B_SLOG_SPRINT.md
+  // Per-side gating. Each leg has independent yes/no entries because some
+  // conflicts only block one direction (e.g. Mets ML YES blocks Mets -1.5
+  // YES but leaves Mets -1.5 NO selectable — see selectionConflicts above).
+  // Leg-level gates (exclusion groups, group cap) populate both sides.
+  type SideGate = { reason: "conflict" | "groupCap"; conflictsWith?: string };
   const legGate = useMemo(() => {
-    const gate = new Map<string, { reason: "conflict" | "groupCap"; conflictsWith?: string }>();
+    const gate = new Map<string, { yes?: SideGate; no?: SideGate }>();
     if (selectedLegs.length === 0) return gate;
+    const setSide = (legId: string, side: "yes" | "no", entry: SideGate) => {
+      const cur = gate.get(legId) ?? {};
+      cur[side] = entry;
+      gate.set(legId, cur);
+    };
+    const setBoth = (legId: string, entry: SideGate) => {
+      setSide(legId, "yes", entry);
+      setSide(legId, "no", entry);
+    };
+
     const corrCounts = new Map<number, number>();
     const exclusionOwners = new Map<number, DisplayLeg>();
     for (const s of selectedLegs) {
@@ -519,20 +585,42 @@ export function ParlayBuilder() {
       const eg = s.leg.exclusionGroupId;
       if (eg !== 0) exclusionOwners.set(eg, s.leg);
     }
+
     for (const leg of allLegs) {
       const idKey = leg.id.toString();
-      if (selectedLegs.some(s => s.leg.id === leg.id)) continue; // already selected — don't gate self
-      if (leg.exclusionGroupId !== 0) {
+      const selfSelected = selectedLegs.find(s => s.leg.id === leg.id);
+
+      // Exclusion group: blocks the whole leg regardless of side.
+      if (!selfSelected && leg.exclusionGroupId !== 0) {
         const owner = exclusionOwners.get(leg.exclusionGroupId);
         if (owner) {
-          gate.set(idKey, { reason: "conflict", conflictsWith: owner.description });
+          setBoth(idKey, { reason: "conflict", conflictsWith: owner.description });
           continue;
         }
       }
-      if (leg.correlationGroupId !== 0) {
+      // Group cap: also whole-leg.
+      if (!selfSelected && leg.correlationGroupId !== 0) {
         const count = corrCounts.get(leg.correlationGroupId) ?? 0;
         if (count >= effectiveMaxLegsPerGroup) {
-          gate.set(idKey, { reason: "groupCap" });
+          setBoth(idKey, { reason: "groupCap" });
+          continue;
+        }
+      }
+      // Per-side conflict (ML+spread same game). Evaluate each side
+      // independently: if picking this side would conflict with any other
+      // currently-selected leg, gate it. Skip the side that's currently
+      // selected on this leg (the user can deselect it by clicking again).
+      const others = selectedLegs.filter(s => s.leg.id !== leg.id);
+      for (const outcome of [1, 2] as const) {
+        if (selfSelected?.outcomeChoice === outcome) continue;
+        for (const o of others) {
+          if (selectionConflicts({ leg, outcome }, { leg: o.leg, outcome: o.outcomeChoice as 1 | 2 })) {
+            setSide(idKey, outcome === 1 ? "yes" : "no", {
+              reason: "conflict",
+              conflictsWith: o.leg.description,
+            });
+            break;
+          }
         }
       }
     }
@@ -640,38 +728,61 @@ export function ParlayBuilder() {
           </div>
         )}
 
-        {/* Category filter pills */}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveCategory("all")}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-              activeCategory === "all"
-                ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
-                : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
-            }`}
-          >
-            Featured
-          </button>
-          {availableCategories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                activeCategory === cat
-                  ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
-                  : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
-              }`}
-            >
-              {CATEGORY_LABELS[cat] ?? cat}
-              {cat === "nba" && (
-                <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 text-[10px] font-bold text-neon-green">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
-                  LIVE
-                </span>
+        {/* Category filter pills. Pinned categories (Featured + MLB) always
+            show; the rest collapse behind "+ show more" until the user
+            expands. If the active category lives in the hidden set, surface
+            it inline so the active state stays visible. */}
+        {(() => {
+          const pinnedSet = new Set<string>(PINNED_CATEGORIES);
+          const pinned = availableCategories.filter(c => pinnedSet.has(c));
+          const rest = availableCategories.filter(c => !pinnedSet.has(c));
+          const inlineActive =
+            !showMoreCats && activeCategory !== "all" && rest.includes(activeCategory) ? [activeCategory] : [];
+          const visibleCats = showMoreCats ? [...pinned, ...rest] : [...pinned, ...inlineActive];
+          const hasMore = rest.length > 0;
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveCategory("all")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                  activeCategory === "all"
+                    ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
+                    : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+                }`}
+              >
+                Featured
+              </button>
+              {visibleCats.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                    activeCategory === cat
+                      ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
+                      : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+                  }`}
+                >
+                  {CATEGORY_LABELS[cat] ?? cat}
+                  {cat === "mlb" && (
+                    <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 text-[10px] font-bold text-neon-green">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                      LIVE
+                    </span>
+                  )}
+                </button>
+              ))}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={() => setShowMoreCats(s => !s)}
+                  className="ml-1 text-xs font-medium text-gray-500 transition-colors hover:text-gray-200"
+                >
+                  {showMoreCats ? "− show less" : "+ show more"}
+                </button>
               )}
-            </button>
-          ))}
-        </div>
+            </div>
+          );
+        })()}
 
         {/* Leg counter: visual dot indicators */}
         <div className="flex items-center gap-2">
@@ -713,6 +824,13 @@ export function ParlayBuilder() {
             const headerSuffix = formatGameStartSuffix(firstLeg?.eventStart);
             const marketCount = game.markets.length;
             const wrapperClass = mlbCard ? "glass-card space-y-3 p-4" : "space-y-3";
+            // LIVE = game has started but the leg's cutoff is still in the
+            // future. The cutoff for sports legs is now `gameStart + 7d`, so
+            // this fires from first pitch through the post-game window until
+            // either Polymarket flips closed=true (markPolyClosed) or the
+            // price-based filter hides the row.
+            const nowSec = Math.floor(Date.now() / 1000);
+            const isLive = firstLeg?.eventStart != null && firstLeg.eventStart <= nowSec && firstLeg.expiresAt > nowSec;
             // Game-header click-through to Polymarket: every leg in a game shares
             // the same parent event slug, so any one of them is a valid source.
             const anyLeg = game.markets.flatMap(m => m.legs)[0];
@@ -729,7 +847,7 @@ export function ParlayBuilder() {
                             target="_blank"
                             rel="noopener noreferrer"
                             title="Open game on Polymarket"
-                            className="underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-brand-pink hover:decoration-brand-pink"
+                            className="transition-colors hover:text-brand-pink"
                           >
                             {game.gameGroup}
                           </a>
@@ -737,6 +855,12 @@ export function ParlayBuilder() {
                           game.gameGroup
                         )}
                         {headerSuffix && <span className="font-normal text-gray-400"> - {headerSuffix}</span>}
+                        {isLive && (
+                          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                            LIVE
+                          </span>
+                        )}
                       </h2>
                       <div className="flex items-center gap-3 text-[11px] text-gray-400">
                         <span>
@@ -752,7 +876,7 @@ export function ParlayBuilder() {
                           target="_blank"
                           rel="noopener noreferrer"
                           title="Open game on Polymarket"
-                          className="underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                          className="transition-colors hover:text-white"
                         >
                           {game.gameGroup}
                         </a>
@@ -760,10 +884,23 @@ export function ParlayBuilder() {
                         game.gameGroup
                       )}
                       {headerSuffix && <span className="ml-2 font-normal text-gray-500"> - {headerSuffix}</span>}
+                      {isLive && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                          LIVE
+                        </span>
+                      )}
                     </h2>
                   ))}
                 {game.markets.map(({ title, legs }) => {
-                  const titleRedundant = legs.length === 1 && legs[0].description.trim() === title.trim();
+                  // Hide the small uppercase bucket header when it would
+                  // duplicate what the leg card already says: either the
+                  // single leg's description matches the title (political
+                  // single-leg markets), or the leg is a sports wager whose
+                  // type is rendered as the middle-of-card label.
+                  const titleRedundant =
+                    legs.length === 1 &&
+                    (legs[0].description.trim() === title.trim() || legs[0].marketType !== undefined);
                   return (
                     <div key={`${game.gameGroup}::${title}`} className="space-y-2">
                       <div className="flex items-center gap-2">
@@ -801,12 +938,25 @@ export function ParlayBuilder() {
                           const selected = selectedLegs.find(s => s.leg.id === leg.id);
                           const hasNo = leg.noId !== undefined;
                           const gateInfo = legGate.get(leg.id.toString());
-                          const gated = gateInfo !== undefined && !selected;
-                          const tooltip = gated
-                            ? gateInfo.reason === "conflict"
-                              ? `Conflicts with: ${gateInfo.conflictsWith ?? ""}`
-                              : "Leg limit reached"
-                            : undefined;
+                          // Per-side gating. A side is gated if there's an
+                          // entry for it AND the user isn't already on that
+                          // side (so they can deselect by clicking again).
+                          const gateYes = gateInfo?.yes && selected?.outcomeChoice !== 1 ? gateInfo.yes : undefined;
+                          const gateNo = gateInfo?.no && selected?.outcomeChoice !== 2 ? gateInfo.no : undefined;
+                          const gatedYes = gateYes !== undefined;
+                          const gatedNo = gateNo !== undefined;
+                          // Whole-leg gating only when both sides are gated
+                          // and nothing is selected (used for card grayout +
+                          // outer tooltip).
+                          const fullyGated = !selected && gatedYes && gatedNo;
+                          const tooltipFor = (g: SideGate | undefined) =>
+                            g
+                              ? g.reason === "conflict"
+                                ? `Conflicts with: ${g.conflictsWith ?? ""}`
+                                : "Leg limit reached"
+                              : undefined;
+                          const yesTooltip = tooltipFor(gateYes);
+                          const noTooltip = tooltipFor(gateNo);
                           // Sports markets read like a sportsbook: each side's
                           // button carries the wager label (Padres -1.5,
                           // Over 8.5) and the redundant question body in the
@@ -818,13 +968,13 @@ export function ParlayBuilder() {
                             <div
                               key={leg.id.toString()}
                               id={legIdx === 0 ? "ftue-market-card" : undefined}
-                              title={tooltip}
+                              title={fullyGated ? (yesTooltip ?? noTooltip) : undefined}
                               className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
                                 selected
                                   ? selected.outcomeChoice === 1
                                     ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
                                     : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-                                  : gated
+                                  : fullyGated
                                     ? "opacity-40 grayscale"
                                     : "hover:border-white/10"
                               }`}
@@ -833,16 +983,19 @@ export function ParlayBuilder() {
                               {/* Yes / Question / No — question centered, sides flanking */}
                               <div className="flex items-stretch">
                                 <button
-                                  disabled={vaultEmpty || gated}
+                                  disabled={vaultEmpty || gatedYes}
                                   onClick={() => toggleLeg(leg, 1)}
-                                  className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                  title={yesTooltip}
+                                  className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
                                     selected?.outcomeChoice === 1
                                       ? "bg-brand-green/20 text-brand-green"
-                                      : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
-                                  } ${gated ? "cursor-not-allowed" : ""}`}
+                                      : gatedYes
+                                        ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
+                                        : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
+                                  }`}
                                 >
                                   {yesSportsLabel ? (
-                                    <span className="max-w-full text-balance text-[11px] font-semibold normal-case leading-tight tracking-normal">
+                                    <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
                                       {yesSportsLabel}
                                     </span>
                                   ) : (
@@ -855,7 +1008,9 @@ export function ParlayBuilder() {
                                       )}
                                     </>
                                   )}
-                                  <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
+                                  <span
+                                    className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
+                                  >
                                     {(leg.yesOdds * netLegFactor).toFixed(2)}x
                                   </span>
                                 </button>
@@ -863,9 +1018,25 @@ export function ParlayBuilder() {
                                   {isSports ? (
                                     // Wager type the user is actually placing
                                     // (Moneyline / Run Line -1.5 / Over/Under
-                                    // 8.5). The game-header above already
-                                    // links out to Polymarket for the matchup.
-                                    <span className="text-sm font-semibold text-gray-200">{leg.marketTitle}</span>
+                                    // 8.5). Linked to Polymarket — same link
+                                    // is also on the game-header above and in
+                                    // the bet slip; the redundancy is on
+                                    // purpose so the user can click out from
+                                    // wherever their eye lands.
+                                    polymarketHref(leg) ? (
+                                      <a
+                                        href={polymarketHref(leg) ?? undefined}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={e => e.stopPropagation()}
+                                        title="Open on Polymarket"
+                                        className="text-sm font-semibold text-gray-200 transition-colors hover:text-brand-pink"
+                                      >
+                                        {leg.marketTitle}
+                                      </a>
+                                    ) : (
+                                      <span className="text-sm font-semibold text-gray-200">{leg.marketTitle}</span>
+                                    )
                                   ) : polymarketHref(leg) ? (
                                     <a
                                       href={polymarketHref(leg) ?? undefined}
@@ -883,16 +1054,19 @@ export function ParlayBuilder() {
                                 </div>
                                 {hasNo && (
                                   <button
-                                    disabled={vaultEmpty || gated}
+                                    disabled={vaultEmpty || gatedNo}
                                     onClick={() => toggleLeg(leg, 2)}
-                                    className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                    title={noTooltip}
+                                    className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
                                       selected?.outcomeChoice === 2
                                         ? "bg-brand-amber/20 text-brand-amber"
-                                        : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
-                                    } ${gated ? "cursor-not-allowed" : ""}`}
+                                        : gatedNo
+                                          ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
+                                          : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                                    }`}
                                   >
                                     {noSportsLabel ? (
-                                      <span className="max-w-full text-balance text-[11px] font-semibold normal-case leading-tight tracking-normal">
+                                      <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
                                         {noSportsLabel}
                                       </span>
                                     ) : (
@@ -905,7 +1079,9 @@ export function ParlayBuilder() {
                                         )}
                                       </>
                                     )}
-                                    <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
+                                    <span
+                                      className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
+                                    >
                                       {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
                                     </span>
                                   </button>
@@ -945,13 +1121,26 @@ export function ParlayBuilder() {
             <div className="space-y-2">
               {selectedLegs.map(s => {
                 const startLabel = formatEventStart(s.leg.eventStart);
+                const slipHref = polymarketHref(s.leg);
                 return (
                   <div
                     key={s.leg.id.toString()}
                     className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-gray-300">{s.leg.description}</p>
+                      {slipHref ? (
+                        <a
+                          href={slipHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open on Polymarket"
+                          className="block truncate text-gray-300 underline decoration-gray-700 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                        >
+                          {s.leg.description}
+                        </a>
+                      ) : (
+                        <p className="truncate text-gray-300">{s.leg.description}</p>
+                      )}
                       {startLabel && (
                         <p
                           title={s.leg.eventStart ? new Date(s.leg.eventStart * 1000).toLocaleString() : undefined}

@@ -43,15 +43,12 @@ interface GammaSportsMarket {
 
 export interface MlbFetchOptions {
   gammaUrl?: string;
-  /** Drop markets whose best-bid/ask spread exceeds this. Default 0.10 (10¢). */
-  maxSpread?: number;
   /** Cap pulled from gamma (per-page). Default 200. */
   limit?: number;
 }
 
 export async function fetchMlbGames(opts: MlbFetchOptions = {}): Promise<CuratedMarket[]> {
   const gammaUrl = (opts.gammaUrl ?? GAMMA_BASE).replace(/\/$/, "");
-  const maxSpread = opts.maxSpread ?? 0.1;
   const limit = opts.limit ?? 200;
 
   const params = new URLSearchParams({
@@ -81,7 +78,7 @@ export async function fetchMlbGames(opts: MlbFetchOptions = {}): Promise<Curated
   // candidates of the same type (multiple totals lines, multiple spreads).
   const byGame = new Map<string, GammaSportsMarket[]>();
   for (const m of markets) {
-    if (!isUsable(m, maxSpread)) continue;
+    if (!isMlbMarketUsable(m)) continue;
     if (!isTargetType(m.sportsMarketType)) continue;
     const gameKey = m.events?.[0]?.id;
     if (!gameKey) continue;
@@ -94,20 +91,55 @@ export async function fetchMlbGames(opts: MlbFetchOptions = {}): Promise<Curated
   for (const gameMarkets of byGame.values()) {
     const event = gameMarkets[0].events![0];
     const eventStart = parseGameStartTime(event.gameStartTime ?? gameMarkets[0].gameStartTime);
+    // Visibility runs long; the natural price filter (`isSideProfitable` +
+    // midToPpm 0.99 clamp) hides settled markets via their own pricing.
+    // Settlement runs short — game end (~6h post first pitch) + UMA buffer
+    // (48h) — so tickets pay out within ~2 days of completion regardless of
+    // how far out the visibility cutoff is.
+    const cutoffOverride = eventStart != null ? new Date((eventStart + 7 * 24 * 3600) * 1000).toISOString() : undefined;
+    const earliestResolveOverride =
+      eventStart != null ? new Date((eventStart + 54 * 3600) * 1000).toISOString() : undefined;
 
     for (const type of TARGET_TYPES) {
       const candidates = gameMarkets.filter(m => m.sportsMarketType === type);
       if (candidates.length === 0) continue;
-      // Multiple lines for one game (e.g. O/U 7.5 AND O/U 8.5) — pick the
-      // deepest book by 24h volume so the user sees the "real" line.
-      const best = candidates.reduce((a, b) => (toNumber(b.volume24hr) > toNumber(a.volume24hr) ? b : a));
+
+      // Polymarket sometimes lists the same wager from both perspectives —
+      // e.g. "Spread: Orioles (-1.5)" AND "Spread: Athletics (-1.5)" share
+      // |line|=1.5 but flip the favorite. Effectively the same logical bet
+      // exposed as two yes/no markets. Collapse to one per |line| by picking
+      // the candidate with the highest underdog multiplier (= lowest min
+      // outcome price), so the user gets the better-priced version.
+      const byAbsLine = new Map<string, GammaSportsMarket[]>();
+      for (const m of candidates) {
+        const key = m.line == null ? "_" : Math.abs(m.line).toString();
+        const list = byAbsLine.get(key);
+        if (list) list.push(m);
+        else byAbsLine.set(key, [m]);
+      }
+      const collapsed: GammaSportsMarket[] = [];
+      for (const group of byAbsLine.values()) {
+        collapsed.push(group.reduce((a, b) => (minOutcomePrice(b) < minOutcomePrice(a) ? b : a)));
+      }
+
+      // Across different |line| values (e.g. O/U 7.5 vs 8.5 — *different*
+      // wagers, not duplicates), pick the deepest book by 24h volume. That's
+      // the line the market actually treats as "the" line.
+      const best = collapsed.reduce((a, b) => (toNumber(b.volume24hr) > toNumber(a.volume24hr) ? b : a));
       const [yesPrice, noPrice] = parsePriceArray(best.outcomePrices);
       const [yesOutcome, noOutcome] = parseOutcomeLabels(best.outcomes);
       out.push({
         conditionId: best.conditionId,
         category: "mlb",
         displayTitle: formatTitle(type, best.line),
-        gameGroup: event.title,
+        cutoffOverride,
+        earliestResolveOverride,
+        // Polymarket lists each calendar game as its own event but reuses the
+        // matchup title ("Athletics vs. Baltimore Orioles") across days. Date-
+        // disambiguate the gameGroup so the UI buckets per-game rather than
+        // per-matchup, and the correlation-group hash gives a separate group
+        // to each day's contest.
+        gameGroup: formatGameGroup(event.title, eventStart),
         eventId: event.id,
         eventStart,
         polymarketSlug: event.slug,
@@ -135,13 +167,29 @@ function isTargetType(t: string | undefined): t is MlbSportsMarketType {
   return t === "moneyline" || t === "spreads" || t === "totals";
 }
 
-function isUsable(m: GammaSportsMarket, maxSpread: number): boolean {
+// MLB-specific usability filter. Deliberately omits the bid/ask spread check
+// that featured.ts uses for political markets: MLB ships a snapshot price via
+// Gamma `outcomePrices`, so a wide live book on tomorrow's game still leaves
+// us with a sane displayed price. The on-chain JIT quote re-checks liquidity
+// at buy time, so empty-book markets fail with a real error rather than
+// silently disappearing pre-sync. Without this relaxation the 0.10 cap
+// dropped ~67% of moneylines and a chunk of spreads/totals on day-ahead games.
+function isMlbMarketUsable(m: GammaSportsMarket): boolean {
   if (m.closed || m.archived || !m.active) return false;
   if (!m.conditionId) return false;
   const outcomes = parseJsonField<string[]>(m.outcomes);
   if (!Array.isArray(outcomes) || outcomes.length !== 2) return false;
-  if (m.bestBid && m.bestAsk && m.bestBid > 0 && m.bestAsk > 0 && m.bestAsk - m.bestBid > maxSpread) return false;
   return true;
+}
+
+// "Athletics vs. Baltimore Orioles (5/9)" — appends a short date so a
+// scheduled rematch (next-day game with the same teams) lands in its own
+// game card. Falls back to the bare title when the start time is unknown.
+function formatGameGroup(title: string, eventStartSec: number | undefined): string {
+  if (eventStartSec == null) return title;
+  const d = new Date(eventStartSec * 1000);
+  const date = d.toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
+  return `${title} (${date})`;
 }
 
 function formatTitle(type: MlbSportsMarketType, line: number | undefined): string {
@@ -160,6 +208,18 @@ function toNumber(raw: string | number | undefined): number {
   if (raw == null) return 0;
   const n = typeof raw === "number" ? raw : Number(raw);
   return Number.isFinite(n) ? n : 0;
+}
+
+// Lowest yes/no outcome price → highest implied multiplier on the better
+// side. Used to break a same-|line| duplicate in favor of the user.
+// Returns Infinity for unparseable rows so they lose the comparison.
+function minOutcomePrice(m: GammaSportsMarket): number {
+  const arr = parseJsonField<string[]>(m.outcomePrices);
+  if (!Array.isArray(arr) || arr.length < 2) return Infinity;
+  const a = Number(arr[0]);
+  const b = Number(arr[1]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return Infinity;
+  return Math.min(a, b);
 }
 
 function parsePriceArray(raw: string[] | string): [number | undefined, number | undefined] {

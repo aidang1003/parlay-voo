@@ -16,7 +16,7 @@ Two items already shipped on this branch (the original admin-gate work that name
 | 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commits `1ebf758`, `cfab447`) |
 | 7 | Display event start time on legs | **shipped** (commits `6d76f64`, `6833042`) |
 | 8 | Clarify which side YES vs NO commits the user to | **shipped** (commit `2c36fc1`) |
-| 9 | De-duplicate question text in the Yes/No box | **shipped** (commits `f3c5967`, `<round-2>`) |
+| 9 | De-duplicate question text in the Yes/No box | **shipped** (commits `f3c5967`, `92b6689`) |
 | 10 | Click-through from question header to Polymarket | **shipped** (commit `9bf391a`) |
 | 11 | Truth-up About + (probably retire) Agents page | **shipped** (commit `e2dc26d`) |
 | 12 | Vault page nuanced corrections | planned — specifics TBD |

@@ -90,6 +90,36 @@ export function useBuyTicket() {
         throw new Error("Approve transaction reverted on-chain");
       }
 
+      // Wait for the approve's state change to be visible to the RPC node
+      // serving simulateContract. waitForTransactionReceipt confirms the tx
+      // landed but a load-balanced RPC pool can serve eth_call from a peer
+      // node that's a block or two behind, producing a spurious
+      // ERC20InsufficientAllowance revert during the simulate below.
+      const ALLOWANCE_POLL_ATTEMPTS = 6;
+      const ALLOWANCE_POLL_DELAY_MS = 350;
+      for (let attempt = 0; attempt < ALLOWANCE_POLL_ATTEMPTS; attempt++) {
+        const current = (await publicClient.readContract({
+          address: usdc.address,
+          abi: usdc.abi,
+          functionName: "allowance",
+          args: [address, engine.address],
+        })) as bigint;
+        if (current >= stakeAmount) {
+          if (attempt > 0) {
+            console.log(`[buyTicket] allowance caught up after ${attempt} retries (${current}/${stakeAmount})`);
+          }
+          break;
+        }
+        if (attempt === ALLOWANCE_POLL_ATTEMPTS - 1) {
+          console.warn(
+            `[buyTicket] allowance still stale after ${ALLOWANCE_POLL_ATTEMPTS} polls ` +
+              `(saw ${current}, need ${stakeAmount}); proceeding anyway — wallet RPC may be fresher`,
+          );
+          break;
+        }
+        await new Promise(r => setTimeout(r, ALLOWANCE_POLL_DELAY_MS));
+      }
+
       setIsPending(false);
       setIsConfirming(true);
 

@@ -14,10 +14,27 @@ export type ScaffoldConfig = BaseConfig;
 
 export const DEFAULT_ALCHEMY_API_KEY = "cR4WnXePioePZ5fFrnSiR";
 
-const baseSepoliaRpcOverride = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL;
-const sepoliaRpcOverride = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL;
-const mainnetRpcOverride = process.env.NEXT_PUBLIC_MAINNET_RPC_URL;
-const baseMainnetRpcOverride = process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL;
+// Strip whitespace + treat blank as unset. Trailing space in `.env` would
+// otherwise bake into the Alchemy URL and cause every request to 401, then
+// silently fall back to the public Base RPC (sepolia.base.org).
+const cleanEnv = (raw: string | undefined): string | undefined => {
+  const v = raw?.trim();
+  return v ? v : undefined;
+};
+
+const ALCHEMY_KEY_RE = /^[A-Za-z0-9_-]+$/;
+const rawAlchemyKey = cleanEnv(process.env.NEXT_PUBLIC_ALCHEMY_API_KEY);
+if (rawAlchemyKey && !ALCHEMY_KEY_RE.test(rawAlchemyKey)) {
+  console.warn(
+    `[scaffold.config] NEXT_PUBLIC_ALCHEMY_API_KEY contains non-alphanumeric chars (len=${rawAlchemyKey.length}); ` +
+      `every Alchemy request will fail and fall through to the public RPC. Re-check the .env value.`,
+  );
+}
+
+const baseSepoliaRpcOverride = cleanEnv(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL);
+const sepoliaRpcOverride = cleanEnv(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL);
+const mainnetRpcOverride = cleanEnv(process.env.NEXT_PUBLIC_MAINNET_RPC_URL);
+const baseMainnetRpcOverride = cleanEnv(process.env.NEXT_PUBLIC_BASE_MAINNET_RPC_URL);
 
 // Override viem's "Foundry" label so the wallet's network switcher reads
 // "Anvil (Local)". Same chain id (31337) — wallets recognize the network by id.
@@ -41,7 +58,7 @@ const scaffoldConfig = {
   // a chain. ETH mainnet last is intentional — gas there is real.
   targetNetworks: [anvil, chains.sepolia, chains.baseSepolia, chains.base, chains.mainnet],
   pollingInterval: 3000,
-  alchemyApiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || DEFAULT_ALCHEMY_API_KEY,
+  alchemyApiKey: rawAlchemyKey || DEFAULT_ALCHEMY_API_KEY,
   rpcOverrides,
   walletConnectProjectId:
     process.env.NEXT_PUBLIC_WC_PROJECT_ID ||

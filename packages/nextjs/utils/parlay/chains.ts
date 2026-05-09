@@ -108,6 +108,15 @@ export function isCircleUsdc(chainId: SupportedChainId, address: string | undefi
  *     the chain's `alchemyHostname`.
  *  4. Throw — caller must set `ALCHEMY_API_KEY` or the chain's override env.
  */
+// Trim + treat blank as unset. A trailing space in `.env` would otherwise
+// bake into the Alchemy URL and produce 401s on every server-side request.
+const cleanEnv = (raw: string | undefined): string | undefined => {
+  const v = raw?.trim();
+  return v ? v : undefined;
+};
+
+const ALCHEMY_KEY_RE = /^[A-Za-z0-9_-]+$/;
+
 export function getRpcUrl(
   chainId: SupportedChainId,
   env: Record<string, string | undefined> = (typeof process !== "undefined" ? process.env : {}) as Record<
@@ -118,12 +127,18 @@ export function getRpcUrl(
   const chain = CHAINS[chainId];
   if (!chain) throw new Error(`Unknown chain id: ${chainId}`);
   if (chain.rpcEnvVar) {
-    const override = env[chain.rpcEnvVar];
-    if (override && override.length > 0) return override;
+    const override = cleanEnv(env[chain.rpcEnvVar]);
+    if (override) return override;
   }
   if (chainId === LOCAL_CHAIN_ID) return "http://127.0.0.1:8545";
-  const alchemyKey = env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+  const alchemyKey = cleanEnv(env.NEXT_PUBLIC_ALCHEMY_API_KEY);
   if (alchemyKey && chain.alchemyHostname) {
+    if (!ALCHEMY_KEY_RE.test(alchemyKey)) {
+      throw new Error(
+        `NEXT_PUBLIC_ALCHEMY_API_KEY contains non-alphanumeric chars (len=${alchemyKey.length}). ` +
+          `Re-check the .env value for stray whitespace, quotes, or newlines.`,
+      );
+    }
     return `https://${chain.alchemyHostname}/v2/${alchemyKey}`;
   }
   throw new Error(

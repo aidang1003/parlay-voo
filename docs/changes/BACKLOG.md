@@ -187,6 +187,18 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 
 ---
 
+## 11. Safari-friendly onboarding (Rabby gap)
+
+**Status:** Carried over from `C_USER_FEEDBACK.md` item #13 — sketched but not implemented in the C-sprint. Picks up when an actual Safari user driver shows up.
+
+**Why this is on the radar.** Onboarding currently funnels new users to install Rabby. Rabby ships Chrome / Firefox / Brave / Edge extensions and a desktop app, but **no Safari extension** — Safari users hit a dead-end at install time. The funnel needs a Safari-specific branch.
+
+**Sketch of the fix.** Detect Safari in `/_onboard` (User-Agent regex like `/^((?!chrome|android).)*safari/i`). On Safari, swap the install path to a wallet that supports it — Coinbase Wallet on iOS / macOS, MetaMask Mobile via WalletConnect, or the WalletConnect QR path itself — and rewrite the copy so we're not telling Safari users to install something that doesn't exist for them. Keep the Rabby path for everyone else.
+
+**Why deferred.** No reported Safari user during the C-sprint. The existing copy is misleading on Safari but not blocking — the user just bounces. Worth picking up when (a) someone actually flags it, or (b) we promote the testnet build to a wider audience and Safari traffic becomes non-trivial.
+
+---
+
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
@@ -199,3 +211,4 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 8. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
 9. RFQ — only when real flow + a concrete maker set are in hand.
 10. Generalize MLB game-card sync to NBA / NFL / NHL — wait for one MLB weekend in prod first.
+11. Safari-friendly onboarding — pick up when an actual Safari user shows up.

@@ -127,6 +127,40 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **Why MLB-only for now.** Intentionally scoped to MLB so we can validate the per-game-card pattern on one sport before generalizing. NBA/NFL/NHL still flow through the legacy `fetchSportEvents` path. Generalization tracked in `docs/changes/BACKLOG.md`.
 
+**What landed (round 3 — this commit).** Hardening + UX polish from the first MLB run with users.
+
+*Gamma data fixes.*
+- `sports_market_types` had been comma-joined in the URL — gamma silently returned 0 rows because the comma was treated as a single literal value. Switched to repeated keys (`sports_market_types=moneyline&sports_market_types=spreads&sports_market_types=totals`).
+- `endDateIso` (date-only) was being read from gamma when `endDate` (full timestamp) was available. For spread/total markets endDate = first pitch, so the date-only form truncated to midnight UTC of game day and flagged the cutoff as past hours before first pitch. `normalizeMarket` in `lib/polymarket/client.ts` now prefers `endDate` over `endDateIso`.
+
+*Cutoff / earliestResolve override mechanism.*
+- New `cutoffOverride` and `earliestResolveOverride` fields on `CuratedMarket`. mlb.ts emits both per game so the chain invariant `earliestResolve >= cutoff` (enforced by `LegRegistry`) holds. Settled at `cutoff = gameStart + 6h`, `earliestResolve = cutoff + 48h = gameStart + 54h`. Sync route prefers the overrides over `metadata.endDateIso`; the legacy `+1h "cutoff too soon"` buffer is gone — only rejects when cutoff is literally in the past.
+- `bigearliestresolve` added to the `ON CONFLICT` update clause in `upsertMarket`. Previously preserved as registration metadata, but updating cutoff while preserving an out-of-sync earliestResolve was leaving rows in a state where the chain rejected with `LegRegistry: resolve before cutoff` on the first buy of any new sourceRef. Both fields now move together so the invariant always holds.
+
+*Per-game uniqueness + ordering.*
+- `gameGroup` now includes the game date (`"Athletics vs. Baltimore Orioles (5/9)"`) so a same-matchup series across days lands as separate cards. Driven by Polymarket reusing identical `event.title` strings for back-to-back games.
+- `groupedByGame` sorts by earliest event start so today's games appear before tomorrow's; games with no start time sink to the end.
+
+*Dedup within a game.*
+- mlb.ts collapses same-`|line|` candidates to one. Polymarket sometimes lists the same wager from both perspectives (`Spread: Orioles -1.5` AND `Spread: Athletics -1.5`); the candidate with the lowest min outcome price (= highest underdog multiplier) wins. Multi-line wagers (O/U 7.5 vs. 8.5) still pick by `volume24hr`.
+- Same-game ML+spread blocking via new `selectionConflicts(a, b)` helper. Mets ML YES + Mets -1.5 YES (redundant), Mets ML NO + Mets -1.5 YES (impossible), Diamondbacks ML YES + Diamondbacks +1.5 NO (redundant) all blocked. Mets ML YES + Diamondbacks +1.5 YES (fringe overlap = "fav wins by 1") allowed. `legGate` refactored to per-side gating so one side can be blocked while the other stays selectable. The existing same-game `correlationGroupId` discount still applies to the fringe-allowed pairs.
+
+*Sports-only filters.*
+- `isMlbMarketUsable` introduced in mlb.ts as a separate function from `featured.ts`'s `isUsable` so MLB skips the bid/ask spread cap. Most moneylines on day-ahead games sit at 10–20¢ spreads while the price snapshot is fine; the original 10¢ cap was dropping ~67% of moneylines and chunks of spread/total markets. The CLOB book is re-checked at quote time, so empty-book markets fail there with a real error instead of silently disappearing pre-sync.
+- `isPostGameSettled` filter in `fetchMarketsFromDb`: hides rows whose price has clamped to `10000`/`990000` AND `eventStart + 4h < now`. Catches Polymarket's lingering-after-game-ends window where the 1% certain-loser side reads as a 100x phantom multiplier (vault arb risk). Pure odds-only filter would have caught legitimate pre-game heavy favorites, so we gate on eventStart-in-past as well.
+
+*UI polish.*
+- LIVE badge moved from NBA pill to MLB pill. Per-game LIVE badge inline with the date suffix when `eventStart < now < expiresAt`.
+- Sports YES/NO buttons widened (`w-24` → `w-36`); label/odds bumped to `text-[13px]`.
+- Wager type (`Moneyline` / `Run Line ±X.X` / `Over/Under X.X`) renders as the leg-card middle label (was `View on Polymarket`). Linked to Polymarket with `hover:text-brand-pink`. The redundant uppercase bucket `<h3>` above each sports leg is hidden — the middle label carries it.
+- Polymarket click-through duplicated in three places per market (matchup title, leg-card middle wager, bet-slip row). Underline removed on the matchup-title and wager links — color-only hover for affordance, per design.
+- Category pills: only `Featured` + `MLB` show by default; everything else hides behind a plaintext `+ show more` toggle. The active category surfaces inline if it's in the hidden set (so a returning user with an `nfl`-saved sessionStorage selection doesn't see an empty active state).
+
+*Diagnostics for cutoff / quote reverts.*
+- `buildLegs` logs each leg's resolution (`sourceRef`, `cutoffDeltaSec`, `priceSource`) to stdout and throws `LegBuildError(409)` on past cutoffs with the offending timestamps in the error message — clear toast instead of opaque on-chain revert.
+- `buyTicket` runs `simulateContract` before `writeContract` so the chain's actual revert string surfaces in the error toast instead of "Transaction reverted on-chain". Pre-flight log dumps the signed quote (cutoffs in delta-seconds) to the browser console. Post-receipt revert (rare, e.g. block-level race) replays the call to extract the reason.
+- Sync route logs every per-leg skip with category + reason so silently-dropped sync entries are visible in `vercel logs`.
+
 ### 7. Display event start time on legs — *shipped*
 
 **Why this exists.** We show `bigcutofftime` (when the leg becomes ineligible) but never the actual game / event start. "When is this game?" is a basic prediction-market UX expectation, and without it users have to flip to Polymarket to find the time and come back.
@@ -182,21 +216,17 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **What landed (commit `e2dc26d`).** `/agents` deleted along with its only consumer `/api/agent-stats`; the nav link is gone from `Header`. The useful bits (builder-code attribution, ParlayEngine + LegRegistry Basescan links, deployer wallet) moved to a "Behind the Scenes" subsection on `/about`. The `/about` page itself was rewritten: the AI Risk Analysis section + 0G Network branding came out (we don't run 0G inference); a new "Agent API" section reframes around the x402 quote endpoint that actually ships; the Vault System stats now read "≥7 days" with a 1× → 4× boost curve (was the stale 30/60/90d / 1.5x); the "0G AI Inference" trust card is replaced with "JIT Quote Signer" to match what the architecture actually does.
 
-### 12. Vault page nuanced corrections — *planned, partially scoped*
+### 12. Vault page nuanced corrections — *shipped*
 
-**Why this exists.** Vault page has rough edges that surface during a walkthrough rather than from a single piece of feedback. We're starting with one concrete miss and expect to add items as the page gets a closer read.
+**Why this exists.** Vault page had rough edges that surface during a walkthrough rather than from a single piece of feedback. The one concrete miss flagged: the "Vault VOO" headline tile only counted liquid (unlocked) shares — locked VOO was visible only in the per-tier breakdown below.
 
-**Identified items.**
+**What landed (commit `b7cef14`).** `MyPositionPanel.tsx`'s "Vault VOO" tile now renders the total of liquid + every lock tier (`userShares + fullShares + partialShares + leastShares`). Tooltip rewritten to "Total VOO held across liquid + all lock tiers; the breakdown is in Lock Hierarchy below." Lock Hierarchy section keeps the per-tier numbers and stays the canonical place to inspect what's locked where. Alternative considered (rename tile to "Liquid Vault VOO") was rejected — the headline is what a returning LP looks at first to answer "what do I have here?", and "total" is the more useful answer.
 
-1. **"Vault VOO" tile excludes locked VOO.** In `components/MyPositionPanel.tsx:82`, the "Vault VOO" `PositionBox` renders only `userShares` — and its own tooltip admits as much ("Unlocked VOO. Withdrawable any time… No fee-share boost — lock to earn"). Locked VOO across Full / Partial / Least tiers shows up further down in the "Lock Hierarchy" block but never rolls up into the headline number. The tile labelled "Vault VOO" should answer "how much VOO do I have in this vault?" — today it answers "how much liquid VOO do I have?" Promote the headline to the total: `userShares + fullShares + partialShares + leastShares`. Tooltip text stays accurate by clarifying "Total VOO held across liquid + all lock tiers; the breakdown is in Lock Hierarchy below." Lock Hierarchy section keeps the per-tier numbers and is still the place to inspect what's locked where. (Alternative considered: rename the tile to "Liquid Vault VOO" and leave the value alone — rejected, because the headline is the place a returning LP looks for "what do I have here?" and that's the more useful question to answer up top.)
+**Closing this item.** No further vault-page corrections surfaced during the sprint review. The placeholder for "more corrections as we walk the page together" gets folded back into general polish — anything new that surfaces lands as its own ticket / change doc rather than another round here.
 
-**TBD items.** More vault-page corrections to come once we walk the page together — placeholder so they land here when identified, instead of as scattered commits.
+### 13. Safari-friendly onboarding (Rabby gap) — *deferred to BACKLOG*
 
-### 13. Safari-friendly onboarding (Rabby gap) — *planned*
-
-**Why this exists.** Onboarding currently funnels new users to install Rabby. Rabby ships Chrome / Firefox / Brave / Edge extensions and a desktop app, but **no Safari extension** — Safari users hit a dead-end at install time. The funnel needs a Safari-specific branch.
-
-**Sketch of the fix.** Detect Safari in `/_onboard` (User-Agent regex like `/^((?!chrome|android).)*safari/i`). On Safari, swap the install path to a wallet that supports it — Coinbase Wallet on iOS / macOS, MetaMask Mobile via WalletConnect, or the WalletConnect QR path itself — and rewrite the copy so we're not telling Safari users to install something that doesn't exist for them. Keep the Rabby path for everyone else.
+Not implemented this sprint. Sketch (Safari-detection branch in `/_onboard`, swap to Coinbase Wallet / WalletConnect path) preserved in `docs/changes/BACKLOG.md` so we can pick it up once it has a concrete user driving it.
 
 ### 14. Hide ended-game markets from the builder — *shipped*
 
@@ -225,6 +255,31 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 **Egress impact.** Per-poll payload drops from ~150KB to ~1KB — roughly **a 100× cut on the hot path**. Idle tabs that previously polled forever now stop after 10 minutes. The drop-and-rebuild on init was never the egress source — schema bytes are negligible — so it's untouched.
 
 **What's intentionally not in this iteration.** No "prices paused" UI badge. The user accepted the worst-case stale-until-quote-sign tradeoff, and surfacing it visually is easy to add later without refactoring. Other pollers identified during the audit (`useRehabClaimable` 10s, `useAdminList` global mount, `/api/markets` uncached, etc.) are sized smaller than the quote-preview path and are queued in `BACKLOG.md` under "DB egress hardening (round 2)".
+
+### 16. Demo flow extension: rehab credit on demo-Lost (lossless path) — *shipped*
+
+**Why this exists.** Round 2 of #3/#4 made the demo Settle / Claim flow work end-to-end for a Won ticket — the deviation row gets minted as MockUSDC equal to the payout. The Lost path, though, dead-ended on the RehabCTA: a demo-Lost ticket never accrued anything to the user's chain `rehabClaimable[user]`, so the "Unclaimed losses" tile read `$0` and the "Claim & Lock Loss" button was disabled. Asymmetric and confusing — the user just lived through a simulated loss but the lossless rehab UX they'd see after a real loss didn't fire.
+
+**What landed.**
+
+- **Schema additions on `tbticketdeviation`.**
+  - `bigstake NUMERIC(78,0)` — original ticket stake in USDC base units. Populated by `demo-settle` from the chain ticket so the rehab path can sum stakes across Lost rows without re-reading the chain.
+  - `blnrehabclaimed BOOLEAN NOT NULL DEFAULT false` — gate per row. Lost rows contribute to the demo rehab claimable until this flips true; matches the chain's "claimed → zero out" lifecycle.
+  - Re-settling resets `blnrehabclaimed` so a Lost → Won → Lost toggle correctly re-adds to claimable instead of carrying a stale claimed flag.
+
+- **Two new helpers in `lib/db/client.ts`.**
+  - `getDemoRehabClaimable(wallet)` — `SUM(bigstake) WHERE txtstatus = 'Lost' AND blnrehabclaimed = false`.
+  - `markDemoRehabClaimed(wallet)` — flip the gate on every contributing row in one update. Returns the pre-clear total + row count for the response.
+
+- **Two new endpoints under `/api/rehab`.**
+  - `GET /api/rehab/demo-claimable?wallet=…` — returns `{ claimable: "<base units>" }`. Hit by the hook below.
+  - `POST /api/rehab/demo-claim` — reads the wallet's demo claimable, mints `claimable * projectedAprBps / BPS` of MockUSDC to the user (mirrors the chain `claimRehab` math via `projectedAprBps` read off `HouseVault`, falls back to 600 bps if the read fails), then `markDemoRehabClaimed`. Reuses the same `MOCK_USDC_ABI.mint` + `HOT_SIGNER_PRIVATE_KEY` path as `tickets/[id]/demo-claim` so there's one minting deviation pattern, not two.
+
+- **`useRehabClaimable` extended** to fetch the demo amount alongside the chain reads. Returns `chainClaimable`, `demoClaimable`, and a combined `claimable = sum`. Polls demo every 10s. The two pots stay separately addressable so the rehab page can route the claim button to the right backend.
+
+- **`/rehab/claim` page** runs claim paths sequentially: chain `claimRehab(duration)` first when `chainClaimable > 0`, then `/api/rehab/demo-claim` when `demoClaimable > 0`. Footnote under the button reads "Includes $X from demo losses — credit will be minted as MockUSDC" when demo is non-zero. CTA disabled state covers both pending paths.
+
+**Tradeoffs accepted.** When the chain later resolves the same ticket as a real Lost, the chain accrues its own `rehabClaimable[user]` independently — we don't subtract the demo amount and don't try to "balance the books". User keeps the phantom MockUSDC and can also claim against the real pot. Acceptable on testnet (MockUSDC is free) and intentional: matches the same "user can claim twice" pattern from the original demo-claim path. Faithful to the user's stated preference — "I don't really care if these excess funds stay there" — and avoids an entire class of reconciliation logic.
 
 ---
 

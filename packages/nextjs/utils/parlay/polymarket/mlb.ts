@@ -57,11 +57,16 @@ export async function fetchMlbGames(opts: MlbFetchOptions = {}): Promise<Curated
   const params = new URLSearchParams({
     tag_id: String(MLB_TAG_ID),
     closed: "false",
-    sports_market_types: TARGET_TYPES.join(","),
     order: "startDate",
     ascending: "true",
     limit: String(limit),
   });
+  // Gamma rejects comma-joined multi-value params silently — `sports_market_types=a,b`
+  // matches the literal string "a,b" against sportsMarketType and returns 0 rows.
+  // Append the key once per value so the URL renders as
+  // `sports_market_types=a&sports_market_types=b&sports_market_types=c`, which gamma
+  // parses correctly.
+  for (const t of TARGET_TYPES) params.append("sports_market_types", t);
 
   const res = await fetch(`${gammaUrl}/markets?${params}`, {
     headers: { accept: "application/json" },

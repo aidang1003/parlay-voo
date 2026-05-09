@@ -8,3 +8,5 @@ export * from "./polymarket/types";
 export { CURATED } from "./polymarket/curated";
 export { fetchFeaturedMarkets, fetchSportEvents, fetchTopEvent } from "./polymarket/featured";
 export type { FeaturedOptions } from "./polymarket/featured";
+export { fetchMlbGames } from "./polymarket/mlb";
+export type { MlbFetchOptions } from "./polymarket/mlb";

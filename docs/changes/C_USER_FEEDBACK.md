@@ -115,11 +115,15 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **Sketch of the fix.** Add a payout-vs-fee check to the curation pipeline: skip any leg whose single-leg payout (at min stake) doesn't clear the marginal entrance fee. The fee model is already accessible via `ParlayEngine` config; do the math at sync time so the row gets dropped before it lands in the UI, or at render time so it tracks live fee config — pick based on how often the fee schedule actually moves (almost never, so sync time is fine).
 
-### 6. Specialize MLB tab around the CLOB MLB endpoint — *planned*
+### 6. Specialize MLB tab around the CLOB MLB endpoint — *shipped*
 
 **Why this exists.** The MLB tab currently renders the same generic question cards as every other sport, sourced via Gamma. Polymarket's CLOB endpoint exposes richer per-market data (order book, fills, cleaner pricing) and MLB has a tightly defined per-game market set (moneyline, spread, total, run line, props) that maps well to a structured layout. Building one specialized tab as a proof-of-concept lets us see whether the CLOB-fed structured-by-game approach is worth doing for NBA / NFL too.
 
-**Sketch of the fix.** New CLOB-fed sync path (extend `polymarket/sync` or add `/api/polymarket/clob-mlb`). Pull MLB games + their associated CLOB markets, group rows by `txtgamegroup` (already on `tblegmapping`), and render an MLB-specific tab that shows games as cards with embedded "moneyline / total / run line / props" rows. Where CLOB exposes a tight bid/ask, quote off the midpoint of those instead of the Gamma midpoint.
+**What landed (round 1).** Commit `1ebf758` shipped the MLB game-card *layout* (one glass card per matchup, header with first-pitch time, market count). The layout was correct but the inputs feeding it weren't: the sync still pulled MLB through `fetchSportEvents("mlb")` → `gamma /events?tag_slug=mlb`, which returns markets whose `sportsMarketType` and `line` come back null. Result: the card rendered but couldn't be split into the canonical ML / spread / total rows.
+
+**What landed (round 2 — this commit).** Replaced the MLB sync path with a dedicated `fetchMlbGames()` that hits `gamma /markets?tag_id=100381&sports_market_types=moneyline,spreads,totals` directly — empirically confirmed to be the only call that populates `sportsMarketType`, `line`, and `events[0]` on the response. New file `utils/parlay/polymarket/mlb.ts` groups markets by parent event id (Polymarket leaves `gameId` null on MLB rows today, so `events[0].id` is the canonical key), then for each game picks one market per type — when multiple lines exist (Polymarket lists O/U 7.5 and 8.5 simultaneously on the same matchup) the deeper book by `volume24hr` wins. Display titles are normalized: `Moneyline`, `Run Line ±X.X`, `Over/Under X.X`. Outcome labels carry through as team names (ML/spread) or `Over`/`Under` (totals) so the YES/NO buttons render meaningful copy. The sync route runs MLB first so structured rows win the dedupe over any incidental MLB markets surfacing through the volume-ranked `featured` fetch.
+
+**Why MLB-only for now.** Intentionally scoped to MLB so we can validate the per-game-card pattern on one sport before generalizing. NBA/NFL/NHL still flow through the legacy `fetchSportEvents` path. Generalization tracked in `docs/changes/BACKLOG.md`.
 
 ### 7. Display event start time on legs — *shipped*
 
@@ -145,29 +149,25 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **Sketch of the fix.** Surface the resolved outcome string alongside each button — e.g. `YES = Lakers`, `NO = Celtics`. Source the labels from the Polymarket payload (`outcomes` array on the Gamma response). Where the payload doesn't disambiguate, fall back to YES / NO but keep the slot present so the layout doesn't shift between markets.
 
-### 9. De-duplicate question text in the Yes/No box — *planned*
+### 9. De-duplicate question text in the Yes/No box — *shipped*
 
 **Why this exists.** The current bet box shows the question both as the card title and inside the YES / NO box body. Same string twice, ~20px apart. It looks like a bug, even when it isn't.
 
-**Sketch of the fix.** Render the question once. Pick the version that includes the most context (typically the title) and drop the duplicate from the box body. Replace the inner string with the YES / NO outcome label from item #8, or with the leg's category and event start time so the slot earns its space.
+**What landed (commit `f3c5967`).** When a market has a single leg whose description equals the market title, the per-market `h3` above the card is suppressed and the leg's own description carries the question. The badge row (category, Odds-locked, event-start chip) stays so the slot keeps its context. Multi-leg markets are unchanged — the `h3` still groups the legs. Outcome labels from #8 fill in additional disambiguation per side.
 
-### 10. Click-through from question header to Polymarket — *planned*
+**Open follow-up (sports market-type context).** Single-shot polymarkets are framed as "question + Yes/No"; sports markets are framed as wagers (moneyline / spread / total) where Yes/No is meaningless without the wager type. Now that `sportsMarketType` flows through (item #6 round 2), the YES/NO box for a sports market should show the wager type + line + side instead of the literal question. Tracked as part of #6's MLB rollout for NBA/NFL/NHL.
+
+### 10. Click-through from question header to Polymarket — *shipped*
 
 **Why this exists.** A user who wants to dig into a market — read comments, see the order book, validate the odds — can't get there from our UI. They have to open Polymarket and search by title. A direct link removes that friction and is also a small honesty signal: we're not hiding where the data comes from.
 
-**Sketch of the fix.** Wrap the question header in an external link to `https://polymarket.com/event/{slug}` (or `/market/{conditionid}` if no slug is on the row). We dropped `jsonbapipayload`, so add `txtpolymarketslug` (TEXT, nullable) to `tblegmapping` and populate from the Gamma payload at sync. Open in a new tab with `noopener noreferrer`.
+**What landed (commit `9bf391a`).** New nullable `txtpolymarketslug` TEXT column on `tblegmapping`, populated from `GammaEvent.slug` at sync. `COALESCE` on update so a missing slug doesn't wipe an existing one. The slug threads through `CuratedMarket → upsertMarket → MarketRow → Leg → /api/markets → ParlayBuilder DisplayLeg`. The leg description renders as an anchor when a slug (or conditionId-shaped sourceRef) is available, opening `https://polymarket.com/event/<slug>` in a new tab with `noopener noreferrer`. Click handler `stopPropagation`'s so the YES/NO buttons keep working. Falls back to `/market/<conditionid>` for legacy rows missing a slug. Seed markets stay unlinked.
 
-### 11. Truth-up About + (probably retire) Agents page — *planned*
+### 11. Truth-up About + (probably retire) Agents page — *shipped*
 
 **Why this exists.** About and Agents were written for an earlier project narrative. Agents in particular reads as if there are autonomous on-chain agents driving market discovery (BallDontLie, NBA games) and a separate Settler bot — neither matches today. Markets come from Polymarket via Gamma; the settler is a Vercel cron in `/api/settlement/run`; "Market Discovery Agent" is gone. The Agents page mostly reflects the deployer wallet's basescan stats with an "agent" label, which is worse than not having the page at all.
 
-**My take (you asked).** Delete `/agents`. Absorb the small bit of useful content (ERC-8021 builder-code attribution, links to ParlayEngine + LegRegistry on Basescan, the deployer wallet) into a short "Behind the scenes" subsection on About. Reasoning:
-- The page promises an agent dashboard but renders wallet stats.
-- The "Discovery Agent + Settler Bot" framing doesn't reflect the JIT-quote / cron-settle flow that A-Day shipped.
-- Maintaining a page that asserts things the code doesn't do is worse than removing it.
-- About already covers protocol explainer; an honest "the deployer EOA submits resolutions; a Vercel cron settles tickets" paragraph is more useful than a fake dashboard.
-
-About itself needs lighter edits — verify protocol facts (vault model, fee routing, oracle path), strip leftover hackathon-pitch phrasing that doesn't match current architecture.
+**What landed (commit `e2dc26d`).** `/agents` deleted along with its only consumer `/api/agent-stats`; the nav link is gone from `Header`. The useful bits (builder-code attribution, ParlayEngine + LegRegistry Basescan links, deployer wallet) moved to a "Behind the Scenes" subsection on `/about`. The `/about` page itself was rewritten: the AI Risk Analysis section + 0G Network branding came out (we don't run 0G inference); a new "Agent API" section reframes around the x402 quote endpoint that actually ships; the Vault System stats now read "≥7 days" with a 1× → 4× boost curve (was the stale 30/60/90d / 1.5x); the "0G AI Inference" trust card is replaced with "JIT Quote Signer" to match what the architecture actually does.
 
 ### 12. Vault page nuanced corrections — *planned, partially scoped*
 

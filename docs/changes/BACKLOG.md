@@ -149,6 +149,26 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 
 ---
 
+## 9. Generalize MLB game-card sync to NBA / NFL / NHL
+
+**Current state.** `utils/parlay/polymarket/mlb.ts` ships an MLB-only fetcher built around `gamma /markets?tag_id=100381&sports_market_types=moneyline,spreads,totals` — empirically the only call that populates `sportsMarketType`, `line`, and `events[0]` for grouping. NBA, NFL, NHL still flow through the legacy `fetchSportEvents("nba"|"nfl"|"nhl")` → `gamma /events?tag_slug=…` path, where those fields come back null and the per-game card layout can't split a matchup into ML / spread / total rows.
+
+**Why deferred.** The MLB rewrite is intentionally a proof-of-concept. We want to validate the per-game-card pattern on one sport (does the deeper-book heuristic pick the right line? does the bucket-by-event grouping hold up when a game has props in addition to ML/spread/total? does the UI feel right with three rows per game?) before committing to the same shape across four sports.
+
+**Sketch when we pick this up.**
+- Lift the MLB fetcher to `fetchSportGames(sport)` keyed off a per-sport config: `{ tagId, marketTypes, formatTitle }`. NBA = spread + total + moneyline; NFL = same; NHL = puck line + total + moneyline. Tag IDs come from `gamma /sports`.
+- Per-sport `formatTitle` so spreads read as "Run Line ±X" (MLB), "Spread ±X" (NBA/NFL), "Puck Line ±X" (NHL). Totals stay "Over/Under X.X".
+- Each sport may surface different non-core types (NRFI for MLB, "first to score" for NHL, anytime TD for NFL). Decide per sport whether to render those as additional rows on the game card or hide them.
+- Same dedupe-priority trick: each sport's structured fetcher runs before the volume-ranked `featured` fetch so its rows win.
+
+**Out of scope for the generalization.**
+- Player props (assists, points, anytime TDs). Different shape — one market per (player × stat) instead of per game. Worth its own pass once core ML/spread/total feels right.
+- Live in-game odds. Polymarket's CLOB pushes price updates over websocket; pulling those into our sync is a bigger change than the REST poll the current MLB fetcher does.
+
+**When this picks up.** After we've watched the MLB tab in production for at least one weekend slate of games and the per-game-card layout has held up.
+
+---
+
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
@@ -159,3 +179,4 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 6. Jackpot pool — high effort, major feature expansion.
 7. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
 8. RFQ — only when real flow + a concrete maker set are in hand.
+9. Generalize MLB game-card sync to NBA / NFL / NHL — wait for one MLB weekend in prod first.

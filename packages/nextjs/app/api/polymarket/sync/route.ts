@@ -8,13 +8,17 @@ import {
   type CuratedMarket,
   type PolymarketOrderBook,
   fetchFeaturedMarkets,
+  fetchMlbGames,
   fetchSportEvents,
 } from "~~/utils/parlay";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SPORT_TAGS = ["nba", "nfl", "mlb", "nhl"] as const;
+// MLB has its own fetcher (gamma /markets with sportsMarketType filter) that
+// emits structured per-game ML / spread / total rows — see utils/parlay/polymarket/mlb.ts.
+// The remaining sports still go through the generic /events tag_slug path.
+const NON_MLB_SPORT_TAGS = ["nba", "nfl", "nhl"] as const;
 
 // Idempotent: refreshes prices/cutoff/score; preserves leg ids/question/category/earliestResolve on conflict.
 export async function GET(req: Request) {
@@ -28,14 +32,18 @@ export async function GET(req: Request) {
     clobUrl: process.env.POLYMARKET_CLOB_URL ?? "https://clob.polymarket.com",
   });
 
+  // MLB runs first so its structured (ML / spread / total) rows win the
+  // dedupe over any incidental MLB markets that sneak in via the volume-ranked
+  // /events fetch — see seen.has() check below.
+  const labels = ["mlb", "featured", ...NON_MLB_SPORT_TAGS] as const;
   const fetchResults = await Promise.allSettled([
+    fetchMlbGames({ gammaUrl }),
     fetchFeaturedMarkets({ gammaUrl }),
-    ...SPORT_TAGS.map(tag => fetchSportEvents(tag, { gammaUrl })),
+    ...NON_MLB_SPORT_TAGS.map(tag => fetchSportEvents(tag, { gammaUrl })),
   ]);
   const remoteBatches = fetchResults.map((r, i) => {
     if (r.status === "fulfilled") return r.value;
-    const label = i === 0 ? "featured" : SPORT_TAGS[i - 1];
-    console.warn(`[polymarket/sync] ${label} fetch failed:`, r.reason);
+    console.warn(`[polymarket/sync] ${labels[i]} fetch failed:`, r.reason);
     return [] as CuratedMarket[];
   });
 

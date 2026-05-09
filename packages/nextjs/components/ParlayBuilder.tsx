@@ -713,13 +713,29 @@ export function ParlayBuilder() {
             const headerSuffix = formatGameStartSuffix(firstLeg?.eventStart);
             const marketCount = game.markets.length;
             const wrapperClass = mlbCard ? "glass-card space-y-3 p-4" : "space-y-3";
+            // Game-header click-through to Polymarket: every leg in a game shares
+            // the same parent event slug, so any one of them is a valid source.
+            const anyLeg = game.markets.flatMap(m => m.legs)[0];
+            const gameHref = anyLeg ? polymarketHref(anyLeg) : null;
             return (
               <div key={`game:${game.gameGroup || "__flat__"}`} className={wrapperClass}>
                 {game.gameGroup &&
                   (mlbCard ? (
                     <div className="flex items-baseline justify-between border-b border-white/5 pb-2">
                       <h2 className="text-base font-bold text-white">
-                        {game.gameGroup}
+                        {gameHref ? (
+                          <a
+                            href={gameHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open game on Polymarket"
+                            className="underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-brand-pink hover:decoration-brand-pink"
+                          >
+                            {game.gameGroup}
+                          </a>
+                        ) : (
+                          game.gameGroup
+                        )}
                         {headerSuffix && <span className="font-normal text-gray-400"> - {headerSuffix}</span>}
                       </h2>
                       <div className="flex items-center gap-3 text-[11px] text-gray-400">
@@ -730,7 +746,19 @@ export function ParlayBuilder() {
                     </div>
                   ) : (
                     <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">
-                      {game.gameGroup}
+                      {gameHref ? (
+                        <a
+                          href={gameHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open game on Polymarket"
+                          className="underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                        >
+                          {game.gameGroup}
+                        </a>
+                      ) : (
+                        game.gameGroup
+                      )}
                       {headerSuffix && <span className="ml-2 font-normal text-gray-500"> - {headerSuffix}</span>}
                     </h2>
                   ))}
@@ -833,18 +861,11 @@ export function ParlayBuilder() {
                                 </button>
                                 <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
                                   {isSports ? (
-                                    polymarketHref(leg) ? (
-                                      <a
-                                        href={polymarketHref(leg) ?? undefined}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={e => e.stopPropagation()}
-                                        title="Open on Polymarket"
-                                        className="text-[11px] text-gray-500 underline decoration-gray-700 decoration-dotted underline-offset-4 transition-colors hover:text-gray-300 hover:decoration-brand-pink"
-                                      >
-                                        View on Polymarket
-                                      </a>
-                                    ) : null
+                                    // Wager type the user is actually placing
+                                    // (Moneyline / Run Line -1.5 / Over/Under
+                                    // 8.5). The game-header above already
+                                    // links out to Polymarket for the matchup.
+                                    <span className="text-sm font-semibold text-gray-200">{leg.marketTitle}</span>
                                   ) : polymarketHref(leg) ? (
                                     <a
                                       href={polymarketHref(leg) ?? undefined}

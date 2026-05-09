@@ -1,5 +1,5 @@
 import { type Hex } from "viem";
-import { getActiveMarkets } from "~~/lib/db/client";
+import { getMarketsForBuildLegs } from "~~/lib/db/client";
 import { PolymarketClient } from "~~/lib/polymarket/client";
 import { midToPpm, parsePolySourceRef } from "~~/lib/polymarket/markets";
 import {
@@ -32,7 +32,11 @@ export interface BuiltLeg {
  *  to stdout so a chain revert with "cutoff passed" can be traced back to
  *  the exact row in the DB. */
 export async function buildLegs(inputs: LegInput[]): Promise<BuiltLeg[]> {
-  const markets = await getActiveMarkets();
+  // Targeted lookup: only fetch the rows the cart references. Replaces a
+  // full SELECT * over the active markets table that ran on every 30s
+  // quote-preview poll (the dominant DB egress source).
+  const refs = Array.from(new Set(inputs.map(l => l.sourceRef)));
+  const markets = await getMarketsForBuildLegs(refs);
   const bySourceRef = new Map(markets.map(m => [m.txtsourceref, m]));
   const nowSec = Math.floor(Date.now() / 1000);
 

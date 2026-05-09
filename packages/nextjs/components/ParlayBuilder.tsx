@@ -374,6 +374,9 @@ export function ParlayBuilder() {
   }, [mounted, selectedLegs]);
 
   // 30s CLOB-mid poll, paused once buy flow starts (quote-sign's final refetch becomes source of truth).
+  // Also auto-pauses after 10 minutes of cart inactivity to cap DB egress for
+  // idle tabs — quote-sign re-prices on submit so a stale display is harmless.
+  // Any cart change re-runs this effect (selectedLegsKey dep) and starts a fresh window.
   const selectedLegsKey = useMemo(
     () => selectedLegs.map(s => `${s.leg.sourceRef}:${s.outcomeChoice}`).join("|"),
     [selectedLegs],
@@ -383,6 +386,8 @@ export function ParlayBuilder() {
   useEffect(() => {
     if (selectedLegs.length < 2 || buyActive) return;
 
+    const STALE_AFTER_MS = 10 * 60 * 1000;
+    const startedAt = Date.now();
     const abort = new AbortController();
     let cancelled = false;
 
@@ -425,7 +430,13 @@ export function ParlayBuilder() {
     }
 
     refresh();
-    const id = window.setInterval(refresh, 30_000);
+    const id = window.setInterval(() => {
+      if (Date.now() - startedAt > STALE_AFTER_MS) {
+        clearInterval(id);
+        return;
+      }
+      refresh();
+    }, 30_000);
     return () => {
       cancelled = true;
       abort.abort();

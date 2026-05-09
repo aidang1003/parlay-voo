@@ -147,6 +147,53 @@ export async function getActiveMarkets(): Promise<MarketRow[]> {
   return (rows as Record<string, unknown>[]).map(coerceMarketRow);
 }
 
+/**
+ * Slim projection of tblegmapping for the quote build path. /api/quote-preview
+ * is polled every 30s while a user has legs in their cart; reading the full
+ * `getActiveMarkets()` result on every poll was the dominant DB egress source
+ * (entire active-set × all 21 columns vs. the 2–5 rows × 8 columns the quote
+ * build actually needs).
+ *
+ * Filters mirror getActiveMarkets so an inactive / closed leg returns nothing
+ * and buildLegs treats it as unknown. Cutoff filtering is intentionally NOT
+ * applied here — buildLegs needs the row to render the "cutoff in past" error
+ * with the actual cutoff timestamp.
+ */
+export interface BuildLegRow {
+  txtsourceref: string;
+  txtsource: LegSource;
+  txtquestion: string;
+  intyesprobppm: number;
+  intnoprobppm: number | null;
+  bigcutofftime: number;
+  bigearliestresolve: number;
+  bigeventstart: number | null;
+}
+
+export async function getMarketsForBuildLegs(sourceRefs: string[]): Promise<BuildLegRow[]> {
+  if (sourceRefs.length === 0) return [];
+  const db = sql();
+  const rows = await db`
+    SELECT txtsourceref, txtsource, txtquestion,
+           intyesprobppm, intnoprobppm,
+           bigcutofftime, bigearliestresolve, bigeventstart
+    FROM tblegmapping
+    WHERE txtsourceref IN ${db(sourceRefs)}
+      AND blnactive = true
+      AND blnpolyclosed = false
+  `;
+  return (rows as Record<string, unknown>[]).map(r => ({
+    txtsourceref: r.txtsourceref as string,
+    txtsource: r.txtsource as LegSource,
+    txtquestion: r.txtquestion as string,
+    intyesprobppm: Number(r.intyesprobppm),
+    intnoprobppm: r.intnoprobppm == null ? null : Number(r.intnoprobppm),
+    bigcutofftime: Number(r.bigcutofftime),
+    bigearliestresolve: Number(r.bigearliestresolve),
+    bigeventstart: r.bigeventstart == null ? null : Number(r.bigeventstart),
+  }));
+}
+
 /** Markets with at least one on-chain-registered leg id. */
 export async function getRegisteredActiveMarkets(): Promise<MarketRow[]> {
   const db = sql();

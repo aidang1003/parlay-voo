@@ -10,8 +10,8 @@ Two items already shipped on this branch (the original admin-gate work that name
 | --- | --- | --- |
 | 1 | Admin wallet gate (debug + admin routes) | **shipped** (commit `23c30a3`) |
 | 2 | Database flexibility (Supabase ↔ Neon) + dropping `jsonbapipayload` | **shipped** (commit `1760345`) |
-| 3 | Ticket-native demo resolver (any wallet) | planned |
-| 4 | Per-user demo overrides for leg resolution | planned — **largest item** |
+| 3 | Ticket-native demo resolver (any wallet) | **shipped** (commits `449c53b`, `<demo-flow>`) |
+| 4 | Per-user demo overrides for leg resolution | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 5 | Hide legs whose payout is below the entrance fee | planned |
 | 6 | Specialize MLB tab around the CLOB MLB endpoint | planned |
 | 7 | Display event start time on legs | planned |
@@ -79,6 +79,14 @@ What landed:
 - **Optional surface on `/tickets`.** Each row could grow a small overflow menu with "Simulate WIN / LOSS / Reset" so users don't have to drill into the detail page. Defer if it crowds the row; the detail page is the canonical place.
 
 **Relationship to the existing admin per-leg resolver.** The raw per-leg YES / NO / VOID grid stays where it is — `/admin/debug`, behind `<AdminGate>`, calling the on-chain `/api/admin/resolve-leg` route. That's the path the cron and manual recovery still need. The new ticket-page panel is *additive*: it doesn't touch on-chain state, it isn't gated, and it doesn't expose leg-level controls.
+
+**Round-2 extension: end-to-end Settle / Claim.** The leg-only deviation flipped each leg's display but left the ticket header stuck on "Active", so the SettledClimb visualization, payout panel, and Claim button never fired — exactly the visual gap that came up in user feedback ("resolving to won didn't show me the corresponding payout graph and proper multiple"). The deviation now extends through the ticket's lifecycle so Settle and Claim work in demo mode too.
+
+- *Demo Settle.* Clicking Settle while any leg is deviated routes to `/api/tickets/[id]/demo-settle`. The route reads the chain ticket + each leg's snapshot probability + the caller's deviation rows, then runs the same algorithm as `ParlayEngine.settleTicket` against the layered statuses (chain truth wins per leg; deviation falls through where chain is still Unresolved). The result — `Won` / `Lost` / `Voided` plus the recomputed payout and multiplier — is upserted into a new `tbticketdeviation` row keyed by `(wallet, ticketId)`. Pure off-chain mirror; the on-chain ticket stays Active.
+- *Demo Claim.* When the ticket renders as a deviation-Won, Claim routes to `/api/tickets/[id]/demo-claim`. The server calls `MockUSDC.mint(wallet, payout)` once with `HOT_SIGNER_PRIVATE_KEY` (MockUSDC's `mint` is permissionless and capped at 10M USDC per call — well above any realistic ticket payout). Mints free MockUSDC equal to the demo payout, flips the row to `Claimed`. The real pool/contract state is untouched, so when the chain later resolves the ticket for real, the existing on-chain Settle / Claim path keeps working unchanged.
+- *Read-time layering.* `/ticket/[id]/page.tsx` overrides `ticket.status` and `ticket.payout` with the deviation row whenever (a) the chain ticket is still Active and (b) at least one leg is still pre-resolution on-chain. Both predicates failing means the chain has caught up — the deviation is suppressed (lazy GC), and the user re-Settles + re-Claims for real.
+- *Two-pass interaction.* Mark as WIN/LOSS → Settle (demo) → Claim (demo). After the cron / manual resolver lands → Settle (chain) → Claim (chain). Same buttons, same visual, the demo just runs first against a deviated state.
+- *Tradeoff documented.* When the chain later resolves the ticket to a real Win, the user can claim against the real pool too — collecting twice. Acceptable on testnet (MockUSDC is free) and intentional: keeps the real claim path untouched so it stays "the same code as production".
 
 ### 4. Per-user demo overrides for leg resolution — *planned, biggest item*
 
@@ -281,17 +289,34 @@ Behavior matrix:
 
 Light-touch reference for the items still ahead. Concrete schemas only where direction is settled (#4 deviation table, new `tblegmapping` columns for #7 and #10). Everything else stays in Part 1 narrative until the spec lands.
 
-**New table — `tbuserlegdeviation` (item #4).** Composite primary key. Outcome enum mirrors `tbpolymarketresolution` so layered reads can compare strings directly.
+**New tables (items #3 + #4).** Composite primary keys, all-lowercase identifiers per the schema convention.
 
 ```sql
+-- Per-leg display override.
 CREATE TABLE tbuserlegdeviation (
   txtwallet      TEXT NOT NULL CHECK (txtwallet ~ '^0x[0-9a-f]{40}$'),
-  txtsourceref   TEXT NOT NULL REFERENCES tblegmapping(txtsourceref) ON DELETE CASCADE,
+  txtsourceref   TEXT NOT NULL,
   txtoutcome     TEXT NOT NULL CHECK (txtoutcome IN ('YES', 'NO', 'VOIDED')),
   tscreatedat    TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (txtwallet, txtsourceref)
 );
 CREATE INDEX IF NOT EXISTS ixuserlegdeviation_wallet ON tbuserlegdeviation (txtwallet);
+
+-- Off-chain mirror of the ticket lifecycle (round-2 extension). Written by
+-- /api/tickets/[id]/demo-settle, promoted to Claimed by /api/tickets/[id]/demo-claim.
+-- NUMERIC(78,0) holds a uint256 ticketId / USDC base-unit payout without loss.
+CREATE TABLE tbticketdeviation (
+  txtwallet         TEXT NOT NULL CHECK (txtwallet ~ '^0x[0-9a-f]{40}$'),
+  bigticketid       NUMERIC(78,0) NOT NULL,
+  txtstatus         TEXT NOT NULL CHECK (txtstatus IN ('Won', 'Lost', 'Voided', 'Claimed')),
+  bigpayout         NUMERIC(78,0) NOT NULL DEFAULT 0,
+  bigmultiplierx1e6 NUMERIC(78,0) NOT NULL DEFAULT 1000000,
+  txtclaimtxhash    TEXT,
+  tssettledat       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  tsclaimedat       TIMESTAMPTZ,
+  PRIMARY KEY (txtwallet, bigticketid)
+);
+CREATE INDEX IF NOT EXISTS ixticketdeviation_wallet ON tbticketdeviation (txtwallet);
 ```
 
 **New columns on `tblegmapping`.**
@@ -307,19 +332,45 @@ Both via `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` migrations in `lib/db/sc
 
 | Route | Method | Auth | Item | Purpose |
 | --- | --- | --- | --- | --- |
-| `/api/tickets/[id]/demo-resolve` | POST | none (any wallet, write keyed to caller) | #3 + #4 | upsert deviations for every leg of this ticket; body `{ outcome: "WIN" \| "LOSS" }` |
-| `/api/tickets/[id]/demo-resolve` | DELETE | none | #3 + #4 | clear the caller's deviations for every leg of this ticket |
-| `/api/legs/deviations` | GET | none | #4 | list the caller's active deviations for read-time layering (keyed off `txtwallet` query / connected-wallet header) |
+| `/api/tickets/[id]/demo-resolve` | POST | none (any wallet, write keyed to caller) | #3 + #4 | upsert leg deviations for every leg of this ticket; body `{ wallet, outcome: "WIN" \| "LOSS" }` |
+| `/api/tickets/[id]/demo-resolve` | DELETE | none | #3 + #4 | clear the caller's deviations for every leg of this ticket and the matching `tbticketdeviation` row |
+| `/api/tickets/[id]/demo-settle` | POST | none | #3 + #4 ext | mirror of `ParlayEngine.settleTicket` against (chain ⊕ deviation) leg statuses; writes `tbticketdeviation` |
+| `/api/tickets/[id]/demo-claim` | POST | none | #3 + #4 ext | requires deviation row in `Won`; calls `MockUSDC.mint(wallet, payout)` once via `HOT_SIGNER_PRIVATE_KEY`; flips row to `Claimed` |
+| `/api/legs/deviations` | GET | none | #3 + #4 | returns `{ deviations, tickets }` — leg-level + ticket-level overrides for read-time layering |
 | `/api/polymarket/clob-mlb` | GET | cron | #6 | new sync path; mirrors `polymarket/sync` shape but reads CLOB |
 
 The raw per-leg POST is intentionally absent — leg-level writes are an internal-only fan-out from the ticket route, never exposed to the client.
 
+**Settle math (TS).** `lib/parlayMath.ts` was unnecessary — `packages/nextjs/utils/parlay/math.ts` already exposes `computeMultiplier` + `computePayout` as a bit-for-bit port of `ParlayMath.sol` (math-parity invariant). The demo-settle route imports those directly so the void-recompute path produces the same payout the chain would.
+
+**Read-time layering rule (extended).**
+
+```
+ticketStatus = (onChainTicket.status !== Active)               // chain settled/won/lost/voided/claimed
+             ? mapStatus(onChainTicket.status)
+             : (allLegsChainResolved                            // chain caught up — let the user
+                  ? "Active"                                    // settle for real
+                  : (ticketDeviationRow?.status ?? "Active"))   // demo state in effect
+```
+
+`allLegsChainResolved = legs.every(l => l.resolved && !l.demo)`. When `ticketStatus` came from the deviation row, also override `ticket.payout` with `bigpayout` from the row.
+
+**Demo-mode handler routing (TicketCard).** TicketCard accepts optional `onSettle` / `onClaim` overrides plus matching `isSettling` / `isClaiming` flags. The page wires them whenever:
+
+| Button | Demo handler used when |
+| --- | --- |
+| Settle  | `chainActive && legs.some(l => l.demo)` — at least one leg is currently deviated |
+| Claim   | `useTicketDeviation && ticketDeviation.status === "Won"` — the rendered Won status came from the deviation layer |
+
+`demoActive` prop on TicketCard surfaces a small "demo" chip next to the status pill whenever either condition holds.
+
 **Files most likely to move.**
 
-- `lib/db/schema.ts`, `lib/db/client.ts` — table + columns above.
-- `app/api/tickets/[id]/demo-resolve/route.ts` (new), `app/api/legs/deviations/route.ts` (new) — items #3 + #4.
-- `app/ticket/[id]/page.tsx` — embed the WIN / LOSS / Reset panel; item #3.
-- `lib/hooks/leg.ts` — fold deviation lookup into the per-leg status read.
+- `lib/db/schema.ts`, `lib/db/client.ts` — tables + columns above.
+- `app/api/tickets/[id]/demo-resolve/route.ts`, `app/api/tickets/[id]/demo-settle/route.ts` (new), `app/api/tickets/[id]/demo-claim/route.ts` (new), `app/api/legs/deviations/route.ts` — items #3 + #4 (and the round-2 extension).
+- `app/ticket/[id]/page.tsx` — embed the WIN / LOSS / Reset panel + ticket-level deviation layering + demo Settle/Claim handlers.
+- `components/TicketCard.tsx` — accept optional `onSettle` / `onClaim` overrides + `demoActive` chip.
+- `lib/hooks/deviations.ts` — `useUserLegDeviations` returns both leg + ticket maps.
 - `app/admin/debug/page.tsx` — left alone; existing per-leg admin grid is the cron / recovery path and stays gated.
 - `components/parlay/*` (bet box / question header) — items #5, #7, #8, #9, #10.
 - `utils/parlay/polymarket/*` — items #6, #7, #10 sync changes.

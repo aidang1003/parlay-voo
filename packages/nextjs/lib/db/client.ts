@@ -380,3 +380,112 @@ export async function deleteUserLegDeviations(wallet: string, sourceRefs: string
   `;
   return { removed: result.count };
 }
+
+// ── Ticket deviations (tbticketdeviation) ───────────────────────────────────
+//
+// Off-chain mirror of the ticket lifecycle for the demo flow. The user clicks
+// Mark as WIN / LOSS to deviate the legs (tbuserlegdeviation), then clicks
+// Settle to compute and store a ticket-level row here, then Claim to flip the
+// row to Claimed and mint MockUSDC. Read-time layering applies the row only
+// while chain truth has not yet resolved every leg — once the chain catches
+// up, the deviation is suppressed and the user re-Settles + re-Claims for
+// real.
+
+export type TicketDeviationStatus = "Won" | "Lost" | "Voided" | "Claimed";
+
+export interface TicketDeviationRow {
+  wallet: string;
+  ticketId: bigint;
+  status: TicketDeviationStatus;
+  payout: bigint;
+  multiplierX1e6: bigint;
+  claimTxHash: string | null;
+  settledAt: string;
+  claimedAt: string | null;
+}
+
+function coerceTicketDeviationRow(r: Record<string, unknown>): TicketDeviationRow {
+  return {
+    wallet: r.txtwallet as string,
+    ticketId: BigInt(r.bigticketid as string | number),
+    status: r.txtstatus as TicketDeviationStatus,
+    payout: BigInt(r.bigpayout as string | number),
+    multiplierX1e6: BigInt(r.bigmultiplierx1e6 as string | number),
+    claimTxHash: (r.txtclaimtxhash as string | null) ?? null,
+    settledAt: r.tssettledat as string,
+    claimedAt: (r.tsclaimedat as string | null) ?? null,
+  };
+}
+
+export async function getTicketDeviation(wallet: string, ticketId: bigint): Promise<TicketDeviationRow | null> {
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const rows = await db`
+    SELECT * FROM tbticketdeviation
+    WHERE txtwallet = ${w} AND bigticketid = ${ticketId.toString()}
+    LIMIT 1
+  `;
+  const row = (rows as Record<string, unknown>[])[0];
+  return row ? coerceTicketDeviationRow(row) : null;
+}
+
+export async function listTicketDeviationsForWallet(wallet: string): Promise<TicketDeviationRow[]> {
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const rows = await db`
+    SELECT * FROM tbticketdeviation
+    WHERE txtwallet = ${w}
+    ORDER BY tssettledat DESC
+  `;
+  return (rows as Record<string, unknown>[]).map(coerceTicketDeviationRow);
+}
+
+export async function upsertTicketDeviation(input: {
+  wallet: string;
+  ticketId: bigint;
+  status: Exclude<TicketDeviationStatus, "Claimed">;
+  payout: bigint;
+  multiplierX1e6: bigint;
+}): Promise<void> {
+  const db = sql();
+  const w = normalizeAddress(input.wallet);
+  await db`
+    INSERT INTO tbticketdeviation (
+      txtwallet, bigticketid, txtstatus, bigpayout, bigmultiplierx1e6
+    ) VALUES (
+      ${w}, ${input.ticketId.toString()}, ${input.status}, ${input.payout.toString()}, ${input.multiplierX1e6.toString()}
+    )
+    ON CONFLICT (txtwallet, bigticketid) DO UPDATE SET
+      txtstatus         = EXCLUDED.txtstatus,
+      bigpayout         = EXCLUDED.bigpayout,
+      bigmultiplierx1e6 = EXCLUDED.bigmultiplierx1e6,
+      tssettledat       = now(),
+      txtclaimtxhash    = NULL,
+      tsclaimedat       = NULL
+  `;
+}
+
+export async function markTicketDeviationClaimed(input: {
+  wallet: string;
+  ticketId: bigint;
+  txHash: string;
+}): Promise<{ updated: number }> {
+  const db = sql();
+  const w = normalizeAddress(input.wallet);
+  const result = await db`
+    UPDATE tbticketdeviation
+    SET txtstatus = 'Claimed', txtclaimtxhash = ${input.txHash}, tsclaimedat = now()
+    WHERE txtwallet = ${w} AND bigticketid = ${input.ticketId.toString()} AND txtstatus = 'Won'
+  `;
+  return { updated: result.count };
+}
+
+export async function deleteTicketDeviation(wallet: string, ticketId: bigint): Promise<{ removed: number }> {
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const result = await db`
+    DELETE FROM tbticketdeviation
+    WHERE txtwallet = ${w} AND bigticketid = ${ticketId.toString()}
+  `;
+  return { removed: result.count };
+}

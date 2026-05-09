@@ -54,8 +54,9 @@ export function DemoResolvePanel({ ticketId, hasActiveDeviations }: Props) {
         <span className="text-[10px] uppercase tracking-wider text-gray-500">demo only</span>
       </div>
       <p className="mb-4 text-xs text-gray-400">
-        Preview what winning or losing this ticket feels like in the UI. No chain transaction, no payout — settlement
-        still runs against the real oracle. Deviations disappear once the chain resolves the leg.
+        Preview this ticket as a win or loss end-to-end. Settle and Claim below then run in demo mode — Claim mints free
+        MockUSDC to your wallet. Once the real resolver catches up, the demo state falls away and you re-Settle /
+        re-Claim on chain.
       </p>
       <div className="flex flex-wrap gap-2">
         <button onClick={() => call("WIN")} disabled={pending !== null} className="btn btn-sm btn-success grow">

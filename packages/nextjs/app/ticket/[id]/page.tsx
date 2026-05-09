@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useAccount } from "wagmi";
 import { DemoResolvePanel } from "~~/components/DemoResolvePanel";
 import { MultiplierClimb } from "~~/components/MultiplierClimb";
 import { RehabCTA } from "~~/components/RehabCTA";
 import { TicketCard, type TicketData, type TicketLeg } from "~~/components/TicketCard";
 import { BASE_CASHOUT_PENALTY_BPS, PPM, computeClientCashoutValue } from "~~/lib/cashout";
 import { useLegDescriptions, useLegStatuses, useTicket, useUserLegDeviations, useUserTickets } from "~~/lib/hooks";
+import type { TicketStatus } from "~~/lib/ticket-status";
 import { formatUSDC, isLegWon, mapStatus, parseOutcomeChoice } from "~~/lib/utils";
+import { notification } from "~~/utils/scaffold-eth";
 
 /** Hook to replay the rocket climb animation on settled tickets */
 function useReplay(resolvedWon: number, crashed: boolean) {
@@ -62,12 +65,16 @@ export default function TicketPage() {
     }
   })();
 
-  const { ticket: onChainTicket, isLoading } = useTicket(ticketId);
+  const { address } = useAccount();
+  const { ticket: onChainTicket, isLoading, refetch: refetchTicket } = useTicket(ticketId);
   const { tickets: userTickets } = useUserTickets();
   const legMap = useLegDescriptions(onChainTicket?.legIds ?? []);
   const isActive = onChainTicket?.status === 0;
   const legStatuses = useLegStatuses(onChainTicket?.legIds ?? [], legMap, isActive ? 2000 : 5000);
-  const { deviations } = useUserLegDeviations();
+  const { deviations, ticketDeviations, refetch: refetchDeviations } = useUserLegDeviations();
+  const ticketDeviation = ticketId !== undefined ? ticketDeviations.get(ticketId.toString()) : undefined;
+  const [isDemoSettling, setIsDemoSettling] = useState(false);
+  const [isDemoClaiming, setIsDemoClaiming] = useState(false);
 
   const sortedIds = userTickets.map(t => t.id).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const currentIdx = ticketId !== undefined ? sortedIds.findIndex(id => id === ticketId) : -1;
@@ -164,29 +171,115 @@ export default function TicketPage() {
         )
       : undefined;
 
+  // Layer the ticket-level deviation over chain truth. Honored only while the
+  // chain ticket is still Active and at least one leg is still pre-resolution
+  // on-chain — once the real resolver lands (so all legs are chain-resolved
+  // independently of the deviation), the deviation falls away and the user
+  // re-Settles + re-Claims for real.
+  const allLegsChainResolved = legs.every(l => l.resolved && !l.demo);
+  const chainActive = onChainTicket.status === 0;
+  const useTicketDeviation = chainActive && !allLegsChainResolved && !!ticketDeviation;
+  const someDemoLeg = legs.some(l => l.demo === true);
+
+  const effectiveStatus: TicketStatus = useTicketDeviation
+    ? (ticketDeviation!.status as TicketStatus)
+    : mapStatus(onChainTicket.status);
+  const effectivePayout = useTicketDeviation ? ticketDeviation!.payout : onChainTicket.potentialPayout;
+
   const ticket: TicketData = {
     id: ticketId!,
     stake: onChainTicket.stake,
     feePaid: onChainTicket.feePaid,
-    payout: onChainTicket.potentialPayout,
+    payout: effectivePayout,
     legs,
-    status: mapStatus(onChainTicket.status),
+    status: effectiveStatus,
     createdAt: Number(onChainTicket.createdAt),
     cashoutValue,
   };
 
-  const legMultipliers = legs.map(l => l.odds);
+  // Scale per-leg odds so their product equals the ticket's net multiplier
+  // (which already includes the protocol fee + correlation discount). This
+  // matches the parlay-builder climb shape, so the rocket curve on
+  // /ticket/[id] lines up with what the user saw at buy time. When the
+  // rendered status came from a deviation, target the deviation's
+  // multiplierX1e6 instead — settle math may have recomputed it after
+  // dropping voided legs.
+  const targetMultiplier = useTicketDeviation
+    ? Number(ticketDeviation!.multiplierX1e6) / PPM
+    : Number(onChainTicket.multiplierX1e6) / PPM;
+  const rawProduct = legs.reduce((acc, l) => acc * l.odds, 1);
+  const climbScale =
+    rawProduct > 0 && targetMultiplier > 0 && Number.isFinite(rawProduct) && legs.length > 0
+      ? Math.pow(targetMultiplier / rawProduct, 1 / legs.length)
+      : 1;
+  const legMultipliers = legs.map(l => l.odds * climbScale);
   const resolvedWon = legs.filter(l => l.resolved && l.result !== 3 && isLegWon(l.outcomeChoice, l.result)).length;
   const crashed = legs.some(l => l.resolved && l.result !== 3 && !isLegWon(l.outcomeChoice, l.result));
   const liveMultiplier = crashed
     ? 0
     : legs.reduce((m, l) => {
         if (!l.resolved || l.result === 3) return m;
-        return isLegWon(l.outcomeChoice, l.result) ? m * l.odds : m;
+        return isLegWon(l.outcomeChoice, l.result) ? m * l.odds * climbScale : m;
       }, 1);
 
   const isSettled =
     ticket.status === "Won" || ticket.status === "Lost" || ticket.status === "Voided" || ticket.status === "Claimed";
+
+  // Demo settle: hits the API that mirrors ParlayEngine.settleTicket() math
+  // against the user's leg deviations. Replaces the chain settle handler in
+  // TicketCard while at least one leg is deviated.
+  async function demoSettle(id: bigint) {
+    if (!address) return;
+    setIsDemoSettling(true);
+    try {
+      const res = await fetch(`/api/tickets/${id.toString()}/demo-settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ wallet: address.toLowerCase() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        notification.error(`Demo settle failed: ${body.error ?? res.statusText}`);
+        return;
+      }
+      const body: { status: string } = await res.json();
+      notification.success(`Demo ${body.status.toLowerCase()}`);
+      refetchDeviations();
+    } finally {
+      setIsDemoSettling(false);
+    }
+  }
+
+  // Demo claim: server mints MockUSDC to the caller and flips the deviation
+  // row to Claimed. Replaces the chain claim handler in TicketCard while the
+  // ticket is in a demo-Won state.
+  async function demoClaim(id: bigint) {
+    if (!address) return;
+    setIsDemoClaiming(true);
+    try {
+      const res = await fetch(`/api/tickets/${id.toString()}/demo-claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ wallet: address.toLowerCase() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        notification.error(`Demo claim failed: ${body.error ?? res.statusText}`);
+        return;
+      }
+      notification.success("Demo payout minted");
+      refetchDeviations();
+      refetchTicket();
+    } finally {
+      setIsDemoClaiming(false);
+    }
+  }
+
+  // Route the Settle button to the demo handler whenever any leg is currently
+  // deviated; route Claim to the demo handler whenever the rendered Won
+  // status came from the deviation layer.
+  const useDemoSettle = chainActive && someDemoLeg;
+  const useDemoClaim = useTicketDeviation && ticketDeviation!.status === "Won";
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
@@ -266,12 +359,19 @@ export default function TicketPage() {
       {/* Rehab CTA for lost tickets */}
       {ticket.status === "Lost" && <RehabCTA stake={ticket.stake} />}
 
-      <TicketCard ticket={ticket} />
+      <TicketCard
+        ticket={ticket}
+        onSettle={useDemoSettle ? demoSettle : undefined}
+        onClaim={useDemoClaim ? demoClaim : undefined}
+        isSettling={useDemoSettle ? isDemoSettling : undefined}
+        isClaiming={useDemoClaim ? isDemoClaiming : undefined}
+        demoActive={someDemoLeg || useTicketDeviation}
+      />
 
       {/* Demo resolver — shown for active tickets so users can preview a win
        *  or loss without waiting for the real game. */}
-      {ticket.status === "Active" && ticketId !== undefined && (
-        <DemoResolvePanel ticketId={ticketId} hasActiveDeviations={demoActive} />
+      {chainActive && ticketId !== undefined && (
+        <DemoResolvePanel ticketId={ticketId} hasActiveDeviations={demoActive || useTicketDeviation} />
       )}
     </div>
   );

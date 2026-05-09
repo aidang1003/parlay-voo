@@ -4,28 +4,61 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 
 export type DeviationOutcome = "YES" | "NO" | "VOIDED";
+export type TicketDeviationStatus = "Won" | "Lost" | "Voided" | "Claimed";
 
 export interface UserLegDeviation {
   sourceRef: string;
   outcome: DeviationOutcome;
 }
 
-async function fetchDeviations(wallet: string): Promise<Map<string, DeviationOutcome>> {
-  const res = await fetch(`/api/legs/deviations?wallet=${wallet.toLowerCase()}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`deviations fetch failed: ${res.status}`);
-  const body: { deviations?: UserLegDeviation[] } = await res.json();
-  const map = new Map<string, DeviationOutcome>();
-  for (const d of body.deviations ?? []) map.set(d.sourceRef, d.outcome);
-  return map;
+export interface TicketDeviation {
+  ticketId: bigint;
+  status: TicketDeviationStatus;
+  payout: bigint;
+  multiplierX1e6: bigint;
+  claimTxHash: string | null;
 }
 
-const EMPTY_MAP: ReadonlyMap<string, DeviationOutcome> = new Map();
+interface RawTicketDeviation {
+  ticketId: string;
+  status: TicketDeviationStatus;
+  payout: string;
+  multiplierX1e6: string;
+  claimTxHash: string | null;
+}
 
-/** Returns the connected wallet's per-leg demo overrides, keyed by sourceRef.
- *  Empty map when no wallet is connected. The display layer prefers chain
- *  truth; this map is consulted only when a leg is still Unresolved on-chain.*/
+interface FetchResult {
+  legs: Map<string, DeviationOutcome>;
+  tickets: Map<string, TicketDeviation>; // keyed by ticketId.toString()
+}
+
+const EMPTY_RESULT: FetchResult = { legs: new Map(), tickets: new Map() };
+
+async function fetchDeviations(wallet: string): Promise<FetchResult> {
+  const res = await fetch(`/api/legs/deviations?wallet=${wallet.toLowerCase()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`deviations fetch failed: ${res.status}`);
+  const body: { deviations?: UserLegDeviation[]; tickets?: RawTicketDeviation[] } = await res.json();
+  const legs = new Map<string, DeviationOutcome>();
+  for (const d of body.deviations ?? []) legs.set(d.sourceRef, d.outcome);
+  const tickets = new Map<string, TicketDeviation>();
+  for (const t of body.tickets ?? []) {
+    tickets.set(t.ticketId, {
+      ticketId: BigInt(t.ticketId),
+      status: t.status,
+      payout: BigInt(t.payout),
+      multiplierX1e6: BigInt(t.multiplierX1e6),
+      claimTxHash: t.claimTxHash,
+    });
+  }
+  return { legs, tickets };
+}
+
+/** Connected wallet's per-leg + per-ticket demo overrides. The display layer
+ *  prefers chain truth; these maps are consulted only when chain state is
+ *  still pre-resolution. Empty maps when no wallet is connected. */
 export function useUserLegDeviations(): {
   deviations: ReadonlyMap<string, DeviationOutcome>;
+  ticketDeviations: ReadonlyMap<string, TicketDeviation>;
   isLoading: boolean;
   refetch: () => void;
 } {
@@ -36,13 +69,14 @@ export function useUserLegDeviations(): {
 
   const q = useQuery({
     queryKey,
-    queryFn: () => (wallet ? fetchDeviations(wallet) : Promise.resolve(new Map<string, DeviationOutcome>())),
+    queryFn: () => (wallet ? fetchDeviations(wallet) : Promise.resolve(EMPTY_RESULT)),
     enabled: !!wallet,
     staleTime: 5_000,
   });
 
   return {
-    deviations: q.data ?? EMPTY_MAP,
+    deviations: q.data?.legs ?? EMPTY_RESULT.legs,
+    ticketDeviations: q.data?.tickets ?? EMPTY_RESULT.tickets,
     isLoading: q.isLoading,
     refetch: () => qc.invalidateQueries({ queryKey }),
   };

@@ -17,7 +17,12 @@ import { NextResponse } from "next/server";
 import { type Abi, createPublicClient, http } from "viem";
 import { baseSepolia, foundry } from "viem/chains";
 import deployedContracts from "~~/contracts/deployedContracts";
-import { type DeviationOutcome, deleteUserLegDeviations, upsertUserLegDeviations } from "~~/lib/db/client";
+import {
+  type DeviationOutcome,
+  deleteTicketDeviation,
+  deleteUserLegDeviations,
+  upsertUserLegDeviations,
+} from "~~/lib/db/client";
 import { BASE_SEPOLIA_CHAIN_ID, LOCAL_CHAIN_ID, type SupportedChainId, getRpcUrl } from "~~/utils/parlay";
 
 export const runtime = "nodejs";
@@ -136,6 +141,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     return NextResponse.json({ error: `ticket lookup failed: ${msg}` }, { status: 502 });
   }
   const sourceRefs = legs.map(l => l.sourceRef);
-  const { removed } = await deleteUserLegDeviations(wallet, sourceRefs);
-  return NextResponse.json({ removed });
+  const [{ removed: removedLegs }, { removed: removedTicket }] = await Promise.all([
+    deleteUserLegDeviations(wallet, sourceRefs),
+    deleteTicketDeviation(wallet, ticketId),
+  ]);
+  return NextResponse.json({ removed: removedLegs, removedTicket });
 }

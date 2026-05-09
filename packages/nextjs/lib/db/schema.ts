@@ -18,12 +18,6 @@
 
 export const SCHEMA_SQL = `
 -- Drop legacy tables from earlier iterations.
-DROP TABLE IF EXISTS leg_mapping;
-DROP TABLE IF EXISTS polymarket_resolutions;
-DROP TABLE IF EXISTS "tbLegMapping";
-DROP TABLE IF EXISTS "tbPolymarketResolution";
-DROP TABLE IF EXISTS tblegmapping;
-DROP TABLE IF EXISTS tbpolymarketresolution;
 
 CREATE TABLE IF NOT EXISTS tblegmapping (
   txtsourceref       TEXT PRIMARY KEY,
@@ -99,4 +93,23 @@ CREATE TABLE IF NOT EXISTS tbuserlegdeviation (
   PRIMARY KEY (txtwallet, txtsourceref)
 );
 CREATE INDEX IF NOT EXISTS ixuserlegdeviation_wallet ON tbuserlegdeviation (txtwallet);
+
+-- tbticketdeviation: ticket-level mirror of the on-chain lifecycle for the
+-- demo flow. Written by /api/tickets/[id]/demo-settle (Won/Lost/Voided) and
+-- promoted to Claimed by /api/tickets/[id]/demo-claim. Suppressed at read
+-- time once chain truth has resolved every leg of the ticket — the user
+-- then re-Settles + re-Claims against the real chain. NUMERIC(78,0) holds a
+-- uint256 ticket id and USDC payout (6-decimal base units) without loss.
+CREATE TABLE IF NOT EXISTS tbticketdeviation (
+  txtwallet         TEXT NOT NULL CHECK (txtwallet ~ '^0x[0-9a-f]{40}$'),
+  bigticketid       NUMERIC(78,0) NOT NULL,
+  txtstatus         TEXT NOT NULL CHECK (txtstatus IN ('Won', 'Lost', 'Voided', 'Claimed')),
+  bigpayout         NUMERIC(78,0) NOT NULL DEFAULT 0,
+  bigmultiplierx1e6 NUMERIC(78,0) NOT NULL DEFAULT 1000000,
+  txtclaimtxhash    TEXT,
+  tssettledat       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  tsclaimedat       TIMESTAMPTZ,
+  PRIMARY KEY (txtwallet, bigticketid)
+);
+CREATE INDEX IF NOT EXISTS ixticketdeviation_wallet ON tbticketdeviation (txtwallet);
 `;

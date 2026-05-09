@@ -60,10 +60,40 @@ function getLegStatus(leg: TicketLeg): "win" | "loss" | "voided" | "pending" {
   return "pending";
 }
 
-export function TicketCard({ ticket }: { ticket: TicketData }) {
-  const { settle, isPending: isSettling } = useSettleTicket();
-  const { claim, isPending: isClaiming } = useClaimPayout();
+export function TicketCard({
+  ticket,
+  onSettle,
+  onClaim,
+  isSettling: isSettlingOverride,
+  isClaiming: isClaimingOverride,
+  demoActive,
+  hideActions,
+}: {
+  ticket: TicketData;
+  /** Override the on-chain settle handler (e.g. for the demo flow). */
+  onSettle?: (id: bigint) => unknown;
+  /** Override the on-chain claim handler. */
+  onClaim?: (id: bigint) => unknown;
+  /** Override the on-chain settle pending flag. */
+  isSettling?: boolean;
+  /** Override the on-chain claim pending flag. */
+  isClaiming?: boolean;
+  /** Surfaces a small "demo" chip next to the status pill so the user can
+   *  tell a simulated outcome from a real chain settlement. */
+  demoActive?: boolean;
+  /** Hide the Settle / Claim / Cashout button row. Used by the /tickets list
+   *  for demo-resolved tickets — those buttons would call chain handlers
+   *  that revert against the still-Active on-chain state, so the list sends
+   *  the user into the detail page (where the demo handlers live) instead. */
+  hideActions?: boolean;
+}) {
+  const settleHook = useSettleTicket();
+  const claimHook = useClaimPayout();
   const { cashoutEarly, isPending: isCashingOut } = useCashoutEarly();
+  const settle = onSettle ?? settleHook.settle;
+  const claim = onClaim ?? claimHook.claim;
+  const isSettling = isSettlingOverride ?? settleHook.isPending;
+  const isClaiming = isClaimingOverride ?? claimHook.isPending;
 
   const multiplier = ticket.legs.reduce((acc, l) => acc * l.odds, 1);
   const allResolved = ticket.legs.every(l => l.resolved);
@@ -83,6 +113,14 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
           <h3 className="text-lg font-bold text-white">#{ticket.id.toString()}</h3>
         </div>
         <div className="flex items-center gap-2">
+          {demoActive && (
+            <span
+              title="Simulated outcome — chain truth has not caught up. No real on-chain settlement yet."
+              className="rounded-full border border-brand-purple/40 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-purple-1"
+            >
+              Demo
+            </span>
+          )}
           <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${STATUS_STYLES[ticket.status]}`}>
             {ticket.status}
           </span>
@@ -160,52 +198,54 @@ export function TicketCard({ ticket }: { ticket: TicketData }) {
           </div>
         </div>
 
-        <div className="flex gap-3">
-          {canSettle && (
-            <button
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                settle(ticket.id);
-              }}
-              disabled={isSettling}
-              className="flex-1 rounded-xl border border-brand-pink/30 bg-brand-pink/10 py-2.5 text-sm font-semibold text-brand-pink transition-all hover:bg-brand-pink/20 disabled:opacity-50"
-            >
-              {isSettling ? "Settling..." : "Settle"}
-            </button>
-          )}
-          {canClaim && (
-            <button
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                claim(ticket.id);
-              }}
-              disabled={isClaiming}
-              className="flex-1 rounded-xl bg-gradient-to-r from-brand-green/80 to-brand-green py-2.5 text-sm font-bold text-black transition-all hover:shadow-lg hover:shadow-brand-green/20 disabled:opacity-50"
-            >
-              {isClaiming ? "Claiming..." : "Claim Payout"}
-            </button>
-          )}
-          {canCashout && (
-            <button
-              onClick={e => {
-                e.preventDefault();
-                e.stopPropagation();
-                const minOut = ticket.cashoutValue ? (ticket.cashoutValue * 98n) / 100n : 0n;
-                cashoutEarly(ticket.id, minOut);
-              }}
-              disabled={isCashingOut}
-              className="flex-1 rounded-xl border border-brand-amber/30 bg-brand-amber/10 py-2.5 text-sm font-semibold text-brand-amber transition-all hover:bg-brand-amber/20 disabled:opacity-50"
-            >
-              {isCashingOut
-                ? "Cashing out..."
-                : ticket.cashoutValue
-                  ? `Cash Out ~$${formatUSDC(ticket.cashoutValue)}`
-                  : "Cash Out Early"}
-            </button>
-          )}
-        </div>
+        {!hideActions && (
+          <div className="flex gap-3">
+            {canSettle && (
+              <button
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  settle(ticket.id);
+                }}
+                disabled={isSettling}
+                className="flex-1 rounded-xl border border-brand-pink/30 bg-brand-pink/10 py-2.5 text-sm font-semibold text-brand-pink transition-all hover:bg-brand-pink/20 disabled:opacity-50"
+              >
+                {isSettling ? "Settling..." : "Settle"}
+              </button>
+            )}
+            {canClaim && (
+              <button
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  claim(ticket.id);
+                }}
+                disabled={isClaiming}
+                className="flex-1 rounded-xl bg-gradient-to-r from-brand-green/80 to-brand-green py-2.5 text-sm font-bold text-black transition-all hover:shadow-lg hover:shadow-brand-green/20 disabled:opacity-50"
+              >
+                {isClaiming ? "Claiming..." : "Claim Payout"}
+              </button>
+            )}
+            {canCashout && (
+              <button
+                onClick={e => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const minOut = ticket.cashoutValue ? (ticket.cashoutValue * 98n) / 100n : 0n;
+                  cashoutEarly(ticket.id, minOut);
+                }}
+                disabled={isCashingOut}
+                className="flex-1 rounded-xl border border-brand-amber/30 bg-brand-amber/10 py-2.5 text-sm font-semibold text-brand-amber transition-all hover:bg-brand-amber/20 disabled:opacity-50"
+              >
+                {isCashingOut
+                  ? "Cashing out..."
+                  : ticket.cashoutValue
+                    ? `Cash Out ~$${formatUSDC(ticket.cashoutValue)}`
+                    : "Cash Out Early"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

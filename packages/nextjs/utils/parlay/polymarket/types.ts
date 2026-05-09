@@ -33,6 +33,12 @@ export interface CuratedMarket {
   yesOutcome?: string;
   /** Outcome label for the NO side. Same convention as yesOutcome. */
   noOutcome?: string;
+  /** Polymarket sportsMarketType. Set by the MLB fetcher; undefined elsewhere
+   *  so the UI falls back to plain question + Yes/No copy. */
+  marketType?: "moneyline" | "spreads" | "totals";
+  /** Raw spread/total line (e.g. -1.5, 8.5). Undefined for moneyline and for
+   *  non-sports markets. Stored ×10 in DB but flows through unscaled. */
+  line?: number;
 }
 
 export interface PolymarketMetadata {

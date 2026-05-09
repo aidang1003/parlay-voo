@@ -115,6 +115,10 @@ export async function fetchMlbGames(opts: MlbFetchOptions = {}): Promise<Curated
         // a team can win, cover, AND go over. negRisk stays false so the
         // builder doesn't grey out conflicting legs.
         negRisk: false,
+        // Drives the per-side YES/NO copy in ParlayBuilder. moneyline keeps
+        // line undefined; spreads/totals carry the raw line.
+        marketType: type,
+        line: type === "moneyline" ? undefined : best.line,
       });
     }
   }

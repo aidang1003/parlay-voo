@@ -58,6 +58,8 @@ interface DisplayLeg {
   polymarketSlug?: string;
   yesOutcome?: string;
   noOutcome?: string;
+  marketType?: "moneyline" | "spreads" | "totals";
+  line?: number;
 }
 
 interface SelectedLeg {
@@ -133,6 +135,30 @@ function formatGameStartSuffix(unixSec: number | undefined): string | null {
   return `${date} ${time}`;
 }
 
+// Sports markets carry a wager type (moneyline | spreads | totals) + outcomes
+// + line. Compute the per-side label so the YES/NO buttons read like a real
+// sportsbook: "Padres -1.5", "Over 8.5", or just "Padres" for moneyline.
+// Returns null when the market is political/crypto/news (caller falls back to
+// the literal Yes/No layout).
+function sportsSideLabel(leg: DisplayLeg, side: 1 | 2): string | null {
+  switch (leg.marketType) {
+    case "moneyline":
+      return (side === 1 ? leg.yesOutcome : leg.noOutcome) ?? null;
+    case "spreads": {
+      const team = side === 1 ? leg.yesOutcome : leg.noOutcome;
+      if (leg.line == null) return team ?? null;
+      const sideLine = side === 1 ? leg.line : -leg.line;
+      const signed = `${sideLine > 0 ? "+" : ""}${sideLine}`;
+      return team ? `${team} ${signed}` : signed;
+    }
+    case "totals":
+      if (leg.line == null) return side === 1 ? "Over" : "Under";
+      return side === 1 ? `Over ${leg.line}` : `Under ${leg.line}`;
+    default:
+      return null;
+  }
+}
+
 /** Falls back to yes-side complement if noOdds is missing — defensive for single-sided seed markets. */
 function effectiveOdds(leg: DisplayLeg, outcome: number): number {
   if (outcome === 2) {
@@ -169,6 +195,8 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         polymarketSlug: leg.polymarketSlug,
         yesOutcome: leg.yesOutcome,
         noOutcome: leg.noOutcome,
+        marketType: leg.marketType,
+        line: leg.line,
       });
     }
   }
@@ -751,6 +779,13 @@ export function ParlayBuilder() {
                               ? `Conflicts with: ${gateInfo.conflictsWith ?? ""}`
                               : "Leg limit reached"
                             : undefined;
+                          // Sports markets read like a sportsbook: each side's
+                          // button carries the wager label (Padres -1.5,
+                          // Over 8.5) and the redundant question body in the
+                          // middle collapses into a small Polymarket link.
+                          const yesSportsLabel = sportsSideLabel(leg, 1);
+                          const noSportsLabel = sportsSideLabel(leg, 2);
+                          const isSports = yesSportsLabel !== null;
                           return (
                             <div
                               key={leg.id.toString()}
@@ -778,18 +813,39 @@ export function ParlayBuilder() {
                                       : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
                                   } ${gated ? "cursor-not-allowed" : ""}`}
                                 >
-                                  <span>Yes</span>
-                                  {leg.yesOutcome && (
-                                    <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
-                                      {leg.yesOutcome}
+                                  {yesSportsLabel ? (
+                                    <span className="max-w-full text-balance text-[11px] font-semibold normal-case leading-tight tracking-normal">
+                                      {yesSportsLabel}
                                     </span>
+                                  ) : (
+                                    <>
+                                      <span>Yes</span>
+                                      {leg.yesOutcome && (
+                                        <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                          {leg.yesOutcome}
+                                        </span>
+                                      )}
+                                    </>
                                   )}
                                   <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
                                     {(leg.yesOdds * netLegFactor).toFixed(2)}x
                                   </span>
                                 </button>
                                 <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
-                                  {polymarketHref(leg) ? (
+                                  {isSports ? (
+                                    polymarketHref(leg) ? (
+                                      <a
+                                        href={polymarketHref(leg) ?? undefined}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={e => e.stopPropagation()}
+                                        title="Open on Polymarket"
+                                        className="text-[11px] text-gray-500 underline decoration-gray-700 decoration-dotted underline-offset-4 transition-colors hover:text-gray-300 hover:decoration-brand-pink"
+                                      >
+                                        View on Polymarket
+                                      </a>
+                                    ) : null
+                                  ) : polymarketHref(leg) ? (
                                     <a
                                       href={polymarketHref(leg) ?? undefined}
                                       target="_blank"
@@ -814,11 +870,19 @@ export function ParlayBuilder() {
                                         : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
                                     } ${gated ? "cursor-not-allowed" : ""}`}
                                   >
-                                    <span>No</span>
-                                    {leg.noOutcome && (
-                                      <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
-                                        {leg.noOutcome}
+                                    {noSportsLabel ? (
+                                      <span className="max-w-full text-balance text-[11px] font-semibold normal-case leading-tight tracking-normal">
+                                        {noSportsLabel}
                                       </span>
+                                    ) : (
+                                      <>
+                                        <span>No</span>
+                                        {leg.noOutcome && (
+                                          <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                            {leg.noOutcome}
+                                          </span>
+                                        )}
+                                      </>
                                     )}
                                     <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
                                       {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
@@ -884,7 +948,7 @@ export function ParlayBuilder() {
                         s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
                       }`}
                     >
-                      {s.outcomeChoice === 1 ? "YES" : "NO"}
+                      {sportsSideLabel(s.leg, s.outcomeChoice === 1 ? 1 : 2) ?? (s.outcomeChoice === 1 ? "YES" : "NO")}
                     </span>
                     <button
                       type="button"

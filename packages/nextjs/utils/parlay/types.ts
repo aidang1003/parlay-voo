@@ -61,6 +61,14 @@ export interface Leg {
   yesOutcome?: string;
   /** NO-side outcome label. Same convention as yesOutcome. */
   noOutcome?: string;
+  /** Sports wager type from Polymarket's sportsMarketType. Drives the
+   *  YES/NO box copy: `moneyline` shows the team labels, `spreads` shows
+   *  team + signed line, `totals` shows Over/Under + line. Undefined for
+   *  political/crypto/news markets, which keep the literal Yes/No layout. */
+  marketType?: "moneyline" | "spreads" | "totals";
+  /** Raw line value (e.g. -1.5, 8.5). Pairs with `marketType === "spreads"`
+   *  or `"totals"`. Undefined for moneyline and non-sports markets. */
+  line?: number;
 }
 
 export interface Market {

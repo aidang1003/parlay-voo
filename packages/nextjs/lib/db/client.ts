@@ -82,6 +82,12 @@ export interface MarketRow {
   /** NO-side outcome label. Null with the same convention as txtyesoutcome. */
   txtnooutcome: string | null;
   blnpolyclosed: boolean;
+  /** Polymarket sportsMarketType ("moneyline" | "spreads" | "totals"). Null
+   *  on political markets and seeds. */
+  txtmarkettype: string | null;
+  /** Spread or total line scaled ×10 (e.g. -15 = -1.5, 85 = 8.5). Null when
+   *  no line applies. */
+  intline: number | null;
   tscreatedat: string;
 }
 
@@ -115,6 +121,8 @@ function coerceMarketRow(r: Record<string, unknown>): MarketRow {
     txtyesoutcome: (r.txtyesoutcome as string | null | undefined) ?? null,
     txtnooutcome: (r.txtnooutcome as string | null | undefined) ?? null,
     blnpolyclosed: r.blnpolyclosed === true,
+    txtmarkettype: (r.txtmarkettype as string | null | undefined) ?? null,
+    intline: toNumOrNull(r.intline),
     tscreatedat: r.tscreatedat as string,
   };
 }
@@ -186,6 +194,11 @@ export interface UpsertMarketInput {
   /** Outcome labels (e.g. "Lakers" / "Celtics"). Null for default Yes/No. */
   yesOutcome?: string | null;
   noOutcome?: string | null;
+  /** Sports market type. "moneyline" | "spreads" | "totals" or null. */
+  marketType?: string | null;
+  /** Raw spread/total line (e.g. -1.5, 8.5). Stored ×10 internally; pass the
+   *  unscaled value here and upsertMarket scales it. Null when no line. */
+  line?: number | null;
 }
 
 /**
@@ -207,19 +220,24 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const polymarketSlug = input.polymarketSlug ?? null;
   const yesOutcome = input.yesOutcome ?? null;
   const noOutcome = input.noOutcome ?? null;
+  const marketType = input.marketType ?? null;
+  // Scale the raw line ×10 to fit INTEGER while preserving half-points.
+  const intLine = input.line == null || !Number.isFinite(input.line) ? null : Math.round(input.line * 10);
   await db`
     INSERT INTO tblegmapping (
       txtsourceref, txtsource, txtquestion, txtcategory,
       intyeslegid, intnolegid, intyesprobppm, intnoprobppm,
       bigcutofftime, bigearliestresolve, blnactive,
       bigcurationscore, txtgamegroup, bigexclusiongroup,
-      bigeventstart, txtpolymarketslug, txtyesoutcome, txtnooutcome
+      bigeventstart, txtpolymarketslug, txtyesoutcome, txtnooutcome,
+      txtmarkettype, intline
     ) VALUES (
       ${input.sourceRef}, ${input.source}, ${input.question}, ${input.category},
       ${input.yesLegId}, ${input.noLegId}, ${input.yesProbabilityPpm}, ${input.noProbabilityPpm},
       ${input.cutoffTime}, ${input.earliestResolve}, ${input.active ?? true},
       ${curationScore}, ${gameGroup}, ${exclusionGroupId},
-      ${eventStart}, ${polymarketSlug}, ${yesOutcome}, ${noOutcome}
+      ${eventStart}, ${polymarketSlug}, ${yesOutcome}, ${noOutcome},
+      ${marketType}, ${intLine}
     )
     ON CONFLICT (txtsourceref) DO UPDATE SET
       intyesprobppm      = EXCLUDED.intyesprobppm,
@@ -233,7 +251,12 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       bigeventstart      = COALESCE(EXCLUDED.bigeventstart, tblegmapping.bigeventstart),
       txtpolymarketslug  = COALESCE(EXCLUDED.txtpolymarketslug, tblegmapping.txtpolymarketslug),
       txtyesoutcome      = COALESCE(EXCLUDED.txtyesoutcome, tblegmapping.txtyesoutcome),
-      txtnooutcome       = COALESCE(EXCLUDED.txtnooutcome, tblegmapping.txtnooutcome)
+      txtnooutcome       = COALESCE(EXCLUDED.txtnooutcome, tblegmapping.txtnooutcome),
+      -- marketType + intline can shift if the upstream picks a different
+      -- best-line on a re-sync (e.g. O/U 7.5 → 8.5 once volume migrates),
+      -- so we always take the latest value rather than COALESCE-pinning it.
+      txtmarkettype      = EXCLUDED.txtmarkettype,
+      intline            = EXCLUDED.intline
   `;
 }
 

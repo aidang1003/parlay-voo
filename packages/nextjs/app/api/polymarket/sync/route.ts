@@ -131,6 +131,8 @@ async function syncOne(entry: CuratedMarket, poly: PolymarketClient): Promise<"u
     polymarketSlug: entry.polymarketSlug ?? null,
     yesOutcome: entry.yesOutcome ?? null,
     noOutcome: entry.noOutcome ?? null,
+    marketType: entry.marketType ?? null,
+    line: entry.line ?? null,
   });
   return "upserted";
 }

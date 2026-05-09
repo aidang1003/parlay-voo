@@ -34,6 +34,8 @@ export async function GET(req: Request) {
       polymarketSlug: l.polymarketSlug,
       yesOutcome: l.yesOutcome,
       noOutcome: l.noOutcome,
+      marketType: l.marketType,
+      line: l.line,
     })),
   }));
 

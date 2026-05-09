@@ -13,12 +13,12 @@ Two items already shipped on this branch (the original admin-gate work that name
 | 3 | Ticket-native demo resolver (any wallet) | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 4 | Per-user demo overrides for leg resolution | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 5 | Hide legs whose payout is below the entrance fee | **shipped** (commit `2944c6d`) |
-| 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commit `1ebf758`) |
+| 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commits `1ebf758`, `cfab447`) |
 | 7 | Display event start time on legs | **shipped** (commits `6d76f64`, `6833042`) |
 | 8 | Clarify which side YES vs NO commits the user to | **shipped** (commit `2c36fc1`) |
-| 9 | De-duplicate question text in the Yes/No box | planned |
-| 10 | Click-through from question header to Polymarket | planned |
-| 11 | Truth-up About + (probably retire) Agents page | planned |
+| 9 | De-duplicate question text in the Yes/No box | **shipped** (commits `f3c5967`, `<round-2>`) |
+| 10 | Click-through from question header to Polymarket | **shipped** (commit `9bf391a`) |
+| 11 | Truth-up About + (probably retire) Agents page | **shipped** (commit `e2dc26d`) |
 | 12 | Vault page nuanced corrections | planned — specifics TBD |
 | 13 | Safari-friendly onboarding (Rabby gap) | planned |
 | 14 | Hide ended-game markets from the builder | **shipped** (commit `6833042`) |
@@ -151,11 +151,22 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 ### 9. De-duplicate question text in the Yes/No box — *shipped*
 
-**Why this exists.** The current bet box shows the question both as the card title and inside the YES / NO box body. Same string twice, ~20px apart. It looks like a bug, even when it isn't.
+**Why this exists.** The current bet box shows the question both as the card title and inside the YES / NO box body. Same string twice, ~20px apart. It looks like a bug, even when it isn't. A second wrinkle surfaced once the MLB rewrite shipped: sports markets and political markets are framed differently and the YES/NO copy needs to know which mode it's in.
 
-**What landed (commit `f3c5967`).** When a market has a single leg whose description equals the market title, the per-market `h3` above the card is suppressed and the leg's own description carries the question. The badge row (category, Odds-locked, event-start chip) stays so the slot keeps its context. Multi-leg markets are unchanged — the `h3` still groups the legs. Outcome labels from #8 fill in additional disambiguation per side.
+**What landed (round 1 — commit `f3c5967`).** When a market has a single leg whose description equals the market title, the per-market `h3` above the card is suppressed and the leg's own description carries the question. The badge row (category, Odds-locked, event-start chip) stays so the slot keeps its context. Multi-leg markets are unchanged — the `h3` still groups the legs. Outcome labels from #8 fill in additional disambiguation per side.
 
-**Open follow-up (sports market-type context).** Single-shot polymarkets are framed as "question + Yes/No"; sports markets are framed as wagers (moneyline / spread / total) where Yes/No is meaningless without the wager type. Now that `sportsMarketType` flows through (item #6 round 2), the YES/NO box for a sports market should show the wager type + line + side instead of the literal question. Tracked as part of #6's MLB rollout for NBA/NFL/NHL.
+**What landed (round 2 — sports market-type context).** Polymarket frames sports as *wagers* (moneyline, run line, over-under) and politics / crypto / news as *questions* with literal Yes/No. The MLB sync (item #6 round 2) already pulls the discriminator — `sportsMarketType` — but until now we discarded it after building the bucket header. Round 2 persists it and lets the YES/NO box render like a real sportsbook.
+
+- **Schema.** `tblegmapping` gets `txtmarkettype TEXT` (`"moneyline" | "spreads" | "totals"` for MLB rows; null for political / crypto / news / seed) and `intline INTEGER` (the spread / total line scaled ×10 so half-points fit the existing `int` prefix convention — `-1.5 → -15`, `8.5 → 85`). On conflict, both columns are *not* COALESCE-pinned: a re-sync that picks a different best-line (e.g. volume migrates from O/U 7.5 to 8.5) overwrites the stored value, since the new line is the one we want to render.
+- **Plumbing.** `marketType` and `line` (raw, unscaled) flow through `CuratedMarket → upsertMarket → MarketRow → Leg → /api/markets → DisplayLeg`. `mlb.ts` populates them; the legacy `fetchSportEvents` and `fetchFeaturedMarkets` paths leave them undefined.
+- **UI.** The leg-card YES/NO box branches on `marketType`:
+  - `moneyline` → button shows the team name (`Padres` / `Mariners`).
+  - `spreads` → button shows team + signed line (`Padres -1.5` / `Cardinals +1.5`); the NO side flips the sign automatically.
+  - `totals` → button shows `Over X.X` / `Under X.X`.
+  - undefined (political / crypto / news / seed) → keeps the literal `Yes` / `No` layout with the existing optional outcome subtext. Round 1's de-dupe rule still applies.
+- **Center body.** For sports markets, the duplicated matchup question collapses into a small `View on Polymarket →` link — the gameGroup header above already names the matchup, the buttons name the wager, so the body has no remaining job. Political markets keep the original click-through-on-the-question-text layout.
+- **Selected-legs summary.** The right-rail slip's `YES` / `NO` chip swaps to the sports side label when present (`Padres -1.5` instead of `YES`), so a glance at the slip tells you what wager you actually built.
+- **Out of scope for this round.** Generalizing to NBA / NFL / NHL — those still flow through the legacy `/events` path which doesn't populate `sportsMarketType`. They follow when item #6 generalizes (BACKLOG.md item 9). Until then, the `marketType`-aware copy gracefully falls back to the existing Yes/No because non-MLB rows ship `marketType === null`.
 
 ### 10. Click-through from question header to Polymarket — *shipped*
 

@@ -72,12 +72,23 @@ function rowToLeg(row: MarketRow, nextSyntheticId: () => number): Leg {
     polymarketSlug: row.txtpolymarketslug ?? undefined,
     yesOutcome: row.txtyesoutcome ?? undefined,
     noOutcome: row.txtnooutcome ?? undefined,
+    marketType: marketTypeFromRow(row.txtmarkettype),
+    // Stored ×10 to fit INTEGER while preserving half-points; unscale here.
+    line: row.intline == null ? undefined : row.intline / 10,
   };
   if (row.txtsource === "polymarket" && row.intnoprobppm != null) {
     leg.noId = row.intnolegid ?? nextSyntheticId();
     leg.noProbabilityPPM = row.intnoprobppm;
   }
   return leg;
+}
+
+// Narrow the loose TEXT column back to the union the UI expects. Anything
+// outside the known set (or null) collapses to undefined so we fall through
+// to plain Yes/No copy.
+function marketTypeFromRow(raw: string | null): "moneyline" | "spreads" | "totals" | undefined {
+  if (raw === "moneyline" || raw === "spreads" || raw === "totals") return raw;
+  return undefined;
 }
 
 /** FNV-1a 32-bit hash. Used by both this file and sync route — must match. */

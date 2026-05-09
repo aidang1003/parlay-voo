@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS tblegmapping (
   txtyesoutcome      TEXT,
   txtnooutcome       TEXT,
   blnpolyclosed      BOOLEAN NOT NULL DEFAULT false,
+  -- Sports markets only: "moneyline" | "spreads" | "totals" (Polymarket's
+  -- sportsMarketType). Null for political/crypto/news/seed markets, which
+  -- continue to render as plain question + Yes/No.
+  txtmarkettype      TEXT,
+  -- Spread or total line, scaled ×10 so half-points fit the int prefix
+  -- convention (-1.5 → -15, 8.5 → 85). Null when no line applies (moneyline,
+  -- non-sports). Pair with txtmarkettype for the YES/NO copy branch.
+  intline            INTEGER,
   tscreatedat        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

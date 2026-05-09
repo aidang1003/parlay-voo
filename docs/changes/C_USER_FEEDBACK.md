@@ -14,13 +14,14 @@ Two items already shipped on this branch (the original admin-gate work that name
 | 4 | Per-user demo overrides for leg resolution | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 5 | Hide legs whose payout is below the entrance fee | **shipped** (commit `2944c6d`) |
 | 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commit `1ebf758`) |
-| 7 | Display event start time on legs | **shipped** |
+| 7 | Display event start time on legs | **shipped** (commits `6d76f64`, `6833042`) |
 | 8 | Clarify which side YES vs NO commits the user to | **shipped** (commit `2c36fc1`) |
 | 9 | De-duplicate question text in the Yes/No box | planned |
 | 10 | Click-through from question header to Polymarket | planned |
 | 11 | Truth-up About + (probably retire) Agents page | planned |
 | 12 | Vault page nuanced corrections | planned — specifics TBD |
 | 13 | Safari-friendly onboarding (Rabby gap) | planned |
+| 14 | Hide ended-game markets from the builder | **shipped** (commit `6833042`) |
 
 ---
 
@@ -124,13 +125,19 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **Why this exists.** We show `bigcutofftime` (when the leg becomes ineligible) but never the actual game / event start. "When is this game?" is a basic prediction-market UX expectation, and without it users have to flip to Polymarket to find the time and come back.
 
-**What landed.** New `bigeventstart` (BIGINT, unix seconds) on `tblegmapping`, populated from `event.startDate` in the Polymarket Gamma payload at sync time. A shared `formatEventStart` helper in `lib/utils.ts` turns the timestamp into "live" / "starts in Nm" / "starts in Nh" / "starts Mon 7:00pm". Rendered in three surfaces:
+**What landed (round 1).** New `bigeventstart` (BIGINT, unix seconds) on `tblegmapping`, a shared `formatEventStart` helper in `lib/utils.ts` that turns the timestamp into "live" / "starts in Nm" / "starts in Nh" / "starts Mon 7:00pm", and the chip rendered in four surfaces:
 - Builder leg card — chip in the badge row next to category + Odds-locked.
-- MLB game card header — "first pitch" line on the per-game card.
+- MLB game card header — start time alongside the matchup.
 - Selected legs in the parlay slip — secondary line under the question.
 - Ticket detail / list — secondary line on each unresolved leg in `TicketCard`.
 
-`bigcutofftime` and `bigearliestresolve` stay where they are; the new column sits next to them. `useLegDescriptions` was rewired to `fetchSourceRefMap` so `LegInfo.eventStart` flows through to ticket pages without a second network hop.
+`useLegDescriptions` was rewired from `fetchQuestionMapCached` to `fetchSourceRefMap` so `LegInfo.eventStart` flows through to ticket pages without a second network hop. `bigcutofftime` and `bigearliestresolve` stay where they are.
+
+**What landed (round 2 — commit `6833042`).** First-pass ingest read `event.startDate` from Gamma, which is the *market deployment* timestamp, not the game time. Result: every active market resolved to "live" because the deploy date was always in the past. Diagnosed against the live API — the actual first-pitch / tip-off lives on `mkt.gameStartTime` (per-market, format `"YYYY-MM-DD HH:MM:SS+00"`), absent for season-long markets. Fix:
+- `featured.ts`: declared `GammaMarket.gameStartTime`, new `parseGameStartTime` normalizer (space → T, short offset → `+HH:MM`), preference order `mkt.gameStartTime ?? event.startDate`.
+- MLB game-card header now embeds the date inline: `Matchup - 5/9/2026 5:15 PM` (locale-formatted, suffix in muted weight). Right-side start chip removed — redundant once the title carries the time. Non-MLB game headers also get the suffix in muted text.
+
+**Schema management.** Per `AGENTS.md` the init script wipes-and-rebuilds every pass. `lib/db/schema.ts` now `DROP TABLE IF EXISTS … CASCADE`s every non-admin table at the top, then `CREATE TABLE IF NOT EXISTS` (idempotent against partial replays) with all columns defined inline — no `ALTER TABLE … ADD COLUMN` migrations. `tbadminwallet` is owned by `lib/db/admin-schema.ts` and is never touched by `/api/db/init`.
 
 ### 8. Clarify which side YES vs NO commits the user to — *planned*
 
@@ -177,6 +184,20 @@ About itself needs lighter edits — verify protocol facts (vault model, fee rou
 **Why this exists.** Onboarding currently funnels new users to install Rabby. Rabby ships Chrome / Firefox / Brave / Edge extensions and a desktop app, but **no Safari extension** — Safari users hit a dead-end at install time. The funnel needs a Safari-specific branch.
 
 **Sketch of the fix.** Detect Safari in `/_onboard` (User-Agent regex like `/^((?!chrome|android).)*safari/i`). On Safari, swap the install path to a wallet that supports it — Coinbase Wallet on iOS / macOS, MetaMask Mobile via WalletConnect, or the WalletConnect QR path itself — and rewrite the copy so we're not telling Safari users to install something that doesn't exist for them. Keep the Rabby path for everyone else.
+
+### 14. Hide ended-game markets from the builder — *shipped*
+
+**Why this exists.** Polymarket flips a market's `closed` flag once the game ends, but Polymarket's UMA finalization can take hours-to-days afterwards. During that window the conditionId is still in our DB and the row still says `blnactive = true`, so the builder kept offering the leg as bettable for ended games (e.g. `mlb-hou-cin-2026-05-08` after the game finished). The intended hiding mechanism — "settler resolves on-chain → `useLegStatuses` flags `resolved` → `liveLegs` filter drops it" — only works for legs that already have a positive on-chain `legId`. JIT-quote markets that nobody bought yet never get registered, so the chain path never fires, and dead markets lingered.
+
+**Why we don't reuse `blnactive`.** The settler's `getUnresolvedPolymarketLegs()` filters on `blnactive = true` so it can find closed-but-not-yet-relayed markets and write the resolution on-chain for tickets that already exist. Flipping `blnactive` on game-end would silently break settlement for those tickets. Two responsibilities, two flags.
+
+**What landed.**
+- New column `blnpolyclosed BOOLEAN NOT NULL DEFAULT false` on `tblegmapping`.
+- Sync route: when `metadata.closed || metadata.archived` returns true from Gamma, `markPolyClosed(conditionId)` flips the flag instead of throwing (was: `throw new Error("market closed/archived")` → caught → `result.skipped++`). Sync result now reports `{ upserted, skipped, closed, errors }`.
+- `getActiveMarkets` and `getRegisteredActiveMarkets` (builder-facing reads) add `AND blnpolyclosed = false`.
+- `getUnresolvedPolymarketLegs` (settler) intentionally does **not** filter on the new column — closed rows still get picked up so the on-chain resolution flows for ticket holders.
+
+**Net effect.** Game-ended markets disappear from the builder on the next cron tick (or manual `/api/polymarket/sync` hit). Tickets people already hold continue to settle normally because the row sticks around for the settler. No new UI affordance; per the design discussion we just hide the market rather than add a "pending settlement" badge.
 
 ---
 
@@ -288,6 +309,7 @@ Behavior matrix:
 - Empty `tbadminwallet` keeps Anvil + burner-wallet local dev working with zero config.
 - `/api/db/init` (markets) and `/api/db/init-admins` (admin allowlist) are independent — running one never touches the other.
 - Seed list is a floor, not a ceiling. Re-running `pnpm db:init-admins` after removing a row from `hardcodedAdminAddresses` (or after changing `USER_WALLET_ADDRESS`) won't delete the dropped address from the DB — only `removeAdmin()` (UI or DELETE route) does that.
+- Settler reads (`getUnresolvedPolymarketLegs`) deliberately filter on `blnactive` only — never on `blnpolyclosed`. Game-ended markets stay reachable so on-chain resolution flows for ticket holders even after the row drops out of the builder. Builder reads (`getActiveMarkets`, `getRegisteredActiveMarkets`) filter on both.
 
 ---
 
@@ -325,14 +347,16 @@ CREATE TABLE tbticketdeviation (
 CREATE INDEX IF NOT EXISTS ixticketdeviation_wallet ON tbticketdeviation (txtwallet);
 ```
 
-**New columns on `tblegmapping`.**
+**Columns on `tblegmapping` (post round-2).**
 
 | Column | Type | For item | Notes |
 | --- | --- | --- | --- |
-| `bigeventstart` | BIGINT | #7 | Unix seconds; populate at Polymarket sync. Nullable on legacy rows. |
+| `bigeventstart` | BIGINT | #7 | Unix seconds. Sync prefers `mkt.gameStartTime` (real game time) and falls back to `event.startDate` only when absent. Nullable. |
 | `txtpolymarketslug` | TEXT | #10 | Nullable; falls back to `/market/{conditionid}` when absent. |
+| `txtyesoutcome` / `txtnooutcome` | TEXT | #8 | Outcome labels (e.g. "Lakers" / "Celtics"). Null when the upstream label is the default Yes/No. |
+| `blnpolyclosed` | BOOLEAN | #14 | Hides game-ended markets from the builder. Sync flips this when Gamma reports `closed \|\| archived`. Settler intentionally ignores it so resolution still flows on-chain. |
 
-Both via `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` migrations in `lib/db/schema.ts`, same pattern as the `bigexclusiongroup` add.
+No `ALTER TABLE` migrations. Per `AGENTS.md` the init script wipes-and-rebuilds, so all columns live inline in `CREATE TABLE IF NOT EXISTS tblegmapping`. Drops at the top of `SCHEMA_SQL`; `tbadminwallet` is owned by `lib/db/admin-schema.ts` and is never touched by `/api/db/init`.
 
 **Likely API surface for the new items.**
 

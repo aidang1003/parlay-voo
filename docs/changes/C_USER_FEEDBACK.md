@@ -13,15 +13,17 @@ Two items already shipped on this branch (the original admin-gate work that name
 | 3 | Ticket-native demo resolver (any wallet) | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 4 | Per-user demo overrides for leg resolution | **shipped** (commits `449c53b`, `<demo-flow>`) |
 | 5 | Hide legs whose payout is below the entrance fee | **shipped** (commit `2944c6d`) |
-| 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commits `1ebf758`, `cfab447`) |
+| 6 | Specialize MLB tab around the CLOB MLB endpoint | **shipped** (commits `1ebf758`, `cfab447`, this commit) |
 | 7 | Display event start time on legs | **shipped** (commits `6d76f64`, `6833042`) |
 | 8 | Clarify which side YES vs NO commits the user to | **shipped** (commit `2c36fc1`) |
 | 9 | De-duplicate question text in the Yes/No box | **shipped** (commits `f3c5967`, `92b6689`) |
 | 10 | Click-through from question header to Polymarket | **shipped** (commit `9bf391a`) |
 | 11 | Truth-up About + (probably retire) Agents page | **shipped** (commit `e2dc26d`) |
-| 12 | Vault page nuanced corrections | planned — specifics TBD |
-| 13 | Safari-friendly onboarding (Rabby gap) | planned |
+| 12 | Vault page nuanced corrections | **shipped** (commit `b7cef14`) |
+| 13 | Safari-friendly onboarding (Rabby gap) | deferred — moved to `BACKLOG.md` |
 | 14 | Hide ended-game markets from the builder | **shipped** (commit `6833042`) |
+| 15 | DB egress fix — slim quote-build query + idle stale clock | **shipped** (commit `<this round>`) |
+| 16 | Demo flow extension: rehab credit on demo-Lost (lossless path) | **shipped** (this commit) |
 
 ---
 
@@ -143,11 +145,11 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 
 **Schema management.** Per `AGENTS.md` the init script wipes-and-rebuilds every pass. `lib/db/schema.ts` now `DROP TABLE IF EXISTS … CASCADE`s every non-admin table at the top, then `CREATE TABLE IF NOT EXISTS` (idempotent against partial replays) with all columns defined inline — no `ALTER TABLE … ADD COLUMN` migrations. `tbadminwallet` is owned by `lib/db/admin-schema.ts` and is never touched by `/api/db/init`.
 
-### 8. Clarify which side YES vs NO commits the user to — *planned*
+### 8. Clarify which side YES vs NO commits the user to — *shipped*
 
 **Why this exists.** Some Polymarket questions are phrased ambiguously enough that "YES" and "NO" don't communicate which side the user is taking. "Will the Lakers win game 3?" — clear. "Lakers vs. Celtics — first to 100" — what does YES mean? The current UI only shows the question text + YES / NO buttons, leaving the user to infer.
 
-**Sketch of the fix.** Surface the resolved outcome string alongside each button — e.g. `YES = Lakers`, `NO = Celtics`. Source the labels from the Polymarket payload (`outcomes` array on the Gamma response). Where the payload doesn't disambiguate, fall back to YES / NO but keep the slot present so the layout doesn't shift between markets.
+**What landed (commit `2c36fc1`).** The leg-card YES/NO buttons surface the resolved outcome string from the Polymarket payload's `outcomes` array — e.g. `YES = Lakers`, `NO = Celtics` — as small subtext under the button label. When the payload only carries default `Yes` / `No`, the slot stays empty so the layout doesn't shift between markets. `yesOutcome` / `noOutcome` fields plumbed through `CuratedMarket → MarketRow → Leg → DisplayLeg`. Item #6 round 2 later replaced this YES/NO + subtext layout with a sportsbook-style single label for sports markets, and #9 round 2 layered in the wager-type framing on top.
 
 ### 9. De-duplicate question text in the Yes/No box — *shipped*
 
@@ -209,6 +211,20 @@ Either way the user lands in the real flow. No conflict warnings, no manual clea
 - `getUnresolvedPolymarketLegs` (settler) intentionally does **not** filter on the new column — closed rows still get picked up so the on-chain resolution flows for ticket holders.
 
 **Net effect.** Game-ended markets disappear from the builder on the next cron tick (or manual `/api/polymarket/sync` hit). Tickets people already hold continue to settle normally because the row sticks around for the settler. No new UI affordance; per the design discussion we just hide the market rather than add a "pending settlement" badge.
+
+### 15. DB egress fix — slim quote-build query + idle stale clock — *shipped*
+
+**Why this exists.** Supabase + Neon free-tier egress kept blowing through (~20GB/mo against a 25MB DB). Tracing the hot paths surfaced two compounding issues, both in the quote-preview poll loop. `/api/quote-preview` runs `buildLegs(...)`, which called `getActiveMarkets()` on every invocation — `SELECT *` over the full active set (all 21 columns × ~100–300 rows) just to look up the 2–5 `sourceRef`s the user actually has in their cart. That route is polled every 30s by `ParlayBuilder` whenever ≥2 legs are selected, so an idle tab with a cart open burned ~150KB × 120 polls/hr ≈ 18MB/hour of pure DB→function egress. Multiply by a few testers leaving tabs open and 20GB/mo falls out of the math.
+
+**What landed.**
+
+- **Targeted SQL projection.** New `getMarketsForBuildLegs(refs[])` in `lib/db/client.ts` does `SELECT <8 columns> FROM tblegmapping WHERE txtsourceref IN (...) AND blnactive AND NOT blnpolyclosed`. Returns only the columns `buildLegs` actually reads (`txtsourceref`, `txtsource`, `txtquestion`, `intyesprobppm`, `intnoprobppm`, `bigcutofftime`, `bigearliestresolve`, `bigeventstart`). Cutoff filtering is intentionally **not** applied here — `buildLegs` needs the row so it can render the "cutoff in past" 409 with the offending timestamp.
+- **`buildLegs` rewired.** `lib/quote/build-legs.ts` now calls `getMarketsForBuildLegs(uniqueRefs)` instead of `getActiveMarkets()`. The `bySourceRef` map shrinks from "every active market" to "the cart's legs". Same map shape, same error semantics — an inactive / closed leg returns nothing and the existing "unknown leg" path fires unchanged.
+- **10-minute idle stale clock on the builder poll.** `ParlayBuilder.tsx` records `startedAt` inside the polling effect; the `setInterval` callback short-circuits and `clearInterval`s itself once `Date.now() - startedAt > 10 * 60 * 1000`. Any cart change re-runs the effect via the existing `selectedLegsKey` dep, so adding/removing a leg or flipping yes/no resets the window. A page refresh resets it too. After 10 minutes of cart inactivity, polling halts — the displayed prices freeze at whatever the last poll fetched. Quote-sign re-prices on submit anyway, so a stale display is harmless: worst case the user sees the wrong odds for ~1s before the signed quote returns the truth.
+
+**Egress impact.** Per-poll payload drops from ~150KB to ~1KB — roughly **a 100× cut on the hot path**. Idle tabs that previously polled forever now stop after 10 minutes. The drop-and-rebuild on init was never the egress source — schema bytes are negligible — so it's untouched.
+
+**What's intentionally not in this iteration.** No "prices paused" UI badge. The user accepted the worst-case stale-until-quote-sign tradeoff, and surfacing it visually is easy to add later without refactoring. Other pollers identified during the audit (`useRehabClaimable` 10s, `useAdminList` global mount, `/api/markets` uncached, etc.) are sized smaller than the quote-preview path and are queued in `BACKLOG.md` under "DB egress hardening (round 2)".
 
 ---
 
@@ -420,3 +436,45 @@ ticketStatus = (onChainTicket.status !== Active)               // chain settled/
 - `app/vault/*` — item #12, scope TBD.
 
 **Out-of-scope (still).** Server-side admin auth (SIWE / signed-nonce header) for `/api/db/admins` etc. — already flagged under the shipped section's "Out of scope". Untouched by this round.
+
+---
+
+### Item #15 — DB egress fix (shipped)
+
+**Files touched.**
+- `packages/nextjs/lib/db/client.ts` — added `BuildLegRow` type + `getMarketsForBuildLegs(refs)`.
+- `packages/nextjs/lib/quote/build-legs.ts` — swapped `getActiveMarkets()` → `getMarketsForBuildLegs(uniqueRefs)`.
+- `packages/nextjs/components/ParlayBuilder.tsx` — 10-min idle stale clock around the 30s `quote-preview` `setInterval`.
+
+**New function signature.**
+```ts
+export interface BuildLegRow {
+  txtsourceref: string;
+  txtsource: LegSource;
+  txtquestion: string;
+  intyesprobppm: number;
+  intnoprobppm: number | null;
+  bigcutofftime: number;
+  bigearliestresolve: number;
+  bigeventstart: number | null;
+}
+export async function getMarketsForBuildLegs(sourceRefs: string[]): Promise<BuildLegRow[]>;
+```
+Filters: `txtsourceref IN (...) AND blnactive AND NOT blnpolyclosed`. Cutoff filter intentionally omitted — handled in `buildLegs` so the 409 error can render the actual stale timestamp.
+
+**Polling-loop change (`ParlayBuilder.tsx`).** Effect deps unchanged (`[selectedLegsKey, buyActive]`). Interval callback now:
+```ts
+const STALE_AFTER_MS = 10 * 60 * 1000;
+const startedAt = Date.now();
+// inside setInterval:
+if (Date.now() - startedAt > STALE_AFTER_MS) { clearInterval(id); return; }
+refresh();
+```
+No state added — pure closure timestamp + early return.
+
+**Invariants preserved.**
+- `buildLegs` error semantics unchanged: unknown / closed leg → "unknown leg" 400; cutoff-in-past → 409 with the cutoff timestamp.
+- `getActiveMarkets()` retained for `/api/markets`, `/api/markets/categories`, `lib/mcp/tools.ts`, settler — all still need the full row shape.
+- Quote-sign always re-prices, so cart-side display staleness never affects the on-chain quote the user signs.
+
+**Tests.** All 33 `ParlayBuilder.test.tsx` cases still pass — the polling effect's externally-observable behavior (initial fetch + per-30s refetch) is unchanged within the 10-minute window.

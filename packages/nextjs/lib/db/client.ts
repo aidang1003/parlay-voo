@@ -249,11 +249,12 @@ export interface UpsertMarketInput {
 }
 
 /**
- * Upsert a market row. On conflict we refresh only the volatile fields a sync
- * needs (probs, cutoff, curation score). Registration metadata — leg ids,
- * question, category, earliestResolve, active flag, game group — is preserved
- * once written so a re-sync can't clobber a registered id or rename a market
- * the catalog has already advertised.
+ * Upsert a market row. On conflict we refresh fields the sync needs to keep
+ * fresh — probs, cutoff, earliestResolve (the two move together to keep the
+ * chain's `earliestResolve >= cutoff` invariant intact), curation score.
+ * Registration metadata — leg ids, question, category, active flag, game
+ * group — is preserved once written so a re-sync can't clobber a registered
+ * id or rename a market the catalog has already advertised.
  */
 export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
   const db = sql();
@@ -290,6 +291,13 @@ export async function upsertMarket(input: UpsertMarketInput): Promise<void> {
       intyesprobppm      = EXCLUDED.intyesprobppm,
       intnoprobppm       = EXCLUDED.intnoprobppm,
       bigcutofftime      = EXCLUDED.bigcutofftime,
+      -- Refresh alongside cutoff so the chain invariant
+      -- earliestResolve >= cutoff (enforced in LegRegistry) holds. Updating
+      -- one without the other can leave the row in a state where the signed
+      -- quote trips LegRegistry: resolve before cutoff on first buy.
+      -- Existing on-chain legs are unaffected -- getOrCreateBySourceRef
+      -- early-returns the registered legId without re-reading our values.
+      bigearliestresolve = EXCLUDED.bigearliestresolve,
       bigcurationscore   = COALESCE(EXCLUDED.bigcurationscore, tblegmapping.bigcurationscore),
       -- Preserve a registered exclusion group; only fill in when the row
       -- didn't have one yet, so a re-sync can never silently re-tag a leg

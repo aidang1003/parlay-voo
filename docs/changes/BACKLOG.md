@@ -149,7 +149,25 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 
 ---
 
-## 9. Generalize MLB game-card sync to NBA / NFL / NHL
+## 9. DB egress hardening (round 2)
+
+**Why this is here.** Round 1 (item #15 in `C_USER_FEEDBACK.md`) cut the dominant egress source — the `/api/quote-preview` poll loop running `SELECT *` on the active-markets table — to a targeted lookup. The remaining offenders are smaller individually but constant. Worth a pass before the free-tier ceiling bites again.
+
+**Items, ordered by likely impact.**
+
+1. **HTTP-level caching for `/api/markets`, `/api/markets/categories`, `/api/admin/list`.** All three call into the DB on every request and have no `Cache-Control` / `revalidate`. The in-process cache in `lib/markets-cache.ts` is per-Lambda-instance and per-tab — cold starts and parallel users miss it. Replace `dynamic = "force-dynamic"` with `revalidate = 30` (markets) / `revalidate = 300` (admin list). One origin hit per TTL window instead of one per user-mount.
+2. **Slim `getActiveMarkets()` projection.** Still returns all 21 columns. Audit each call site and either (a) shrink the SELECT to columns actually consumed, or (b) split into purpose-specific projections (`getMarketsForList`, `getMarketsForSettler`) the same way `getMarketsForBuildLegs` was carved out.
+3. **Kill or back off the 10s `useRehabClaimable` poll.** `lib/hooks/vault.ts:164` runs `setInterval(refetchDemo, 10_000)` against `/api/rehab/demo-claimable`. The value only changes when the user demo-settles or claims — switch to action-driven refetch (call `refetchDemo()` from those handlers), or push the interval to 60s+. The hook is mounted on every page that renders the rehab banner, so the multiplier across users + tabs is real.
+4. **`useAdminList` is mounted globally.** `TestnetBanner` lives in `ScaffoldEthAppWithProviders.tsx`, so every page hits `/api/admin/list`. React Query staleTime is 30s but every fresh tab open = a query. Combine with item #1's `revalidate = 300` and this becomes a single-digit hits/day endpoint.
+5. **Audit other 5–10s pollers for action-driven alternatives.** `useTicket` (5s), `useUserTickets` (5s), `useUSDCBalance` (5s), `useVaultPosition` (10s), etc. — these hit RPC, not Postgres, so they don't show up on the DB egress bill, but the same "poll forever vs. refetch on tx confirm" question applies and they cost user-side data + RPC quota.
+6. **Batch the seed/sync upsert loops.** `/api/db/init` and `/api/polymarket/sync` `await upsertMarket()` per row in a serial loop — 200+ round trips per run. Bundle into `INSERT … VALUES (...), (...), … ON CONFLICT … DO UPDATE` per batch (or use `postgres.js`'s `sql.unsafe(query, [params])` with arrays). Not the ongoing-egress story, but cuts cron runtime + connection overhead.
+7. **Confirm Vercel crons fire on production only.** `vercel.json` has the `polymarket/sync` (8 AM) and `settlement/run` (8 PM) crons. Make sure they're not duplicated on preview deployments — Vercel honours cron config per-environment, but a preview branch with `vercel.json` edits can silently fire too. Five-minute dashboard check, not a code change.
+
+**Deferred because.** Round 1 was the smoking gun (~100× cut on the hottest path). Each remaining item is single-digit-percent of that. Picking these up makes sense if the egress bill stays elevated *after* round 1 ships, or if a future expansion (more pages, more pollers, more users) re-inflates the baseline.
+
+---
+
+## 10. Generalize MLB game-card sync to NBA / NFL / NHL
 
 **Current state.** `utils/parlay/polymarket/mlb.ts` ships an MLB-only fetcher built around `gamma /markets?tag_id=100381&sports_market_types=moneyline,spreads,totals` — empirically the only call that populates `sportsMarketType`, `line`, and `events[0]` for grouping. NBA, NFL, NHL still flow through the legacy `fetchSportEvents("nba"|"nfl"|"nhl")` → `gamma /events?tag_slug=…` path, where those fields come back null and the per-game card layout can't split a matchup into ML / spread / total rows.
 
@@ -173,10 +191,11 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
 2. Early-resolve tickets once a leg is lost — quick win, frees reserves sooner.
-3. Compromised-key detection + auto-pause — picks up real urgency once TVL crosses a threshold.
-4. Dynamic fee scaling — medium effort, strong DeFi mechanic.
-5. Dynamic max payout — medium effort, unlocks larger tickets.
-6. Jackpot pool — high effort, major feature expansion.
-7. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
-8. RFQ — only when real flow + a concrete maker set are in hand.
-9. Generalize MLB game-card sync to NBA / NFL / NHL — wait for one MLB weekend in prod first.
+3. DB egress hardening (round 2) — pick up if the egress bill stays elevated after round 1.
+4. Compromised-key detection + auto-pause — picks up real urgency once TVL crosses a threshold.
+5. Dynamic fee scaling — medium effort, strong DeFi mechanic.
+6. Dynamic max payout — medium effort, unlocks larger tickets.
+7. Jackpot pool — high effort, major feature expansion.
+8. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
+9. RFQ — only when real flow + a concrete maker set are in hand.
+10. Generalize MLB game-card sync to NBA / NFL / NHL — wait for one MLB weekend in prod first.

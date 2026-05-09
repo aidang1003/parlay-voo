@@ -5,7 +5,7 @@ import { BUILDER_SUFFIX } from "../builder-code";
 import { fetchSignedQuote, toQuoteArg } from "../quote/sign-fetch";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 import { useDeployedContract } from "./useDeployedContract";
-import { parseEventLogs, parseUnits } from "viem";
+import { encodeFunctionData, parseEventLogs, parseUnits } from "viem";
 import { useAccount, useReadContracts } from "wagmi";
 import { ceilToCentRaw } from "~~/utils/parlay";
 
@@ -93,17 +93,70 @@ export function useBuyTicket() {
       setIsPending(false);
       setIsConfirming(true);
 
+      const quoteArg = toQuoteArg(quote);
+
+      // Pre-flight log + simulate so a chain revert surfaces with its actual
+      // reason ("ParlayEngine: cutoff passed", "deadline passed", etc.)
+      // instead of the opaque "Transaction reverted on-chain". The cutoff
+      // delta in particular is what's been biting us — surfaced here in
+      // human-readable form before we burn the gas.
+      const nowSec = Math.floor(Date.now() / 1000);
+      console.log("[buyTicket] submitting signed quote", {
+        buyer: quote.buyer,
+        stake: quote.stake.toString(),
+        deadline: quote.deadline.toString(),
+        deadlineDelta: Number(quote.deadline) - nowSec,
+        legs: quote.legs.map(l => ({
+          sourceRef: l.sourceRef.slice(0, 14) + "…",
+          probabilityPPM: l.probabilityPPM.toString(),
+          cutoffTime: l.cutoffTime.toString(),
+          cutoffIso: new Date(Number(l.cutoffTime) * 1000).toISOString(),
+          cutoffDeltaSec: Number(l.cutoffTime) - nowSec,
+        })),
+      });
+
+      try {
+        await publicClient.simulateContract({
+          address: engine.address,
+          abi: engine.abi,
+          functionName: "buyTicketSigned",
+          args: [quoteArg, signature],
+          account: address,
+        });
+      } catch (simErr) {
+        console.error("[buyTicket] simulate failed — chain would revert:", simErr);
+        throw simErr;
+      }
+
       const buyHash = await writeContractAsync({
         address: engine.address,
         abi: engine.abi,
         functionName: "buyTicketSigned",
-        args: [toQuoteArg(quote), signature],
+        args: [quoteArg, signature],
         dataSuffix: BUILDER_SUFFIX,
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash: buyHash });
 
       if (receipt.status === "reverted") {
-        throw new Error("Transaction reverted on-chain");
+        // Receipt-level revert without a simulate-time failure is rare
+        // (re-entrancy guard, block-level race). Fall back to a tx replay so
+        // the underlying reason still makes it into the error message.
+        let reason = "unknown reason";
+        try {
+          await publicClient.call({
+            account: address,
+            to: engine.address,
+            data: encodeFunctionData({
+              abi: engine.abi,
+              functionName: "buyTicketSigned",
+              args: [quoteArg, signature],
+            }),
+            blockNumber: receipt.blockNumber,
+          });
+        } catch (replayErr) {
+          reason = replayErr instanceof Error ? replayErr.message : String(replayErr);
+        }
+        throw new Error(`Transaction reverted on-chain: ${reason}`);
       }
 
       // cast decoded args — generated ABI isn't `as const`, viem can't infer event types

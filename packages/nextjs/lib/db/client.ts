@@ -435,6 +435,8 @@ export interface TicketDeviationRow {
   status: TicketDeviationStatus;
   payout: bigint;
   multiplierX1e6: bigint;
+  stake: bigint;
+  rehabClaimed: boolean;
   claimTxHash: string | null;
   settledAt: string;
   claimedAt: string | null;
@@ -447,6 +449,8 @@ function coerceTicketDeviationRow(r: Record<string, unknown>): TicketDeviationRo
     status: r.txtstatus as TicketDeviationStatus,
     payout: BigInt(r.bigpayout as string | number),
     multiplierX1e6: BigInt(r.bigmultiplierx1e6 as string | number),
+    stake: BigInt((r.bigstake ?? 0) as string | number),
+    rehabClaimed: r.blnrehabclaimed === true,
     claimTxHash: (r.txtclaimtxhash as string | null) ?? null,
     settledAt: r.tssettledat as string,
     claimedAt: (r.tsclaimedat as string | null) ?? null,
@@ -482,23 +486,63 @@ export async function upsertTicketDeviation(input: {
   status: Exclude<TicketDeviationStatus, "Claimed">;
   payout: bigint;
   multiplierX1e6: bigint;
+  /** Original ticket stake (USDC base units). Stored so the demo rehab flow
+   *  can compute its claimable from the deviation table without re-reading
+   *  the chain ticket. */
+  stake: bigint;
 }): Promise<void> {
   const db = sql();
   const w = normalizeAddress(input.wallet);
   await db`
     INSERT INTO tbticketdeviation (
-      txtwallet, bigticketid, txtstatus, bigpayout, bigmultiplierx1e6
+      txtwallet, bigticketid, txtstatus, bigpayout, bigmultiplierx1e6, bigstake
     ) VALUES (
-      ${w}, ${input.ticketId.toString()}, ${input.status}, ${input.payout.toString()}, ${input.multiplierX1e6.toString()}
+      ${w}, ${input.ticketId.toString()}, ${input.status}, ${input.payout.toString()}, ${input.multiplierX1e6.toString()}, ${input.stake.toString()}
     )
     ON CONFLICT (txtwallet, bigticketid) DO UPDATE SET
       txtstatus         = EXCLUDED.txtstatus,
       bigpayout         = EXCLUDED.bigpayout,
       bigmultiplierx1e6 = EXCLUDED.bigmultiplierx1e6,
+      bigstake          = EXCLUDED.bigstake,
+      -- Re-settling resets the rehab gate. If the user toggled their leg
+      -- deviation between Lost and Won, a fresh Lost should re-contribute to
+      -- demo rehab claimable; a fresh Won shouldn't carry an old claimed flag.
+      blnrehabclaimed   = false,
       tssettledat       = now(),
       txtclaimtxhash    = NULL,
       tsclaimedat       = NULL
   `;
+}
+
+/**
+ * Sum of stakes from this wallet's demo-Lost ticket deviations that haven't
+ * yet been "claimed" through the demo rehab flow. Mirrors the chain
+ * `rehabClaimable[user]` mapping; the two pots are independent (the chain
+ * accrues real losses, the demo accrues phantom losses) and both pay out.
+ */
+export async function getDemoRehabClaimable(wallet: string): Promise<bigint> {
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const rows = await db`
+    SELECT COALESCE(SUM(bigstake), 0) AS total FROM tbticketdeviation
+    WHERE txtwallet = ${w} AND txtstatus = 'Lost' AND blnrehabclaimed = false
+  `;
+  const total = (rows as Record<string, unknown>[])[0]?.total ?? 0;
+  return BigInt(typeof total === "string" ? total : String(total));
+}
+
+/** Flip blnrehabclaimed=true on every Lost row contributing to the wallet's
+ *  current demo rehab claimable. Counterpart to the chain's `claimRehab`
+ *  zeroing the rehabClaimable mapping. */
+export async function markDemoRehabClaimed(wallet: string): Promise<{ updated: number; total: bigint }> {
+  const db = sql();
+  const w = normalizeAddress(wallet);
+  const before = await getDemoRehabClaimable(wallet);
+  const result = await db`
+    UPDATE tbticketdeviation SET blnrehabclaimed = true
+    WHERE txtwallet = ${w} AND txtstatus = 'Lost' AND blnrehabclaimed = false
+  `;
+  return { updated: result.count, total: before };
 }
 
 export async function markTicketDeviationClaimed(input: {

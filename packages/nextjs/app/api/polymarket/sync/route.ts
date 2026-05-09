@@ -64,11 +64,21 @@ export async function GET(req: Request) {
       else result.upserted++;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      // Each failure logged with category so a leg that's invisible in the
+      // builder can be traced — "this conditionId failed sync because X" is
+      // far more useful than a single aggregated count.
+      console.warn(
+        `[sync] SKIP cid=${entry.conditionId.slice(0, 12)}… category=${entry.category} ` +
+          `displayTitle="${(entry.displayTitle ?? "").slice(0, 50)}" reason: ${msg}`,
+      );
       result.errors.push(`${entry.conditionId.slice(0, 10)}: ${msg}`);
       result.skipped++;
     }
   }
 
+  console.log(
+    `[sync] done total=${result.total} upserted=${result.upserted} closed=${result.closed} skipped=${result.skipped}`,
+  );
   return NextResponse.json(result);
 }
 

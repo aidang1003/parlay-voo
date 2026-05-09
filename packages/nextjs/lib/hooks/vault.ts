@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BUILDER_SUFFIX } from "../builder-code";
 import { EMPTY_ABI, useContractClient, usePinnedWriteContract } from "./_internal";
 import { useDeployedContract } from "./useDeployedContract";
@@ -114,6 +114,13 @@ export function useCreditBalance() {
  * on-chain parameters needed to render the claim screen: projected APR for the
  * advance-credit preview and the minimum lock duration enforced by
  * `claimRehab`.
+ *
+ * Adds a parallel demo-rehab claimable read from `/api/rehab/demo-claimable`.
+ * Demo-Lost ticket deviations accrue stake to that pot; the chain pot only
+ * grows when a real loss settles. The two are intentionally independent —
+ * `claimable` exposes their sum so the UI shows a single combined balance,
+ * while `chainClaimable` and `demoClaimable` stay separately addressable for
+ * routing the claim button to the right backend.
  */
 export function useRehabClaimable() {
   const { address } = useAccount();
@@ -129,14 +136,54 @@ export function useRehabClaimable() {
     query: { enabled: !!address && !!vault, refetchInterval: 10_000 },
   });
 
+  const [demoClaimable, setDemoClaimable] = useState<bigint | undefined>(undefined);
+  const [demoLoading, setDemoLoading] = useState<boolean>(true);
+  const refetchDemo = useCallback(async () => {
+    if (!address) {
+      setDemoClaimable(undefined);
+      setDemoLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/rehab/demo-claimable?wallet=${address.toLowerCase()}`);
+      if (!res.ok) {
+        setDemoClaimable(0n);
+        return;
+      }
+      const body: { claimable?: string } = await res.json();
+      setDemoClaimable(BigInt(body.claimable ?? "0"));
+    } catch {
+      setDemoClaimable(0n);
+    } finally {
+      setDemoLoading(false);
+    }
+  }, [address]);
+
+  useEffect(() => {
+    refetchDemo();
+    const id = setInterval(refetchDemo, 10_000);
+    return () => clearInterval(id);
+  }, [refetchDemo]);
+
   const pick = (i: number) => (data?.[i]?.status === "success" ? (data[i].result as bigint) : undefined);
+  const chainClaimable = pick(0);
+  const combined =
+    chainClaimable === undefined && demoClaimable === undefined
+      ? undefined
+      : (chainClaimable ?? 0n) + (demoClaimable ?? 0n);
+
+  const refetchAll = useCallback(async () => {
+    await Promise.all([refetch(), refetchDemo()]);
+  }, [refetch, refetchDemo]);
 
   return {
-    claimable: pick(0),
+    claimable: combined,
+    chainClaimable,
+    demoClaimable,
     projectedAprBps: pick(1),
     minDuration: pick(2),
-    isLoading,
-    refetch,
+    isLoading: isLoading || demoLoading,
+    refetch: refetchAll,
   };
 }
 

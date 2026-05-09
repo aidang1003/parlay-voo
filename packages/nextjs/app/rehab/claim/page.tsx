@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useClaimRehab, useRehabClaimable } from "~~/lib/hooks";
 import { formatUSDC } from "~~/lib/utils";
+import { notification } from "~~/utils/scaffold-eth";
 
 const SECS_PER_DAY = 86_400n;
 const SECS_PER_YEAR = 365n * SECS_PER_DAY;
@@ -23,9 +24,11 @@ const PRESETS: Preset[] = [
 const fmtUsdc = (n: bigint | undefined): string => formatUSDC(n, { placeholder: "0.00" });
 
 export default function RehabClaimPage() {
-  const { isConnected } = useAccount();
-  const { claimable, projectedAprBps, minDuration, isLoading, refetch } = useRehabClaimable();
+  const { address, isConnected } = useAccount();
+  const { claimable, chainClaimable, demoClaimable, projectedAprBps, minDuration, isLoading, refetch } =
+    useRehabClaimable();
   const claim = useClaimRehab();
+  const [demoClaiming, setDemoClaiming] = useState(false);
 
   // Default to 2 years — doubles the minimum and reads as a meaningful commitment.
   const [years, setYears] = useState<number>(2);
@@ -44,14 +47,48 @@ export default function RehabClaimPage() {
 
   const aprPct = projectedAprBps ? Number(projectedAprBps) / 100 : undefined;
 
+  const hasChain = !!chainClaimable && chainClaimable > 0n;
+  const hasDemo = !!demoClaimable && demoClaimable > 0n;
   const canClaim = isConnected && !!claimable && claimable > 0n && !!minDuration && durationSecs >= minDuration;
 
+  // Two independent claim paths can fire on a single click:
+  //  1. Chain rehabClaimable > 0  → vault.claimRehab(duration) (real, locks USDC into LEAST tier)
+  //  2. Demo claimable > 0        → /api/rehab/demo-claim     (mints MockUSDC equivalent of credit)
+  // When both are non-zero we run them sequentially. Per spec the demo pot
+  // doesn't reconcile with chain, so phantom MockUSDC stays in the wallet
+  // even after the chain later settles the same tickets for real.
   async function handleClaim() {
-    if (!canClaim) return;
-    const ok = await claim.claim(durationSecs);
-    if (ok) {
-      refetch();
+    if (!canClaim || !address) return;
+
+    let chainOk = !hasChain;
+    let demoOk = !hasDemo;
+
+    if (hasChain) {
+      chainOk = await claim.claim(durationSecs);
+      if (!chainOk) return;
     }
+
+    if (hasDemo) {
+      setDemoClaiming(true);
+      try {
+        const res = await fetch("/api/rehab/demo-claim", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ wallet: address.toLowerCase() }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          notification.error(`Demo rehab claim failed: ${body.error ?? res.statusText}`);
+        } else {
+          notification.success("Demo rehab credit minted");
+          demoOk = true;
+        }
+      } finally {
+        setDemoClaiming(false);
+      }
+    }
+
+    if (chainOk || demoOk) refetch();
   }
 
   if (!isConnected) {
@@ -197,21 +234,28 @@ export default function RehabClaimPage() {
       <section className="sticky bottom-4 z-10">
         <button
           onClick={handleClaim}
-          disabled={!canClaim || claim.isPending || claim.isConfirming}
+          disabled={!canClaim || claim.isPending || claim.isConfirming || demoClaiming}
           className="w-full rounded-2xl bg-gradient-to-r from-amber-600 to-yellow-600 px-6 py-4 text-base font-bold text-white shadow-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {claim.isConfirming
             ? "Confirming…"
             : claim.isPending
               ? "Preparing…"
-              : claim.isSuccess
-                ? "Claimed ✓"
-                : canClaim
-                  ? `Lock $${fmtUsdc(claimable)} & claim $${fmtUsdc(creditPreview)} credit`
-                  : !claimable || claimable === 0n
-                    ? "Nothing to claim"
-                    : "Pick a valid duration"}
+              : demoClaiming
+                ? "Minting demo credit…"
+                : claim.isSuccess
+                  ? "Claimed ✓"
+                  : canClaim
+                    ? `Lock $${fmtUsdc(claimable)} & claim $${fmtUsdc(creditPreview)} credit`
+                    : !claimable || claimable === 0n
+                      ? "Nothing to claim"
+                      : "Pick a valid duration"}
         </button>
+        {hasDemo && (
+          <p className="mt-2 text-center text-[11px] text-amber-300/60">
+            Includes ${fmtUsdc(demoClaimable)} from demo losses — credit will be minted as MockUSDC.
+          </p>
+        )}
         {claim.error && <p className="mt-2 text-center text-sm text-neon-red">{claim.error.message.slice(0, 200)}</p>}
       </section>
     </div>

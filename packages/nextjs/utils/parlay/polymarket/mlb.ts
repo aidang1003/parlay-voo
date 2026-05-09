@@ -91,14 +91,22 @@ export async function fetchMlbGames(opts: MlbFetchOptions = {}): Promise<Curated
   for (const gameMarkets of byGame.values()) {
     const event = gameMarkets[0].events![0];
     const eventStart = parseGameStartTime(event.gameStartTime ?? gameMarkets[0].gameStartTime);
-    // Visibility runs long; the natural price filter (`isSideProfitable` +
-    // midToPpm 0.99 clamp) hides settled markets via their own pricing.
-    // Settlement runs short — game end (~6h post first pitch) + UMA buffer
-    // (48h) — so tickets pay out within ~2 days of completion regardless of
-    // how far out the visibility cutoff is.
-    const cutoffOverride = eventStart != null ? new Date((eventStart + 7 * 24 * 3600) * 1000).toISOString() : undefined;
+    // Cutoff sits at gameStart + 6h (covers normal MLB game length + buffer)
+    // and earliestResolve at cutoff + 48h (UMA dispute window). The chain
+    // enforces `earliestResolve >= cutoff` in LegRegistry — pushing cutoff
+    // past earliestResolve trips "LegRegistry: resolve before cutoff" the
+    // first time anyone tries to buy a fresh leg. Visibility past 6h relies
+    // on the price-based `isPostGameSettled` filter in markets.ts, which
+    // hides extreme-priced post-game markets without needing the cutoff to
+    // extend further.
+    const CUTOFF_AFTER_GAME_SEC = 6 * 60 * 60;
+    const RESOLVE_AFTER_CUTOFF_SEC = 48 * 60 * 60;
+    const cutoffOverride =
+      eventStart != null ? new Date((eventStart + CUTOFF_AFTER_GAME_SEC) * 1000).toISOString() : undefined;
     const earliestResolveOverride =
-      eventStart != null ? new Date((eventStart + 54 * 3600) * 1000).toISOString() : undefined;
+      eventStart != null
+        ? new Date((eventStart + CUTOFF_AFTER_GAME_SEC + RESOLVE_AFTER_CUTOFF_SEC) * 1000).toISOString()
+        : undefined;
 
     for (const type of TARGET_TYPES) {
       const candidates = gameMarkets.filter(m => m.sportsMarketType === type);

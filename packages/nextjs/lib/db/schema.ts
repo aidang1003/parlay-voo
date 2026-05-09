@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS tbticketdeviation (
   txtstatus         TEXT NOT NULL CHECK (txtstatus IN ('Won', 'Lost', 'Voided', 'Claimed')),
   bigpayout         NUMERIC(78,0) NOT NULL DEFAULT 0,
   bigmultiplierx1e6 NUMERIC(78,0) NOT NULL DEFAULT 1000000,
+  -- Original ticket stake (USDC base units). Populated at demo-settle time so
+  -- the demo rehab path can reconstruct rehabClaimable without re-reading the
+  -- chain ticket. Zero on rows written before this column existed.
+  bigstake          NUMERIC(78,0) NOT NULL DEFAULT 0,
+  -- Demo-rehab gate. Once a Lost row's stake has been "claimed" through the
+  -- demo rehab flow (server mints MockUSDC = stake * projectedAprBps / BPS),
+  -- this flips true so the row stops contributing to demo claimable. Real
+  -- chain rehabClaimable is independent — both pots can pay out.
+  blnrehabclaimed   BOOLEAN NOT NULL DEFAULT false,
   txtclaimtxhash    TEXT,
   tssettledat       TIMESTAMPTZ NOT NULL DEFAULT now(),
   tsclaimedat       TIMESTAMPTZ,

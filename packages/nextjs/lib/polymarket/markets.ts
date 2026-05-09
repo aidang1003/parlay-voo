@@ -13,6 +13,43 @@ function isSideProfitable(probPpm: number | null, feeBps: number): boolean {
   return probPpm * BPS < PPM * (BPS - feeBps);
 }
 
+// midToPpm clamps Polymarket prices to [10000, 990000] (= 1% / 99%). When
+// either side hits a clamp boundary, the underlying market has effectively
+// priced certainty on one outcome. Pre-game heavy favorites can sit at this
+// boundary legitimately, so we don't hide on price alone — see
+// `isPostGameSettled` below for the combined gate.
+const CLAMP_FLOOR_PPM = 10_000;
+const CLAMP_CEIL_PPM = 990_000;
+
+// Sports lingering window: Polymarket usually flips `closed=true` within the
+// game-end-to-resolution window, but there's a gap where the market still
+// trades at ~99/1 splits. After 4h past first pitch the game is virtually
+// guaranteed to be over (longest baseball games rarely top ~3.5h), so any
+// lingering extreme-priced row is settled in everything-but-name.
+const POST_GAME_LINGER_SECS = 4 * 60 * 60;
+
+/** Three-way settled-but-not-closed signal:
+ *   - Either side's price has clamped to the boundary (1% or 99%)
+ *   - eventStart is known and ≥ 4h in the past
+ *   - cutoff (when meaningfully in the future, i.e. not the gameStart+7d
+ *     override) is also in the past — a redundant confirmation that gamma's
+ *     own lifecycle treats the market as concluded
+ *
+ * Returns true when all available signals point to a settled market.
+ * Markets with no eventStart (political / crypto / news) bypass this entirely
+ * — they have their own end-of-life handling via `closed=true` →
+ * `markPolyClosed`. */
+function isPostGameSettled(row: MarketRow, nowSec: number): boolean {
+  if (row.bigeventstart == null) return false;
+  const postGame = row.bigeventstart + POST_GAME_LINGER_SECS < nowSec;
+  if (!postGame) return false;
+  const yesClamped =
+    row.intyesprobppm != null && (row.intyesprobppm <= CLAMP_FLOOR_PPM || row.intyesprobppm >= CLAMP_CEIL_PPM);
+  const noClamped =
+    row.intnoprobppm != null && (row.intnoprobppm <= CLAMP_FLOOR_PPM || row.intnoprobppm >= CLAMP_CEIL_PPM);
+  return yesClamped || noClamped;
+}
+
 /** One row per sourceRef with yes/no flattened. Display only — checkout re-verifies prices/leg-ids on-chain. */
 export async function fetchMarketsFromDb(): Promise<Market[]> {
   const rows = await getActiveMarkets();
@@ -22,10 +59,16 @@ export async function fetchMarketsFromDb(): Promise<Market[]> {
   let syntheticId = -1;
   const nextSynthetic = () => syntheticId--;
 
+  const nowSec = Math.floor(Date.now() / 1000);
   for (const row of rows) {
     const yesProfitable = isSideProfitable(row.intyesprobppm, PROTOCOL_FEE_BPS);
     const noProfitable = isSideProfitable(row.intnoprobppm, PROTOCOL_FEE_BPS);
     if (!yesProfitable && !noProfitable) continue; // both sides dead money
+
+    // Hide settled-but-not-yet-closed sports markets so the 1% certain-loser
+    // side doesn't render as a free 100x against the vault while we wait for
+    // Polymarket to flip closed=true.
+    if (isPostGameSettled(row, nowSec)) continue;
 
     if (row.txtsource === "seed") {
       markets.push({

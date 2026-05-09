@@ -241,6 +241,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     status: result.status,
     payout: result.payout,
     multiplierX1e6: result.multiplierX1e6,
+    // Stake feeds the demo rehab claimable on Lost rows. Always passed so a
+    // re-settle from Lost→Won correctly resets the column.
+    stake: ticket.stake,
   });
 
   return NextResponse.json({

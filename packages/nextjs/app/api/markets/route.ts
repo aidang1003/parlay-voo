@@ -30,6 +30,12 @@ export async function GET(req: Request) {
       active: l.active,
       correlationGroupId: l.correlationGroupId ?? 0,
       exclusionGroupId: l.exclusionGroupId ?? 0,
+      eventStart: l.eventStart,
+      polymarketSlug: l.polymarketSlug,
+      yesOutcome: l.yesOutcome,
+      noOutcome: l.noOutcome,
+      marketType: l.marketType,
+      line: l.line,
     })),
   }));
 

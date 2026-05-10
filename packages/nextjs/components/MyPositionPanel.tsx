@@ -80,12 +80,12 @@ export function MyPositionPanel({ variant }: Props) {
       <div className="grid gap-6 lg:grid-cols-2">
         <PositionBox
           label="Vault VOO"
-          primary={`${formatUSDC(userShares)} VOO`}
-          secondary={`$${formatUSDC(userSharesValue)} value`}
+          primary={`${formatUSDC(userShares + fullShares + partialShares + leastShares)} VOO`}
+          secondary={`$${formatUSDC(totalPositionValue)} value`}
           accent="white"
           tooltip={{
-            title: "Liquid vault shares",
-            body: "Unlocked VOO. Withdrawable any time, subject to free liquidity. No fee-share boost — lock to earn.",
+            title: "Total VOO held",
+            body: "Sum of liquid VOO and every lock tier (Full / Partial / Least). Lock Hierarchy below shows the per-tier breakdown.",
           }}
         />
         <PositionBox

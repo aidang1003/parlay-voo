@@ -1,17 +1,59 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getRecentContractEvents } from "../events/chunked-events";
 import { fetchSourceRefMap } from "../markets-cache";
 import { parseOutcomeChoice } from "../utils";
 import { useContractClient, usePinnedChainId } from "./_internal";
 import type { LegInfo } from "./leg";
 import { useAllTickets } from "./ticket";
 import { useDeployedContract } from "./useDeployedContract";
+import { useQuery } from "@tanstack/react-query";
+import { useAccount } from "wagmi";
 import { BASE_SEPOLIA_CHAIN_ID, LOCAL_CHAIN_ID } from "~~/utils/parlay";
 
 export function useIsTestnet(): boolean {
   const chainId = usePinnedChainId();
   return chainId === LOCAL_CHAIN_ID || chainId === BASE_SEPOLIA_CHAIN_ID;
+}
+
+// Source-of-truth = tbadminwallet (DB). Empty list still falls open so a
+// freshly-initialised DB doesn't lock everyone out before the first seed.
+async function fetchAdminList(): Promise<string[]> {
+  const res = await fetch("/api/admin/list", { cache: "no-store" });
+  if (!res.ok) throw new Error(`admin list fetch failed: ${res.status}`);
+  const body: { admins?: string[] } = await res.json();
+  return Array.isArray(body.admins) ? body.admins.map(a => a.toLowerCase()) : [];
+}
+
+export function useAdminList() {
+  return useQuery({
+    queryKey: ["admin-list"],
+    queryFn: fetchAdminList,
+    staleTime: 30_000,
+  });
+}
+
+export interface AdminStatus {
+  isAdmin: boolean;
+  isLoading: boolean;
+  /** True when DB returned an empty list — gate falls open. */
+  unconfigured: boolean;
+}
+
+export function useIsAdmin(): AdminStatus {
+  const { address } = useAccount();
+  const { data, isLoading, isError } = useAdminList();
+
+  return useMemo(() => {
+    if (isLoading) return { isAdmin: false, isLoading: true, unconfigured: false };
+    if (isError) return { isAdmin: false, isLoading: false, unconfigured: false };
+    const list = data ?? [];
+    const unconfigured = list.length === 0;
+    if (unconfigured) return { isAdmin: !!address, isLoading: false, unconfigured: true };
+    if (!address) return { isAdmin: false, isLoading: false, unconfigured: false };
+    return { isAdmin: list.includes(address.toLowerCase()), isLoading: false, unconfigured: false };
+  }, [address, data, isError, isLoading]);
 }
 
 export interface OpenLeg {
@@ -215,12 +257,14 @@ export function useRecentResolutions({ limit = 20 }: { limit?: number } = {}) {
     const localId = ++fetchIdRef.current;
 
     try {
-      const logs = await publicClient.getContractEvents({
+      // Chunked scan — a fromBlock=0 → latest sweep exceeds Alchemy's 10k
+      // eth_getLogs cap on Base Sepolia and 413's the public-RPC fallback.
+      const logs = await getRecentContractEvents({
+        publicClient,
         address: oracle.address,
         abi: oracle.abi,
         eventName: "LegResolved",
-        fromBlock: 0n,
-        toBlock: "latest",
+        limit,
       });
 
       // Newest-first by block, then clip; resolves block timestamps + leg

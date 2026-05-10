@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getRecentContractEvents } from "../events/chunked-events";
 import { EMPTY_ABI, useContractClient, useWriteTx } from "./_internal";
 import { useDeployedContract } from "./useDeployedContract";
 import type { Log } from "viem";
@@ -264,30 +265,31 @@ export function useTicketActivity({ limit = 100 }: { limit?: number } = {}) {
     const localFetchId = ++fetchIdRef.current;
 
     try {
-      // Pull all three event types from genesis. ParlayEngine is recent enough
-      // that this is cheap on Anvil/Sepolia; switch to a windowed scan if log
-      // volume ever bites.
+      // Walk back in 9.5k-block chunks until we have `limit` events of each
+      // kind (or hit the lookback cap). A genesis→latest scan exceeds
+      // Alchemy's 10k-block eth_getLogs cap on Base Sepolia; the public RPC
+      // fallback then 413's on the same payload.
       const [purchasedLogs, settledLogs, cashoutLogs] = await Promise.all([
-        publicClient.getContractEvents({
+        getRecentContractEvents({
+          publicClient,
           address: engine.address,
           abi: engine.abi,
           eventName: "TicketPurchased",
-          fromBlock: 0n,
-          toBlock: "latest",
+          limit,
         }),
-        publicClient.getContractEvents({
+        getRecentContractEvents({
+          publicClient,
           address: engine.address,
           abi: engine.abi,
           eventName: "TicketSettled",
-          fromBlock: 0n,
-          toBlock: "latest",
+          limit,
         }),
-        publicClient.getContractEvents({
+        getRecentContractEvents({
+          publicClient,
           address: engine.address,
           abi: engine.abi,
           eventName: "EarlyCashout",
-          fromBlock: 0n,
-          toBlock: "latest",
+          limit,
         }),
       ]);
 

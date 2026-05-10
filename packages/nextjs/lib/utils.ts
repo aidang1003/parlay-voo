@@ -29,6 +29,18 @@ export function formatUSDC(
   return n.toFixed(decimals);
 }
 
+// "live" / "starts in Nm" / "starts in Nh" / "starts Mon 7:00pm". null ⇒ no chip.
+export function formatEventStart(unixSec: number | undefined | null): string | null {
+  if (unixSec == null) return null;
+  const diffSec = unixSec - Math.floor(Date.now() / 1000);
+  if (diffSec <= 0) return "live";
+  const hours = diffSec / 3600;
+  if (hours < 1) return `starts in ${Math.max(1, Math.round(diffSec / 60))}m`;
+  if (hours < 24) return `starts in ${Math.round(hours)}h`;
+  const d = new Date(unixSec * 1000);
+  return `starts ${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
 /**
  * Sanitize numeric input: strips non-digit/dot characters, limits to one
  * decimal point. Safety net for paste, autofill, and drag-drop -- the

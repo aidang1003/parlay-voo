@@ -8,6 +8,7 @@ export interface MarketLegLite {
   sourceRef: string;
   probabilityPPM: number;
   noProbabilityPPM?: number;
+  eventStart?: number;
 }
 
 interface MarketLite {
@@ -43,18 +44,9 @@ export async function fetchMarketsCached(): Promise<MarketLite[]> {
   return inFlight;
 }
 
-/** Map keyed by sourceRef → first matching leg (full record). */
 export async function fetchSourceRefMap(): Promise<Map<string, MarketLegLite>> {
   const markets = await fetchMarketsCached();
   const map = new Map<string, MarketLegLite>();
   for (const m of markets) for (const leg of m.legs) map.set(leg.sourceRef, leg);
-  return map;
-}
-
-/** Map keyed by sourceRef → human-readable question only. */
-export async function fetchQuestionMapCached(): Promise<Map<string, string>> {
-  const markets = await fetchMarketsCached();
-  const map = new Map<string, string>();
-  for (const m of markets) for (const leg of m.legs) map.set(leg.sourceRef, leg.question);
   return map;
 }

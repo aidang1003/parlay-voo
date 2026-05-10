@@ -21,6 +21,9 @@ interface GammaMarket {
   bestAsk: number;
   clobTokenIds: string[] | string;
   endDate?: string;
+  // Per-game first-pitch / tip-off timestamp. Polymarket-native sports field;
+  // shape "YYYY-MM-DD HH:MM:SS+00". Absent for season-long markets.
+  gameStartTime?: string;
 }
 
 interface GammaTag {
@@ -106,24 +109,30 @@ async function fetchEvents(cfg: Required<FeaturedOptions>, tagSlug: string | und
     const markets = event.markets ?? [];
     const fallbackCategory = resolveCategory(event, cfg.category);
     const eventVolume24hr = parseNumOrUndef(event.volume24hr);
+    const eventStartFallback = parseIsoToUnix(event.startDate);
     const sport = classifySport(event);
     const resolvedCategory = sport.category ?? fallbackCategory;
     const gameGroup = sport.gameGroup ?? undefined;
     for (const mkt of markets) {
       if (!isUsable(mkt, cfg)) continue;
       const [yesPrice, noPrice] = parsePrices(mkt.outcomePrices);
+      const [yesOutcome, noOutcome] = parseOutcomeLabels(mkt.outcomes);
 
+      const eventStart = parseGameStartTime(mkt.gameStartTime) ?? eventStartFallback;
       results.push({
         conditionId: mkt.conditionId,
         category: resolvedCategory,
         displayTitle: mkt.groupItemTitle ? `${event.title}: ${mkt.groupItemTitle}` : mkt.question,
         yesPrice,
         noPrice,
-        apiPayload: buildApiPayload(event, mkt),
         volume24hr: eventVolume24hr,
         gameGroup,
         negRisk: event.negRisk === true,
         eventId: event.id,
+        eventStart,
+        polymarketSlug: event.slug,
+        yesOutcome,
+        noOutcome,
       });
     }
   }
@@ -158,14 +167,18 @@ function parseNumOrUndef(raw: string | number | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function buildApiPayload(event: GammaEvent, market: GammaMarket): Record<string, unknown> {
-  // Strip siblings off the event copy so N-market groups don't balloon each row.
-  const { markets: _siblings, ...eventMeta } = event;
-  return {
-    event: eventMeta,
-    market,
-    capturedAt: new Date().toISOString(),
-  };
+function parseIsoToUnix(iso: string | undefined): number | undefined {
+  if (!iso) return undefined;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+}
+
+// Polymarket ships gameStartTime as "YYYY-MM-DD HH:MM:SS+00" — non-ISO (space
+// separator, short offset). Normalize to ISO before parsing.
+function parseGameStartTime(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const iso = raw.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  return parseIsoToUnix(iso);
 }
 
 function resolveCategory(event: GammaEvent, fallback: string): string {
@@ -184,6 +197,18 @@ function parsePrices(raw: string[] | string): [number | undefined, number | unde
   const yes = Number(arr[0]);
   const no = Number(arr[1]);
   return [Number.isFinite(yes) ? yes : undefined, Number.isFinite(no) ? no : undefined];
+}
+
+/** Pull outcome labels from the Gamma payload. Returns undefined for the
+ *  default "Yes"/"No" so the UI can fall back to its built-in copy. */
+function parseOutcomeLabels(raw: string[] | string): [string | undefined, string | undefined] {
+  const arr = parseJsonField<string[]>(raw);
+  if (!Array.isArray(arr) || arr.length < 2) return [undefined, undefined];
+  const norm = (s: unknown) => (typeof s === "string" ? s.trim() : "");
+  const yes = norm(arr[0]);
+  const no = norm(arr[1]);
+  const isDefault = (s: string) => s.toLowerCase() === "yes" || s.toLowerCase() === "no" || s.length === 0;
+  return [isDefault(yes) ? undefined : yes, isDefault(no) ? undefined : no];
 }
 
 export async function fetchTopEvent(

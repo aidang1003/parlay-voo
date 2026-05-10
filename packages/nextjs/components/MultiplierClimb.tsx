@@ -235,6 +235,13 @@ export function MultiplierClimb({
     if (!animated || pathLength === 0 || points.length <= 1) return undefined;
     const totalSegments = points.length - 1;
     const revealedSegments = Math.min(animatedSegments, totalSegments);
+    // Once every segment is revealed, drop the dash machinery entirely. With
+    // strokeDasharray set, the path renders as a single dash equal to the
+    // path length — visually a solid line, but the transition machinery
+    // around stroke-dashoffset can leave it looking patchy/dashed compared
+    // to the parlay-builder preview, which never sets a dasharray. Clearing
+    // it here makes a fully-revealed climb identical to the builder line.
+    if (revealedSegments >= totalSegments) return undefined;
     // map straight-segment lengths onto the curved Bezier so reveal fraction stays accurate
     let revealStraight = 0;
     let totalStraight = 0;

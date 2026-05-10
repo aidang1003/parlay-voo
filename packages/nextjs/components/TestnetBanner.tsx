@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useIsTestnet } from "~~/lib/hooks/debug";
+import { useIsAdmin, useIsTestnet } from "~~/lib/hooks/debug";
 
 export function TestnetBanner() {
   const isTestnet = useIsTestnet();
+  const { isAdmin } = useIsAdmin();
   if (!isTestnet) return null;
 
   return (
@@ -13,13 +14,19 @@ export function TestnetBanner() {
         <span className="flex-shrink-0 rounded-full bg-brand-pink/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-pink">
           Testnet
         </span>
-        <p className="flex-1">You&apos;re connected to testnet — admin tooling lives on the debug page.</p>
-        <Link
-          href="/admin/debug"
-          className="flex-shrink-0 rounded-lg border border-brand-pink/30 px-3 py-1 text-xs font-bold text-brand-pink transition-colors hover:bg-brand-pink/10"
-        >
-          Open debug page
-        </Link>
+        <p className="flex-1">
+          {isAdmin
+            ? "You're connected to testnet — admin tooling lives on the debug page."
+            : "You're connected to testnet. Funds here aren't real."}
+        </p>
+        {isAdmin && (
+          <Link
+            href="/admin/debug"
+            className="flex-shrink-0 rounded-lg border border-brand-pink/30 px-3 py-1 text-xs font-bold text-brand-pink transition-colors hover:bg-brand-pink/10"
+          >
+            Open debug page
+          </Link>
+        )}
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ import {
   useUSDCBalance,
   useVaultStats,
 } from "~~/lib/hooks";
-import { blockNonNumericKeys, sanitizeNumericInput, useSessionState } from "~~/lib/utils";
+import { blockNonNumericKeys, formatEventStart, sanitizeNumericInput, useSessionState } from "~~/lib/utils";
 import type { Leg, Market } from "~~/utils/parlay";
 import {
   BPS,
@@ -54,6 +54,12 @@ interface DisplayLeg {
   noProbabilityPPM?: number;
   correlationGroupId: number;
   exclusionGroupId: number;
+  eventStart?: number;
+  polymarketSlug?: string;
+  yesOutcome?: string;
+  noOutcome?: string;
+  marketType?: "moneyline" | "spreads" | "totals";
+  line?: number;
 }
 
 interface SelectedLeg {
@@ -68,6 +74,10 @@ interface StoredSelection {
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────
+
+// Pills shown by default (in addition to "Featured"). Everything else hides
+// behind "+ show more" until the user expands the row.
+const PINNED_CATEGORIES = ["mlb"] as const;
 
 const CATEGORY_LABELS: Record<string, string> = {
   all: "Featured",
@@ -111,6 +121,80 @@ function ppmToOdds(ppm: number): number {
   return 1_000_000 / ppm;
 }
 
+/** Build a Polymarket link for the leg. Falls back to the conditionId-based
+ *  /market/<id> URL when the slug is missing (legacy rows). Seed markets
+ *  return null and the UI renders the question without a link. */
+function polymarketHref(leg: { polymarketSlug?: string; sourceRef: string }): string | null {
+  if (leg.polymarketSlug) return `https://polymarket.com/event/${leg.polymarketSlug}`;
+  if (/^0x[0-9a-fA-F]{64}$/.test(leg.sourceRef)) return `https://polymarket.com/market/${leg.sourceRef}`;
+  return null;
+}
+
+// "5/9/2026 5:15 PM" for the MLB game-card header. null ⇒ no suffix.
+function formatGameStartSuffix(unixSec: number | undefined): string | null {
+  if (unixSec == null) return null;
+  const d = new Date(unixSec * 1000);
+  const date = d.toLocaleDateString(undefined, { month: "numeric", day: "numeric", year: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${date} ${time}`;
+}
+
+// Same-game ML+spread blocking. Polymarket's spread market puts the favorite
+// at outcomes[0] (yesOutcome) and the underdog at outcomes[1] (noOutcome),
+// with line < 0 for the favorite. The moneyline market uses the same team
+// strings on each side. Cross-product of YES/NO between an ML leg and a
+// spread leg in the same game maps to four logical outcomes:
+//
+//   case A: ML YES (fav) + Spread YES (fav covers)         → spread ⊂ ML  → BLOCK (redundant)
+//   case B: ML NO  (dog) + Spread YES (fav covers)         → disjoint     → BLOCK (impossible)
+//   case C: ML YES (fav) + Spread NO  (dog +line)          → fringe overlap (fav wins by 1) → ALLOW
+//   case D: ML NO  (dog) + Spread NO  (dog +line)          → ML ⊂ spread  → BLOCK (redundant)
+//
+// Returns true when the (a,b) pair must be blocked; false otherwise. The
+// existing same-game correlationGroupId discount continues to apply to the
+// fringe-allowed cases — fine-grained per-pair correlation tuning is a
+// separate (larger) change in the math layer.
+function selectionConflicts(a: { leg: DisplayLeg; outcome: 1 | 2 }, b: { leg: DisplayLeg; outcome: 1 | 2 }): boolean {
+  if (!a.leg.gameGroup || a.leg.gameGroup !== b.leg.gameGroup) return false;
+  const ml = a.leg.marketType === "moneyline" ? a : b.leg.marketType === "moneyline" ? b : null;
+  const sp = a.leg.marketType === "spreads" ? a : b.leg.marketType === "spreads" ? b : null;
+  if (!ml || !sp) return false;
+  const mlTeam = ml.outcome === 1 ? ml.leg.yesOutcome : ml.leg.noOutcome;
+  const spFavorite = sp.leg.yesOutcome;
+  if (!mlTeam || !spFavorite) return false;
+  const mlPickedFavorite = mlTeam.trim().toLowerCase() === spFavorite.trim().toLowerCase();
+  const spPickedYes = sp.outcome === 1;
+  // Block A (mlFav, spYes), B (mlDog, spYes), D (mlDog, spNo). Allow C (mlFav, spNo).
+  if (mlPickedFavorite && spPickedYes) return true;
+  if (!mlPickedFavorite && spPickedYes) return true;
+  if (!mlPickedFavorite && !spPickedYes) return true;
+  return false;
+}
+
+// Sports markets carry a wager type (moneyline | spreads | totals) + outcomes
+// + line. Compute the per-side label so the YES/NO buttons read like a real
+// sportsbook: "Padres -1.5", "Over 8.5", or just "Padres" for moneyline.
+// Returns null when the market is political/crypto/news (caller falls back to
+// the literal Yes/No layout).
+function sportsSideLabel(leg: DisplayLeg, side: 1 | 2): string | null {
+  switch (leg.marketType) {
+    case "moneyline":
+      return (side === 1 ? leg.yesOutcome : leg.noOutcome) ?? null;
+    case "spreads": {
+      const team = side === 1 ? leg.yesOutcome : leg.noOutcome;
+      if (leg.line == null) return team ?? null;
+      const sideLine = side === 1 ? leg.line : -leg.line;
+      const signed = `${sideLine > 0 ? "+" : ""}${sideLine}`;
+      return team ? `${team} ${signed}` : signed;
+    }
+    case "totals":
+      if (leg.line == null) return side === 1 ? "Over" : "Under";
+      return side === 1 ? `Over ${leg.line}` : `Under ${leg.line}`;
+    default:
+      return null;
+  }
+}
+
 /** Falls back to yes-side complement if noOdds is missing — defensive for single-sided seed markets. */
 function effectiveOdds(leg: DisplayLeg, outcome: number): number {
   if (outcome === 2) {
@@ -143,6 +227,12 @@ function apiMarketsToLegs(markets: Market[]): DisplayLeg[] {
         noProbabilityPPM: leg.noProbabilityPPM,
         correlationGroupId: leg.correlationGroupId ?? 0,
         exclusionGroupId: leg.exclusionGroupId ?? 0,
+        eventStart: leg.eventStart,
+        polymarketSlug: leg.polymarketSlug,
+        yesOutcome: leg.yesOutcome,
+        noOutcome: leg.noOutcome,
+        marketType: leg.marketType,
+        line: leg.line,
       });
     }
   }
@@ -194,6 +284,7 @@ export function ParlayBuilder() {
   const [marketsLoading, setMarketsLoading] = useState(true);
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useSessionState<string>(SESSION_KEYS.category, "all");
+  const [showMoreCats, setShowMoreCats] = useState(false);
 
   // ── Input state (persisted to sessionStorage) ──────────────────────────
 
@@ -283,6 +374,9 @@ export function ParlayBuilder() {
   }, [mounted, selectedLegs]);
 
   // 30s CLOB-mid poll, paused once buy flow starts (quote-sign's final refetch becomes source of truth).
+  // Also auto-pauses after 10 minutes of cart inactivity to cap DB egress for
+  // idle tabs — quote-sign re-prices on submit so a stale display is harmless.
+  // Any cart change re-runs this effect (selectedLegsKey dep) and starts a fresh window.
   const selectedLegsKey = useMemo(
     () => selectedLegs.map(s => `${s.leg.sourceRef}:${s.outcomeChoice}`).join("|"),
     [selectedLegs],
@@ -292,6 +386,8 @@ export function ParlayBuilder() {
   useEffect(() => {
     if (selectedLegs.length < 2 || buyActive) return;
 
+    const STALE_AFTER_MS = 10 * 60 * 1000;
+    const startedAt = Date.now();
     const abort = new AbortController();
     let cancelled = false;
 
@@ -334,7 +430,13 @@ export function ParlayBuilder() {
     }
 
     refresh();
-    const id = window.setInterval(refresh, 30_000);
+    const id = window.setInterval(() => {
+      if (Date.now() - startedAt > STALE_AFTER_MS) {
+        clearInterval(id);
+        return;
+      }
+      refresh();
+    }, 30_000);
     return () => {
       cancelled = true;
       abort.abort();
@@ -406,6 +508,20 @@ export function ParlayBuilder() {
       }
       games[gi].markets[mi].legs.push(leg);
     }
+
+    // Order games by earliest first-pitch / tip-off so a same-matchup series
+    // reads chronologically (May 9 before May 10). Games with no eventStart
+    // (political markets, season-long props, missing data) sink to the end.
+    const earliestStart = (g: (typeof games)[number]): number => {
+      let min = Infinity;
+      for (const market of g.markets) {
+        for (const leg of market.legs) {
+          if (leg.eventStart != null && leg.eventStart < min) min = leg.eventStart;
+        }
+      }
+      return min;
+    };
+    games.sort((a, b) => earliestStart(a) - earliestStart(b));
     return games;
   }, [filteredLegs]);
 
@@ -454,9 +570,24 @@ export function ParlayBuilder() {
   }, [stake, stakeNum, useLossless]);
 
   // legId → disabled reason; copy stays neutral per docs/changes/B_SLOG_SPRINT.md
+  // Per-side gating. Each leg has independent yes/no entries because some
+  // conflicts only block one direction (e.g. Mets ML YES blocks Mets -1.5
+  // YES but leaves Mets -1.5 NO selectable — see selectionConflicts above).
+  // Leg-level gates (exclusion groups, group cap) populate both sides.
+  type SideGate = { reason: "conflict" | "groupCap"; conflictsWith?: string };
   const legGate = useMemo(() => {
-    const gate = new Map<string, { reason: "conflict" | "groupCap"; conflictsWith?: string }>();
+    const gate = new Map<string, { yes?: SideGate; no?: SideGate }>();
     if (selectedLegs.length === 0) return gate;
+    const setSide = (legId: string, side: "yes" | "no", entry: SideGate) => {
+      const cur = gate.get(legId) ?? {};
+      cur[side] = entry;
+      gate.set(legId, cur);
+    };
+    const setBoth = (legId: string, entry: SideGate) => {
+      setSide(legId, "yes", entry);
+      setSide(legId, "no", entry);
+    };
+
     const corrCounts = new Map<number, number>();
     const exclusionOwners = new Map<number, DisplayLeg>();
     for (const s of selectedLegs) {
@@ -465,20 +596,42 @@ export function ParlayBuilder() {
       const eg = s.leg.exclusionGroupId;
       if (eg !== 0) exclusionOwners.set(eg, s.leg);
     }
+
     for (const leg of allLegs) {
       const idKey = leg.id.toString();
-      if (selectedLegs.some(s => s.leg.id === leg.id)) continue; // already selected — don't gate self
-      if (leg.exclusionGroupId !== 0) {
+      const selfSelected = selectedLegs.find(s => s.leg.id === leg.id);
+
+      // Exclusion group: blocks the whole leg regardless of side.
+      if (!selfSelected && leg.exclusionGroupId !== 0) {
         const owner = exclusionOwners.get(leg.exclusionGroupId);
         if (owner) {
-          gate.set(idKey, { reason: "conflict", conflictsWith: owner.description });
+          setBoth(idKey, { reason: "conflict", conflictsWith: owner.description });
           continue;
         }
       }
-      if (leg.correlationGroupId !== 0) {
+      // Group cap: also whole-leg.
+      if (!selfSelected && leg.correlationGroupId !== 0) {
         const count = corrCounts.get(leg.correlationGroupId) ?? 0;
         if (count >= effectiveMaxLegsPerGroup) {
-          gate.set(idKey, { reason: "groupCap" });
+          setBoth(idKey, { reason: "groupCap" });
+          continue;
+        }
+      }
+      // Per-side conflict (ML+spread same game). Evaluate each side
+      // independently: if picking this side would conflict with any other
+      // currently-selected leg, gate it. Skip the side that's currently
+      // selected on this leg (the user can deselect it by clicking again).
+      const others = selectedLegs.filter(s => s.leg.id !== leg.id);
+      for (const outcome of [1, 2] as const) {
+        if (selfSelected?.outcomeChoice === outcome) continue;
+        for (const o of others) {
+          if (selectionConflicts({ leg, outcome }, { leg: o.leg, outcome: o.outcomeChoice as 1 | 2 })) {
+            setSide(idKey, outcome === 1 ? "yes" : "no", {
+              reason: "conflict",
+              conflictsWith: o.leg.description,
+            });
+            break;
+          }
         }
       }
     }
@@ -586,38 +739,61 @@ export function ParlayBuilder() {
           </div>
         )}
 
-        {/* Category filter pills */}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveCategory("all")}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-              activeCategory === "all"
-                ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
-                : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
-            }`}
-          >
-            Featured
-          </button>
-          {availableCategories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                activeCategory === cat
-                  ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
-                  : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
-              }`}
-            >
-              {CATEGORY_LABELS[cat] ?? cat}
-              {cat === "nba" && (
-                <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 text-[10px] font-bold text-neon-green">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
-                  LIVE
-                </span>
+        {/* Category filter pills. Pinned categories (Featured + MLB) always
+            show; the rest collapse behind "+ show more" until the user
+            expands. If the active category lives in the hidden set, surface
+            it inline so the active state stays visible. */}
+        {(() => {
+          const pinnedSet = new Set<string>(PINNED_CATEGORIES);
+          const pinned = availableCategories.filter(c => pinnedSet.has(c));
+          const rest = availableCategories.filter(c => !pinnedSet.has(c));
+          const inlineActive =
+            !showMoreCats && activeCategory !== "all" && rest.includes(activeCategory) ? [activeCategory] : [];
+          const visibleCats = showMoreCats ? [...pinned, ...rest] : [...pinned, ...inlineActive];
+          const hasMore = rest.length > 0;
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveCategory("all")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                  activeCategory === "all"
+                    ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
+                    : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+                }`}
+              >
+                Featured
+              </button>
+              {visibleCats.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                    activeCategory === cat
+                      ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
+                      : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+                  }`}
+                >
+                  {CATEGORY_LABELS[cat] ?? cat}
+                  {cat === "mlb" && (
+                    <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 text-[10px] font-bold text-neon-green">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                      LIVE
+                    </span>
+                  )}
+                </button>
+              ))}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={() => setShowMoreCats(s => !s)}
+                  className="ml-1 text-xs font-medium text-gray-500 transition-colors hover:text-gray-200"
+                >
+                  {showMoreCats ? "− show less" : "+ show more"}
+                </button>
               )}
-            </button>
-          ))}
-        </div>
+            </div>
+          );
+        })()}
 
         {/* Leg counter: visual dot indicators */}
         <div className="flex items-center gap-2">
@@ -649,104 +825,289 @@ export function ParlayBuilder() {
               <p className="mt-1 text-xs text-gray-600">Check back soon — markets are synced from Polymarket.</p>
             </div>
           )}
-          {groupedByGame.map(game => (
-            <div key={`game:${game.gameGroup || "__flat__"}`} className="space-y-3">
-              {game.gameGroup && (
-                <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">{game.gameGroup}</h2>
-              )}
-              {game.markets.map(({ title, legs }) => (
-                <div key={`${game.gameGroup}::${title}`} className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h3>
-                    {legs[0] && (
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                          CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
-                        }`}
-                      >
-                        {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
-                      </span>
-                    )}
-                    {legs[0]?.sourceRef.startsWith("0x") && (
-                      <span
-                        title="Odds captured when this market was registered on-chain. They don't update mid-flight."
-                        className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
-                      >
-                        Odds locked
-                      </span>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {legs.map((leg, legIdx) => {
-                      const selected = selectedLegs.find(s => s.leg.id === leg.id);
-                      const hasNo = leg.noId !== undefined;
-                      const gateInfo = legGate.get(leg.id.toString());
-                      const gated = gateInfo !== undefined && !selected;
-                      const tooltip = gated
-                        ? gateInfo.reason === "conflict"
-                          ? `Conflicts with: ${gateInfo.conflictsWith ?? ""}`
-                          : "Leg limit reached"
-                        : undefined;
-                      return (
-                        <div
-                          key={leg.id.toString()}
-                          id={legIdx === 0 ? "ftue-market-card" : undefined}
-                          title={tooltip}
-                          className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
-                            selected
-                              ? selected.outcomeChoice === 1
-                                ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
-                                : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-                              : gated
-                                ? "opacity-40 grayscale"
-                                : "hover:border-white/10"
-                          }`}
-                          style={{ animationDelay: `${legIdx * 50}ms` }}
+          {groupedByGame.map(game => {
+            // MLB tab gets a specialized game-card layout: each game collapses
+            // its markets into a single glass-card with a prominent header
+            // (matchup, first pitch, market count). Other tabs keep the flat
+            // list for now — proof-of-concept before rolling to NBA/NFL/NHL.
+            const mlbCard = activeCategory === "mlb" && !!game.gameGroup;
+            const firstLeg = game.markets.flatMap(m => m.legs).find(l => l.eventStart !== undefined);
+            const headerSuffix = formatGameStartSuffix(firstLeg?.eventStart);
+            const marketCount = game.markets.length;
+            const wrapperClass = mlbCard ? "glass-card space-y-3 p-4" : "space-y-3";
+            // LIVE = game has started but the leg's cutoff is still in the
+            // future. The cutoff for sports legs is now `gameStart + 7d`, so
+            // this fires from first pitch through the post-game window until
+            // either Polymarket flips closed=true (markPolyClosed) or the
+            // price-based filter hides the row.
+            const nowSec = Math.floor(Date.now() / 1000);
+            const isLive = firstLeg?.eventStart != null && firstLeg.eventStart <= nowSec && firstLeg.expiresAt > nowSec;
+            // Game-header click-through to Polymarket: every leg in a game shares
+            // the same parent event slug, so any one of them is a valid source.
+            const anyLeg = game.markets.flatMap(m => m.legs)[0];
+            const gameHref = anyLeg ? polymarketHref(anyLeg) : null;
+            return (
+              <div key={`game:${game.gameGroup || "__flat__"}`} className={wrapperClass}>
+                {game.gameGroup &&
+                  (mlbCard ? (
+                    <div className="flex items-baseline justify-between border-b border-white/5 pb-2">
+                      <h2 className="text-base font-bold text-white">
+                        {gameHref ? (
+                          <a
+                            href={gameHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open game on Polymarket"
+                            className="transition-colors hover:text-brand-pink"
+                          >
+                            {game.gameGroup}
+                          </a>
+                        ) : (
+                          game.gameGroup
+                        )}
+                        {headerSuffix && <span className="font-normal text-gray-400"> - {headerSuffix}</span>}
+                        {isLive && (
+                          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                            LIVE
+                          </span>
+                        )}
+                      </h2>
+                      <div className="flex items-center gap-3 text-[11px] text-gray-400">
+                        <span>
+                          {marketCount} {marketCount === 1 ? "market" : "markets"}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">
+                      {gameHref ? (
+                        <a
+                          href={gameHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open game on Polymarket"
+                          className="transition-colors hover:text-white"
                         >
-                          {/* Yes / Question / No — question centered, sides flanking */}
-                          <div className="flex items-stretch">
-                            <button
-                              disabled={vaultEmpty || gated}
-                              onClick={() => toggleLeg(leg, 1)}
-                              className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                                selected?.outcomeChoice === 1
-                                  ? "bg-brand-green/20 text-brand-green"
-                                  : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
-                              } ${gated ? "cursor-not-allowed" : ""}`}
+                          {game.gameGroup}
+                        </a>
+                      ) : (
+                        game.gameGroup
+                      )}
+                      {headerSuffix && <span className="ml-2 font-normal text-gray-500"> - {headerSuffix}</span>}
+                      {isLive && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                          LIVE
+                        </span>
+                      )}
+                    </h2>
+                  ))}
+                {game.markets.map(({ title, legs }) => {
+                  // Hide the small uppercase bucket header when it would
+                  // duplicate what the leg card already says: either the
+                  // single leg's description matches the title (political
+                  // single-leg markets), or the leg is a sports wager whose
+                  // type is rendered as the middle-of-card label.
+                  const titleRedundant =
+                    legs.length === 1 &&
+                    (legs[0].description.trim() === title.trim() || legs[0].marketType !== undefined);
+                  return (
+                    <div key={`${game.gameGroup}::${title}`} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        {!titleRedundant && (
+                          <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h3>
+                        )}
+                        {legs[0] && (
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
+                            }`}
+                          >
+                            {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
+                          </span>
+                        )}
+                        {legs[0]?.sourceRef.startsWith("0x") && (
+                          <span
+                            title="Odds captured when this market was registered on-chain. They don't update mid-flight."
+                            className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
+                          >
+                            Odds locked
+                          </span>
+                        )}
+                        {legs[0]?.eventStart !== undefined && (
+                          <span
+                            title={new Date(legs[0].eventStart * 1000).toLocaleString()}
+                            className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-gray-400"
+                          >
+                            {formatEventStart(legs[0].eventStart)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {legs.map((leg, legIdx) => {
+                          const selected = selectedLegs.find(s => s.leg.id === leg.id);
+                          const hasNo = leg.noId !== undefined;
+                          const gateInfo = legGate.get(leg.id.toString());
+                          // Per-side gating. A side is gated if there's an
+                          // entry for it AND the user isn't already on that
+                          // side (so they can deselect by clicking again).
+                          const gateYes = gateInfo?.yes && selected?.outcomeChoice !== 1 ? gateInfo.yes : undefined;
+                          const gateNo = gateInfo?.no && selected?.outcomeChoice !== 2 ? gateInfo.no : undefined;
+                          const gatedYes = gateYes !== undefined;
+                          const gatedNo = gateNo !== undefined;
+                          // Whole-leg gating only when both sides are gated
+                          // and nothing is selected (used for card grayout +
+                          // outer tooltip).
+                          const fullyGated = !selected && gatedYes && gatedNo;
+                          const tooltipFor = (g: SideGate | undefined) =>
+                            g
+                              ? g.reason === "conflict"
+                                ? `Conflicts with: ${g.conflictsWith ?? ""}`
+                                : "Leg limit reached"
+                              : undefined;
+                          const yesTooltip = tooltipFor(gateYes);
+                          const noTooltip = tooltipFor(gateNo);
+                          // Sports markets read like a sportsbook: each side's
+                          // button carries the wager label (Padres -1.5,
+                          // Over 8.5) and the redundant question body in the
+                          // middle collapses into a small Polymarket link.
+                          const yesSportsLabel = sportsSideLabel(leg, 1);
+                          const noSportsLabel = sportsSideLabel(leg, 2);
+                          const isSports = yesSportsLabel !== null;
+                          return (
+                            <div
+                              key={leg.id.toString()}
+                              id={legIdx === 0 ? "ftue-market-card" : undefined}
+                              title={fullyGated ? (yesTooltip ?? noTooltip) : undefined}
+                              className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
+                                selected
+                                  ? selected.outcomeChoice === 1
+                                    ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
+                                    : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
+                                  : fullyGated
+                                    ? "opacity-40 grayscale"
+                                    : "hover:border-white/10"
+                              }`}
+                              style={{ animationDelay: `${legIdx * 50}ms` }}
                             >
-                              <span>Yes</span>
-                              <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                                {(leg.yesOdds * netLegFactor).toFixed(2)}x
-                              </span>
-                            </button>
-                            <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
-                              <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
+                              {/* Yes / Question / No — question centered, sides flanking */}
+                              <div className="flex items-stretch">
+                                <button
+                                  disabled={vaultEmpty || gatedYes}
+                                  onClick={() => toggleLeg(leg, 1)}
+                                  title={yesTooltip}
+                                  className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                    selected?.outcomeChoice === 1
+                                      ? "bg-brand-green/20 text-brand-green"
+                                      : gatedYes
+                                        ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
+                                        : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
+                                  }`}
+                                >
+                                  {yesSportsLabel ? (
+                                    <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
+                                      {yesSportsLabel}
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <span>Yes</span>
+                                      {leg.yesOutcome && (
+                                        <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                          {leg.yesOutcome}
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                  <span
+                                    className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
+                                  >
+                                    {(leg.yesOdds * netLegFactor).toFixed(2)}x
+                                  </span>
+                                </button>
+                                <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
+                                  {isSports ? (
+                                    // Wager type the user is actually placing
+                                    // (Moneyline / Run Line -1.5 / Over/Under
+                                    // 8.5). Linked to Polymarket — same link
+                                    // is also on the game-header above and in
+                                    // the bet slip; the redundancy is on
+                                    // purpose so the user can click out from
+                                    // wherever their eye lands.
+                                    polymarketHref(leg) ? (
+                                      <a
+                                        href={polymarketHref(leg) ?? undefined}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={e => e.stopPropagation()}
+                                        title="Open on Polymarket"
+                                        className="text-sm font-semibold text-gray-200 transition-colors hover:text-brand-pink"
+                                      >
+                                        {leg.marketTitle}
+                                      </a>
+                                    ) : (
+                                      <span className="text-sm font-semibold text-gray-200">{leg.marketTitle}</span>
+                                    )
+                                  ) : polymarketHref(leg) ? (
+                                    <a
+                                      href={polymarketHref(leg) ?? undefined}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={e => e.stopPropagation()}
+                                      title="Open on Polymarket"
+                                      className="min-w-0 text-sm text-gray-200 underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                                    >
+                                      {leg.description}
+                                    </a>
+                                  ) : (
+                                    <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
+                                  )}
+                                </div>
+                                {hasNo && (
+                                  <button
+                                    disabled={vaultEmpty || gatedNo}
+                                    onClick={() => toggleLeg(leg, 2)}
+                                    title={noTooltip}
+                                    className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                      selected?.outcomeChoice === 2
+                                        ? "bg-brand-amber/20 text-brand-amber"
+                                        : gatedNo
+                                          ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
+                                          : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                                    }`}
+                                  >
+                                    {noSportsLabel ? (
+                                      <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
+                                        {noSportsLabel}
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <span>No</span>
+                                        {leg.noOutcome && (
+                                          <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                            {leg.noOutcome}
+                                          </span>
+                                        )}
+                                      </>
+                                    )}
+                                    <span
+                                      className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
+                                    >
+                                      {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
+                                    </span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            {hasNo && (
-                              <button
-                                disabled={vaultEmpty || gated}
-                                onClick={() => toggleLeg(leg, 2)}
-                                className={`flex w-24 flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                                  selected?.outcomeChoice === 2
-                                    ? "bg-brand-amber/20 text-brand-amber"
-                                    : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
-                                } ${gated ? "cursor-not-allowed" : ""}`}
-                              >
-                                <span>No</span>
-                                <span className="tabular-nums text-[11px] font-semibold text-brand-gold/90">
-                                  {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
-                                </span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -769,38 +1130,69 @@ export function ParlayBuilder() {
           {/* Selected legs summary with numbered badges */}
           {selectedLegs.length > 0 && (
             <div className="space-y-2">
-              {selectedLegs.map(s => (
-                <div
-                  key={s.leg.id.toString()}
-                  className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
-                >
-                  <span className="min-w-0 flex-1 truncate text-gray-300">{s.leg.description}</span>
-                  <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
-                    {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
-                  </span>
-                  <span
-                    className={`ml-2 flex-shrink-0 text-xs font-bold ${
-                      s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
-                    }`}
+              {selectedLegs.map(s => {
+                const startLabel = formatEventStart(s.leg.eventStart);
+                const slipHref = polymarketHref(s.leg);
+                return (
+                  <div
+                    key={s.leg.id.toString()}
+                    className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
                   >
-                    {s.outcomeChoice === 1 ? "YES" : "NO"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
-                    aria-label={`Remove ${s.leg.description}`}
-                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3">
-                      <path
-                        fillRule="evenodd"
-                        d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      {slipHref ? (
+                        <a
+                          href={slipHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open on Polymarket"
+                          className="block truncate text-gray-300 underline decoration-gray-700 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                        >
+                          {s.leg.description}
+                        </a>
+                      ) : (
+                        <p className="truncate text-gray-300">{s.leg.description}</p>
+                      )}
+                      {startLabel && (
+                        <p
+                          title={s.leg.eventStart ? new Date(s.leg.eventStart * 1000).toLocaleString() : undefined}
+                          className="truncate text-[10px] text-gray-500"
+                        >
+                          {startLabel}
+                        </p>
+                      )}
+                    </div>
+                    <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
+                      {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
+                    </span>
+                    <span
+                      className={`ml-2 flex-shrink-0 text-xs font-bold ${
+                        s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
+                      }`}
+                    >
+                      {sportsSideLabel(s.leg, s.outcomeChoice === 1 ? 1 : 2) ?? (s.outcomeChoice === 1 ? "YES" : "NO")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
+                      aria-label={`Remove ${s.leg.description}`}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className="h-3 w-3"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 

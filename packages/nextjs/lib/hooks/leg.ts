@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchQuestionMapCached } from "../markets-cache";
+import { fetchSourceRefMap } from "../markets-cache";
 import { useContractClient } from "./_internal";
 import { useDeployedContract } from "./useDeployedContract";
 
@@ -13,6 +13,7 @@ export interface LegInfo {
   oracleAdapter: `0x${string}`;
   probabilityPPM: bigint;
   active: boolean;
+  eventStart?: number;
 }
 
 export interface LegOracleResult {
@@ -31,8 +32,8 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
     if (!publicClient || !registry || legIds.length === 0) return;
 
     const uniqueIds = Array.from(new Set(legIds.map(id => id.toString())));
-    const [questionMap, ...results] = await Promise.all([
-      fetchQuestionMapCached(),
+    const [sourceRefMap, ...results] = await Promise.all([
+      fetchSourceRefMap(),
       ...uniqueIds.map(async key => {
         try {
           const data = await publicClient.readContract({
@@ -51,8 +52,12 @@ export function useLegDescriptions(legIds: readonly bigint[]) {
     const map = new Map<string, LegInfo>();
     for (const r of results) {
       if (!r) continue;
-      const dbQuestion = questionMap.get(r.leg.sourceRef);
-      map.set(r.key, dbQuestion ? { ...r.leg, question: dbQuestion } : r.leg);
+      const lite = sourceRefMap.get(r.leg.sourceRef);
+      map.set(r.key, {
+        ...r.leg,
+        question: lite?.question ?? r.leg.question,
+        eventStart: lite?.eventStart,
+      });
     }
     setLegs(map);
   }, [publicClient, registry?.address, legIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -149,13 +149,66 @@ Without those, an RFQ implementation just adds a delay step before every ticket 
 
 ---
 
+## 9. DB egress hardening (round 2)
+
+**Why this is here.** Round 1 (item #15 in `C_USER_FEEDBACK.md`) cut the dominant egress source — the `/api/quote-preview` poll loop running `SELECT *` on the active-markets table — to a targeted lookup. The remaining offenders are smaller individually but constant. Worth a pass before the free-tier ceiling bites again.
+
+**Items, ordered by likely impact.**
+
+1. **HTTP-level caching for `/api/markets`, `/api/markets/categories`, `/api/admin/list`.** All three call into the DB on every request and have no `Cache-Control` / `revalidate`. The in-process cache in `lib/markets-cache.ts` is per-Lambda-instance and per-tab — cold starts and parallel users miss it. Replace `dynamic = "force-dynamic"` with `revalidate = 30` (markets) / `revalidate = 300` (admin list). One origin hit per TTL window instead of one per user-mount.
+2. **Slim `getActiveMarkets()` projection.** Still returns all 21 columns. Audit each call site and either (a) shrink the SELECT to columns actually consumed, or (b) split into purpose-specific projections (`getMarketsForList`, `getMarketsForSettler`) the same way `getMarketsForBuildLegs` was carved out.
+3. **Kill or back off the 10s `useRehabClaimable` poll.** `lib/hooks/vault.ts:164` runs `setInterval(refetchDemo, 10_000)` against `/api/rehab/demo-claimable`. The value only changes when the user demo-settles or claims — switch to action-driven refetch (call `refetchDemo()` from those handlers), or push the interval to 60s+. The hook is mounted on every page that renders the rehab banner, so the multiplier across users + tabs is real.
+4. **`useAdminList` is mounted globally.** `TestnetBanner` lives in `ScaffoldEthAppWithProviders.tsx`, so every page hits `/api/admin/list`. React Query staleTime is 30s but every fresh tab open = a query. Combine with item #1's `revalidate = 300` and this becomes a single-digit hits/day endpoint.
+5. **Audit other 5–10s pollers for action-driven alternatives.** `useTicket` (5s), `useUserTickets` (5s), `useUSDCBalance` (5s), `useVaultPosition` (10s), etc. — these hit RPC, not Postgres, so they don't show up on the DB egress bill, but the same "poll forever vs. refetch on tx confirm" question applies and they cost user-side data + RPC quota.
+6. **Batch the seed/sync upsert loops.** `/api/db/init` and `/api/polymarket/sync` `await upsertMarket()` per row in a serial loop — 200+ round trips per run. Bundle into `INSERT … VALUES (...), (...), … ON CONFLICT … DO UPDATE` per batch (or use `postgres.js`'s `sql.unsafe(query, [params])` with arrays). Not the ongoing-egress story, but cuts cron runtime + connection overhead.
+7. **Confirm Vercel crons fire on production only.** `vercel.json` has the `polymarket/sync` (8 AM) and `settlement/run` (8 PM) crons. Make sure they're not duplicated on preview deployments — Vercel honours cron config per-environment, but a preview branch with `vercel.json` edits can silently fire too. Five-minute dashboard check, not a code change.
+
+**Deferred because.** Round 1 was the smoking gun (~100× cut on the hottest path). Each remaining item is single-digit-percent of that. Picking these up makes sense if the egress bill stays elevated *after* round 1 ships, or if a future expansion (more pages, more pollers, more users) re-inflates the baseline.
+
+---
+
+## 10. Generalize MLB game-card sync to NBA / NFL / NHL
+
+**Current state.** `utils/parlay/polymarket/mlb.ts` ships an MLB-only fetcher built around `gamma /markets?tag_id=100381&sports_market_types=moneyline,spreads,totals` — empirically the only call that populates `sportsMarketType`, `line`, and `events[0]` for grouping. NBA, NFL, NHL still flow through the legacy `fetchSportEvents("nba"|"nfl"|"nhl")` → `gamma /events?tag_slug=…` path, where those fields come back null and the per-game card layout can't split a matchup into ML / spread / total rows.
+
+**Why deferred.** The MLB rewrite is intentionally a proof-of-concept. We want to validate the per-game-card pattern on one sport (does the deeper-book heuristic pick the right line? does the bucket-by-event grouping hold up when a game has props in addition to ML/spread/total? does the UI feel right with three rows per game?) before committing to the same shape across four sports.
+
+**Sketch when we pick this up.**
+- Lift the MLB fetcher to `fetchSportGames(sport)` keyed off a per-sport config: `{ tagId, marketTypes, formatTitle }`. NBA = spread + total + moneyline; NFL = same; NHL = puck line + total + moneyline. Tag IDs come from `gamma /sports`.
+- Per-sport `formatTitle` so spreads read as "Run Line ±X" (MLB), "Spread ±X" (NBA/NFL), "Puck Line ±X" (NHL). Totals stay "Over/Under X.X".
+- Each sport may surface different non-core types (NRFI for MLB, "first to score" for NHL, anytime TD for NFL). Decide per sport whether to render those as additional rows on the game card or hide them.
+- Same dedupe-priority trick: each sport's structured fetcher runs before the volume-ranked `featured` fetch so its rows win.
+
+**Out of scope for the generalization.**
+- Player props (assists, points, anytime TDs). Different shape — one market per (player × stat) instead of per game. Worth its own pass once core ML/spread/total feels right.
+- Live in-game odds. Polymarket's CLOB pushes price updates over websocket; pulling those into our sync is a bigger change than the REST poll the current MLB fetcher does.
+
+**When this picks up.** After we've watched the MLB tab in production for at least one weekend slate of games and the per-game-card layout has held up.
+
+---
+
+## 11. Safari-friendly onboarding (Rabby gap)
+
+**Status:** Carried over from `C_USER_FEEDBACK.md` item #13 — sketched but not implemented in the C-sprint. Picks up when an actual Safari user driver shows up.
+
+**Why this is on the radar.** Onboarding currently funnels new users to install Rabby. Rabby ships Chrome / Firefox / Brave / Edge extensions and a desktop app, but **no Safari extension** — Safari users hit a dead-end at install time. The funnel needs a Safari-specific branch.
+
+**Sketch of the fix.** Detect Safari in `/_onboard` (User-Agent regex like `/^((?!chrome|android).)*safari/i`). On Safari, swap the install path to a wallet that supports it — Coinbase Wallet on iOS / macOS, MetaMask Mobile via WalletConnect, or the WalletConnect QR path itself — and rewrite the copy so we're not telling Safari users to install something that doesn't exist for them. Keep the Rabby path for everyone else.
+
+**Why deferred.** No reported Safari user during the C-sprint. The existing copy is misleading on Safari but not blocking — the user just bounces. Worth picking up when (a) someone actually flags it, or (b) we promote the testnet build to a wider audience and Safari traffic becomes non-trivial.
+
+---
+
 ## Priority (informal)
 
 1. Oracle fault recovery — stuck tickets lock vault reserves indefinitely.
 2. Early-resolve tickets once a leg is lost — quick win, frees reserves sooner.
-3. Compromised-key detection + auto-pause — picks up real urgency once TVL crosses a threshold.
-4. Dynamic fee scaling — medium effort, strong DeFi mechanic.
-5. Dynamic max payout — medium effort, unlocks larger tickets.
-6. Jackpot pool — high effort, major feature expansion.
-7. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
-8. RFQ — only when real flow + a concrete maker set are in hand.
+3. DB egress hardening (round 2) — pick up if the egress bill stays elevated after round 1.
+4. Compromised-key detection + auto-pause — picks up real urgency once TVL crosses a threshold.
+5. Dynamic fee scaling — medium effort, strong DeFi mechanic.
+6. Dynamic max payout — medium effort, unlocks larger tickets.
+7. Jackpot pool — high effort, major feature expansion.
+8. ABIs in Postgres — only when multi-dev or historical-ABI verification becomes a real need.
+9. RFQ — only when real flow + a concrete maker set are in hand.
+10. Generalize MLB game-card sync to NBA / NFL / NHL — wait for one MLB weekend in prod first.
+11. Safari-friendly onboarding — pick up when an actual Safari user shows up.

@@ -274,9 +274,14 @@ export default Home;
 - Types use `UpperCamelCase` without `T` prefix (use `Address` not `TAddress`)
 - Avoid explicit typing when TypeScript can infer the type
 
+### Database Management
+- When developing it's assumed that we kill all database tables except tbadminwallets on every pass. There is no need to write a proper migration script. Remove any current database migration scripts from the initialization file.
+- The initialization script only needs to remove legacy tables from the most recent run.
+- Later on when we want to manage database migrations we'll need a different method for doing so to ensure the migration script is run once and only once.
+
 ### Comments
 
-Make comments that add information. Avoid redundant JSDoc for simple functions.
+Make high value one-line comments in code you write that are short and concise. If the comment takes multiple lines it should be documented in the architecture or change docs instead. Avoid redundant JSDoc for simple functions.
 
 ## Documentation
 

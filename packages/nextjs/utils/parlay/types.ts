@@ -47,6 +47,28 @@ export interface Leg {
    *  cart — the builder greys out conflicting legs and the engine reverts
    *  on duplicate non-zero ids. 0 = no exclusion. */
   exclusionGroupId?: number;
+  /** Event start (unix seconds). Polymarket-only; rendered as "starts in
+   *  N hours" on the leg card so users can see when the game tips off
+   *  without leaving the app. */
+  eventStart?: number;
+  /** Polymarket event slug. Powers the question-text click-through to
+   *  https://polymarket.com/event/<slug>. Polymarket-only; seed markets
+   *  leave it undefined and the UI renders the question without a link. */
+  polymarketSlug?: string;
+  /** YES-side outcome label (e.g. "Lakers"). Undefined when the upstream
+   *  market only carries the default "Yes" — the UI falls back to the
+   *  generic copy. */
+  yesOutcome?: string;
+  /** NO-side outcome label. Same convention as yesOutcome. */
+  noOutcome?: string;
+  /** Sports wager type from Polymarket's sportsMarketType. Drives the
+   *  YES/NO box copy: `moneyline` shows the team labels, `spreads` shows
+   *  team + signed line, `totals` shows Over/Under + line. Undefined for
+   *  political/crypto/news markets, which keep the literal Yes/No layout. */
+  marketType?: "moneyline" | "spreads" | "totals";
+  /** Raw line value (e.g. -1.5, 8.5). Pairs with `marketType === "spreads"`
+   *  or `"totals"`. Undefined for moneyline and non-sports markets. */
+  line?: number;
 }
 
 export interface Market {

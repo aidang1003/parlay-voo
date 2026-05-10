@@ -38,6 +38,7 @@
     "next:serve": "pnpm --filter @se-2/nextjs serve",
     "test": "pnpm foundry:test && pnpm test:web",
     "test:web": "pnpm --filter @se-2/nextjs test",
+    "db:init-admins": "pnpm --filter @se-2/nextjs db:init-admins",
     "typecheck": "pnpm next:check-types",
     "build": "dotenv -c -- pnpm --filter @se-2/nextjs build",
     "start": "dotenv -c -- pnpm --filter @se-2/nextjs start",

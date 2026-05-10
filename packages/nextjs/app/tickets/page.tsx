@@ -8,11 +8,14 @@ import { RehabClaimBanner } from "~~/components/RehabClaimBanner";
 import { TicketCard, type TicketData, type TicketLeg, type TicketStatus } from "~~/components/TicketCard";
 import { BASE_CASHOUT_PENALTY_BPS, PPM, computeClientCashoutValue } from "~~/lib/cashout";
 import {
+  type DeviationOutcome,
   type LegInfo,
   type LegOracleResult,
   type OnChainTicket,
+  type TicketDeviation,
   useLegDescriptions,
   useLegStatuses,
+  useUserLegDeviations,
   useUserTickets,
 } from "~~/lib/hooks";
 import { isLegWon, mapStatus, parseOutcomeChoice } from "~~/lib/utils";
@@ -40,17 +43,25 @@ function matchesTab(status: TicketStatus, tab: TabFilter): boolean {
   }
 }
 
+interface ToTicketDataResult {
+  data: TicketData;
+  demoActive: boolean;
+}
+
 function toTicketData(
   id: bigint,
   t: OnChainTicket,
   legMap: Map<string, LegInfo>,
   legStatuses: Map<string, LegOracleResult>,
-): TicketData {
+  legDeviations: ReadonlyMap<string, DeviationOutcome>,
+  ticketDeviation: TicketDeviation | undefined,
+): ToTicketDataResult {
   const multiplier = Number(t.multiplierX1e6) / PPM;
   const effectiveStake = t.stake - t.feePaid;
   const penaltyBps = BASE_CASHOUT_PENALTY_BPS;
   const wonProbsPPM: number[] = [];
   let unresolvedCount = 0;
+  let anyLegDemo = false;
 
   const legs: TicketLeg[] = t.legIds.map((legId, i): TicketLeg => {
     const leg = legMap.get(legId.toString());
@@ -59,8 +70,29 @@ function toTicketData(
     const effectivePPM = outcomeChoice === 2 ? PPM - rawPPM : outcomeChoice === 1 ? rawPPM : 0;
     const odds = effectivePPM > 0 ? PPM / effectivePPM : multiplier ** (1 / t.legIds.length);
     const oracleResult = legStatuses.get(legId.toString());
-    const resolved = oracleResult?.resolved ?? false;
-    const result = oracleResult?.status ?? 0;
+    let resolved = oracleResult?.resolved ?? false;
+    let result = oracleResult?.status ?? 0;
+    let demo = false;
+
+    // Layer leg deviation only while chain truth is still Unresolved — same
+    // rule as /ticket/[id]. Once the chain resolves, it wins.
+    if (!resolved && leg?.sourceRef) {
+      const dev = legDeviations.get(leg.sourceRef);
+      if (dev === "VOIDED") {
+        resolved = true;
+        result = 3;
+        demo = true;
+      } else if (dev === "YES") {
+        resolved = true;
+        result = 1;
+        demo = true;
+      } else if (dev === "NO") {
+        resolved = true;
+        result = 2;
+        demo = true;
+      }
+    }
+    if (demo) anyLegDemo = true;
 
     if (resolved && result !== 3) {
       if (isLegWon(outcomeChoice, result) && effectivePPM > 0) wonProbsPPM.push(effectivePPM);
@@ -76,11 +108,21 @@ function toTicketData(
       result,
       probabilityPPM: effectivePPM,
       legId,
+      demo,
+      eventStart: leg?.eventStart,
     };
   });
 
+  const allLegsChainResolved = legs.every(l => l.resolved && !l.demo);
+  const chainActive = t.status === 0;
+  const useTicketDeviation = chainActive && !allLegsChainResolved && !!ticketDeviation;
+
+  const status = useTicketDeviation ? (ticketDeviation!.status as TicketData["status"]) : mapStatus(t.status);
+  const payout = useTicketDeviation ? ticketDeviation!.payout : t.potentialPayout;
+  // Suppress the Cashout button whenever the user is in a demo settled state
+  // — a Won/Lost/Voided/Claimed ticket has no cashout, same as on chain.
   const cashoutValue =
-    unresolvedCount > 0
+    !useTicketDeviation && unresolvedCount > 0
       ? computeClientCashoutValue(
           effectiveStake,
           wonProbsPPM,
@@ -92,14 +134,17 @@ function toTicketData(
       : undefined;
 
   return {
-    id,
-    stake: t.stake,
-    feePaid: t.feePaid,
-    payout: t.potentialPayout,
-    legs,
-    status: mapStatus(t.status),
-    createdAt: Number(t.createdAt),
-    cashoutValue,
+    data: {
+      id,
+      stake: t.stake,
+      feePaid: t.feePaid,
+      payout,
+      legs,
+      status,
+      createdAt: Number(t.createdAt),
+      cashoutValue,
+    },
+    demoActive: anyLegDemo || useTicketDeviation,
   };
 }
 
@@ -126,25 +171,29 @@ export default function TicketsPage() {
 
   const legMap = useLegDescriptions(allLegIds);
   const legStatuses = useLegStatuses(allLegIds, legMap);
+  const { deviations, ticketDeviations } = useUserLegDeviations();
 
   const ticketDataList = useMemo(
-    () => tickets.map(({ id, ticket }) => toTicketData(id, ticket, legMap, legStatuses)),
-    [tickets, legMap, legStatuses],
+    () =>
+      tickets.map(({ id, ticket }) =>
+        toTicketData(id, ticket, legMap, legStatuses, deviations, ticketDeviations.get(id.toString())),
+      ),
+    [tickets, legMap, legStatuses, deviations, ticketDeviations],
   );
 
   const tabCounts = useMemo(() => {
     const counts: Record<TabFilter, number> = { all: 0, active: 0, settled: 0, cashed: 0 };
     for (const td of ticketDataList) {
       counts.all++;
-      if (matchesTab(td.status, "active")) counts.active++;
-      if (matchesTab(td.status, "settled")) counts.settled++;
-      if (matchesTab(td.status, "cashed")) counts.cashed++;
+      if (matchesTab(td.data.status, "active")) counts.active++;
+      if (matchesTab(td.data.status, "settled")) counts.settled++;
+      if (matchesTab(td.data.status, "cashed")) counts.cashed++;
     }
     return counts;
   }, [ticketDataList]);
 
   const filtered = useMemo(
-    () => ticketDataList.filter(td => matchesTab(td.status, activeTab)),
+    () => ticketDataList.filter(td => matchesTab(td.data.status, activeTab)),
     [ticketDataList, activeTab],
   );
 
@@ -250,11 +299,11 @@ export default function TicketsPage() {
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map(td => (
                 <Link
-                  key={td.id.toString()}
-                  href={`/ticket/${td.id.toString()}`}
+                  key={td.data.id.toString()}
+                  href={`/ticket/${td.data.id.toString()}`}
                   className="block h-full transition-transform hover:scale-[1.02]"
                 >
-                  <TicketCard ticket={td} />
+                  <TicketCard ticket={td.data} demoActive={td.demoActive} hideActions={td.demoActive} />
                 </Link>
               ))}
             </div>

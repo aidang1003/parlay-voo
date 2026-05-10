@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getRecentContractEvents } from "../events/chunked-events";
 import { fetchSourceRefMap } from "../markets-cache";
 import { parseOutcomeChoice } from "../utils";
 import { useContractClient, usePinnedChainId } from "./_internal";
@@ -256,12 +257,14 @@ export function useRecentResolutions({ limit = 20 }: { limit?: number } = {}) {
     const localId = ++fetchIdRef.current;
 
     try {
-      const logs = await publicClient.getContractEvents({
+      // Chunked scan — a fromBlock=0 → latest sweep exceeds Alchemy's 10k
+      // eth_getLogs cap on Base Sepolia and 413's the public-RPC fallback.
+      const logs = await getRecentContractEvents({
+        publicClient,
         address: oracle.address,
         abi: oracle.abi,
         eventName: "LegResolved",
-        fromBlock: 0n,
-        toBlock: "latest",
+        limit,
       });
 
       // Newest-first by block, then clip; resolves block timestamps + leg

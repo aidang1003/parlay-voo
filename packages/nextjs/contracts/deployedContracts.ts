@@ -7,7 +7,7 @@ import { GenericContractsDeclaration } from "~~/utils/scaffold-eth/contract";
 const deployedContracts = {
   31337: {
     MockUSDC: {
-      address: "0xbd836e1a0228b28227b2d69426ce270149e14041",
+      address: "0xe70f6ee7c08112dd87cc58347a19f65eec8c45f1",
       abi: [
         {
           type: "constructor",
@@ -355,10 +355,10 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 2,
+      deployedOnBlock: 26,
     },
     HouseVault: {
-      address: "0xc232129fa72304ec630c2a6ee0757edd704e6ca3",
+      address: "0xbdafc8f14768d59658edc4d2dce67899fa291397",
       abi: [
         {
           type: "constructor",
@@ -2176,10 +2176,10 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 3,
+      deployedOnBlock: 27,
     },
     LegRegistry: {
-      address: "0x774d67193b331df28aecd22f644ea30bb66bdd5e",
+      address: "0xdbf56c326ea1a585c19adf88ea0610e4231369e7",
       abi: [
         {
           type: "constructor",
@@ -2750,10 +2750,10 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 4,
+      deployedOnBlock: 28,
     },
     AdminOracleAdapter: {
-      address: "0x9d2a52b29e509884ac172cc26f3ef8dce2840ed9",
+      address: "0xfd9e89f009279bbf08e08cee6c543bc6f5a78830",
       abi: [
         {
           type: "constructor",
@@ -2927,10 +2927,10 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 5,
+      deployedOnBlock: 27,
     },
     ParlayEngine: {
-      address: "0x4d4b7dc9ea36595e1379c15f55efe243dd77e30a",
+      address: "0xeaccf060bf9c6fa7bc2138a07aad170970a22736",
       abi: [
         {
           type: "constructor",
@@ -4676,10 +4676,10 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 6,
+      deployedOnBlock: 28,
     },
     LockVaultV2: {
-      address: "0x2deccfaf7864353d4f6ff535576dce9a6ddef0a9",
+      address: "0xaafd5abdf6cc24f4e56b712d810d6be9b492fb3c",
       abi: [
         {
           type: "constructor",
@@ -5691,10 +5691,10 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 9,
+      deployedOnBlock: 28,
     },
     MockYieldAdapter: {
-      address: "0xb8cd5f56705fa03ff56e9e5c824fdaa2e8b1d7bd",
+      address: "0xbecaff8719f14ba762565150355befe7e120556d",
       abi: [
         {
           type: "constructor",
@@ -5910,7 +5910,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 13,
+      deployedOnBlock: 28,
     },
   },
   84532: {

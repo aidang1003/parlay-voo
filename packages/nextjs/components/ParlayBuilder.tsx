@@ -291,6 +291,7 @@ export function ParlayBuilder() {
   const [selectedLegs, setSelectedLegs] = useState<SelectedLeg[]>([]);
   const [stake, setStake] = useSessionState<string>(SESSION_KEYS.stake, "");
   const [mounted, setMounted] = useState(false);
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
 
   // Fetch markets from API
   useEffect(() => {
@@ -481,6 +482,17 @@ export function ParlayBuilder() {
       setActiveCategory("all");
     }
   }, [activeCategory, allLegs.length, filteredLegs.length, setActiveCategory]);
+
+  useEffect(() => {
+    if (isSuccess) setMobileCartOpen(false);
+  }, [isSuccess]);
+
+  useEffect(() => {
+    document.body.style.overflow = mobileCartOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileCartOpen]);
 
   const groupedByGame = useMemo(() => {
     const games: {
@@ -730,142 +742,173 @@ export function ParlayBuilder() {
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div id="ftue-builder" className={`grid gap-8 lg:grid-cols-5 ${mounted ? "" : "pointer-events-none opacity-0"}`}>
-      {/* Leg selector */}
-      <div className="space-y-4 lg:col-span-3">
-        {vaultEmpty && (
-          <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3 text-sm text-yellow-400">
-            No liquidity in the vault. Deposit USDC in the Vault tab to enable betting.
-          </div>
-        )}
+    <>
+      <div id="ftue-builder" className={`grid gap-8 lg:grid-cols-5 ${mounted ? "" : "pointer-events-none opacity-0"}`}>
+        {/* Leg selector */}
+        <div className={`space-y-4 lg:col-span-3 ${selectedLegs.length > 0 ? "pb-24 lg:pb-0" : ""}`}>
+          {vaultEmpty && (
+            <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3 text-sm text-yellow-400">
+              No liquidity in the vault. Deposit USDC in the Vault tab to enable betting.
+            </div>
+          )}
 
-        {/* Category filter pills. Pinned categories (Featured + MLB) always
+          {/* Category filter pills. Pinned categories (Featured + MLB) always
             show; the rest collapse behind "+ show more" until the user
             expands. If the active category lives in the hidden set, surface
             it inline so the active state stays visible. */}
-        {(() => {
-          const pinnedSet = new Set<string>(PINNED_CATEGORIES);
-          const pinned = availableCategories.filter(c => pinnedSet.has(c));
-          const rest = availableCategories.filter(c => !pinnedSet.has(c));
-          const inlineActive =
-            !showMoreCats && activeCategory !== "all" && rest.includes(activeCategory) ? [activeCategory] : [];
-          const visibleCats = showMoreCats ? [...pinned, ...rest] : [...pinned, ...inlineActive];
-          const hasMore = rest.length > 0;
-          return (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setActiveCategory("all")}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                  activeCategory === "all"
-                    ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
-                    : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
-                }`}
-              >
-                Featured
-              </button>
-              {visibleCats.map(cat => (
+          {(() => {
+            const pinnedSet = new Set<string>(PINNED_CATEGORIES);
+            const pinned = availableCategories.filter(c => pinnedSet.has(c));
+            const rest = availableCategories.filter(c => !pinnedSet.has(c));
+            const inlineActive =
+              !showMoreCats && activeCategory !== "all" && rest.includes(activeCategory) ? [activeCategory] : [];
+            const visibleCats = showMoreCats ? [...pinned, ...rest] : [...pinned, ...inlineActive];
+            const hasMore = rest.length > 0;
+            return (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
+                  onClick={() => setActiveCategory("all")}
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                    activeCategory === cat
+                    activeCategory === "all"
                       ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
                       : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
                   }`}
                 >
-                  {CATEGORY_LABELS[cat] ?? cat}
-                  {cat === "mlb" && (
-                    <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 text-[10px] font-bold text-neon-green">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
-                      LIVE
-                    </span>
-                  )}
+                  Featured
                 </button>
-              ))}
-              {hasMore && (
-                <button
-                  type="button"
-                  onClick={() => setShowMoreCats(s => !s)}
-                  className="ml-1 text-xs font-medium text-gray-500 transition-colors hover:text-gray-200"
-                >
-                  {showMoreCats ? "− show less" : "+ show more"}
-                </button>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* Leg counter: visual dot indicators */}
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-gray-300">Pick Your Legs</h2>
-          <div className="flex gap-1">
-            {Array.from({ length: effectiveMaxLegs }, (_, i) => (
-              <div
-                key={i}
-                className={`flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold transition-all ${
-                  i < selectedLegs.length ? "gradient-bg text-white shadow-sm" : "bg-white/5 text-gray-600"
-                }`}
-              >
-                {i + 1}
+                {visibleCats.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setActiveCategory(cat)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                      activeCategory === cat
+                        ? "gradient-bg text-white shadow-lg shadow-brand-pink/20"
+                        : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+                    }`}
+                  >
+                    {CATEGORY_LABELS[cat] ?? cat}
+                    {cat === "mlb" && (
+                      <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 text-[10px] font-bold text-neon-green">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                        LIVE
+                      </span>
+                    )}
+                  </button>
+                ))}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreCats(s => !s)}
+                    className="ml-1 text-xs font-medium text-gray-500 transition-colors hover:text-gray-200"
+                  >
+                    {showMoreCats ? "− show less" : "+ show more"}
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
-        </div>
+            );
+          })()}
 
-        <div className={`space-y-4 ${vaultEmpty ? "pointer-events-none opacity-40" : ""}`}>
-          {marketsLoading && allLegs.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-              <div className="mb-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-600 border-t-brand-purple" />
-              <p className="text-sm">Loading markets...</p>
+          {/* Leg counter: visual dot indicators */}
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-gray-300">Pick Your Legs</h2>
+            <div className="flex gap-1">
+              {Array.from({ length: effectiveMaxLegs }, (_, i) => (
+                <div
+                  key={i}
+                  className={`flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold transition-all ${
+                    i < selectedLegs.length ? "gradient-bg text-white shadow-sm" : "bg-white/5 text-gray-600"
+                  }`}
+                >
+                  {i + 1}
+                </div>
+              ))}
             </div>
-          )}
-          {!marketsLoading && allLegs.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-              <p className="text-sm">No markets available right now.</p>
-              <p className="mt-1 text-xs text-gray-600">Check back soon — markets are synced from Polymarket.</p>
-            </div>
-          )}
-          {groupedByGame.map(game => {
-            // MLB tab gets a specialized game-card layout: each game collapses
-            // its markets into a single glass-card with a prominent header
-            // (matchup, first pitch, market count). Other tabs keep the flat
-            // list for now — proof-of-concept before rolling to NBA/NFL/NHL.
-            const mlbCard = activeCategory === "mlb" && !!game.gameGroup;
-            const firstLeg = game.markets.flatMap(m => m.legs).find(l => l.eventStart !== undefined);
-            const headerSuffix = formatGameStartSuffix(firstLeg?.eventStart);
-            const marketCount = game.markets.length;
-            const wrapperClass = mlbCard ? "glass-card space-y-3 p-4" : "space-y-3";
-            // LIVE = game has started but the leg's cutoff is still in the
-            // future. The cutoff for sports legs is now `gameStart + 7d`, so
-            // this fires from first pitch through the post-game window until
-            // either Polymarket flips closed=true (markPolyClosed) or the
-            // price-based filter hides the row.
-            const nowSec = Math.floor(Date.now() / 1000);
-            const isLive = firstLeg?.eventStart != null && firstLeg.eventStart <= nowSec && firstLeg.expiresAt > nowSec;
-            // Game-header click-through to Polymarket: every leg in a game shares
-            // the same parent event slug, so any one of them is a valid source.
-            const anyLeg = game.markets.flatMap(m => m.legs)[0];
-            const gameHref = anyLeg ? polymarketHref(anyLeg) : null;
-            return (
-              <div key={`game:${game.gameGroup || "__flat__"}`} className={wrapperClass}>
-                {game.gameGroup &&
-                  (mlbCard ? (
-                    <div className="flex items-baseline justify-between border-b border-white/5 pb-2">
-                      <h2 className="text-base font-bold text-white">
+          </div>
+
+          <div className={`space-y-4 ${vaultEmpty ? "pointer-events-none opacity-40" : ""}`}>
+            {marketsLoading && allLegs.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                <div className="mb-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-600 border-t-brand-purple" />
+                <p className="text-sm">Loading markets...</p>
+              </div>
+            )}
+            {!marketsLoading && allLegs.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                <p className="text-sm">No markets available right now.</p>
+                <p className="mt-1 text-xs text-gray-600">Check back soon — markets are synced from Polymarket.</p>
+              </div>
+            )}
+            {groupedByGame.map(game => {
+              // MLB tab gets a specialized game-card layout: each game collapses
+              // its markets into a single glass-card with a prominent header
+              // (matchup, first pitch, market count). Other tabs keep the flat
+              // list for now — proof-of-concept before rolling to NBA/NFL/NHL.
+              const mlbCard = activeCategory === "mlb" && !!game.gameGroup;
+              const firstLeg = game.markets.flatMap(m => m.legs).find(l => l.eventStart !== undefined);
+              const headerSuffix = formatGameStartSuffix(firstLeg?.eventStart);
+              const marketCount = game.markets.length;
+              const wrapperClass = mlbCard ? "glass-card space-y-3 p-4" : "space-y-3";
+              // LIVE = game has started but the leg's cutoff is still in the
+              // future. The cutoff for sports legs is now `gameStart + 7d`, so
+              // this fires from first pitch through the post-game window until
+              // either Polymarket flips closed=true (markPolyClosed) or the
+              // price-based filter hides the row.
+              const nowSec = Math.floor(Date.now() / 1000);
+              const isLive =
+                firstLeg?.eventStart != null && firstLeg.eventStart <= nowSec && firstLeg.expiresAt > nowSec;
+              // Game-header click-through to Polymarket: every leg in a game shares
+              // the same parent event slug, so any one of them is a valid source.
+              const anyLeg = game.markets.flatMap(m => m.legs)[0];
+              const gameHref = anyLeg ? polymarketHref(anyLeg) : null;
+              return (
+                <div key={`game:${game.gameGroup || "__flat__"}`} className={wrapperClass}>
+                  {game.gameGroup &&
+                    (mlbCard ? (
+                      <div className="flex items-baseline justify-between border-b border-white/5 pb-2">
+                        <h2 className="text-base font-bold text-white">
+                          {gameHref ? (
+                            <a
+                              href={gameHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open game on Polymarket"
+                              className="transition-colors hover:text-brand-pink"
+                            >
+                              {game.gameGroup}
+                            </a>
+                          ) : (
+                            game.gameGroup
+                          )}
+                          {headerSuffix && <span className="font-normal text-gray-400"> - {headerSuffix}</span>}
+                          {isLive && (
+                            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
+                              LIVE
+                            </span>
+                          )}
+                        </h2>
+                        <div className="flex items-center gap-3 text-[11px] text-gray-400">
+                          <span>
+                            {marketCount} {marketCount === 1 ? "market" : "markets"}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">
                         {gameHref ? (
                           <a
                             href={gameHref}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="Open game on Polymarket"
-                            className="transition-colors hover:text-brand-pink"
+                            className="transition-colors hover:text-white"
                           >
                             {game.gameGroup}
                           </a>
                         ) : (
                           game.gameGroup
                         )}
-                        {headerSuffix && <span className="font-normal text-gray-400"> - {headerSuffix}</span>}
+                        {headerSuffix && <span className="ml-2 font-normal text-gray-500"> - {headerSuffix}</span>}
                         {isLive && (
                           <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
                             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
@@ -873,219 +916,119 @@ export function ParlayBuilder() {
                           </span>
                         )}
                       </h2>
-                      <div className="flex items-center gap-3 text-[11px] text-gray-400">
-                        <span>
-                          {marketCount} {marketCount === 1 ? "market" : "markets"}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <h2 className="border-b border-white/5 pb-1 text-sm font-bold text-gray-300">
-                      {gameHref ? (
-                        <a
-                          href={gameHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Open game on Polymarket"
-                          className="transition-colors hover:text-white"
-                        >
-                          {game.gameGroup}
-                        </a>
-                      ) : (
-                        game.gameGroup
-                      )}
-                      {headerSuffix && <span className="ml-2 font-normal text-gray-500"> - {headerSuffix}</span>}
-                      {isLive && (
-                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-neon-green/15 px-1.5 py-0.5 align-middle text-[10px] font-bold text-neon-green">
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neon-green" />
-                          LIVE
-                        </span>
-                      )}
-                    </h2>
-                  ))}
-                {game.markets.map(({ title, legs }) => {
-                  // Hide the small uppercase bucket header when it would
-                  // duplicate what the leg card already says: either the
-                  // single leg's description matches the title (political
-                  // single-leg markets), or the leg is a sports wager whose
-                  // type is rendered as the middle-of-card label.
-                  const titleRedundant =
-                    legs.length === 1 &&
-                    (legs[0].description.trim() === title.trim() || legs[0].marketType !== undefined);
-                  return (
-                    <div key={`${game.gameGroup}::${title}`} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        {!titleRedundant && (
-                          <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h3>
-                        )}
-                        {legs[0] && (
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                              CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
-                            }`}
-                          >
-                            {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
-                          </span>
-                        )}
-                        {legs[0]?.sourceRef.startsWith("0x") && (
-                          <span
-                            title="Odds captured when this market was registered on-chain. They don't update mid-flight."
-                            className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
-                          >
-                            Odds locked
-                          </span>
-                        )}
-                        {legs[0]?.eventStart !== undefined && (
-                          <span
-                            title={new Date(legs[0].eventStart * 1000).toLocaleString()}
-                            className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-gray-400"
-                          >
-                            {formatEventStart(legs[0].eventStart)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        {legs.map((leg, legIdx) => {
-                          const selected = selectedLegs.find(s => s.leg.id === leg.id);
-                          const hasNo = leg.noId !== undefined;
-                          const gateInfo = legGate.get(leg.id.toString());
-                          // Per-side gating. A side is gated if there's an
-                          // entry for it AND the user isn't already on that
-                          // side (so they can deselect by clicking again).
-                          const gateYes = gateInfo?.yes && selected?.outcomeChoice !== 1 ? gateInfo.yes : undefined;
-                          const gateNo = gateInfo?.no && selected?.outcomeChoice !== 2 ? gateInfo.no : undefined;
-                          const gatedYes = gateYes !== undefined;
-                          const gatedNo = gateNo !== undefined;
-                          // Whole-leg gating only when both sides are gated
-                          // and nothing is selected (used for card grayout +
-                          // outer tooltip).
-                          const fullyGated = !selected && gatedYes && gatedNo;
-                          const tooltipFor = (g: SideGate | undefined) =>
-                            g
-                              ? g.reason === "conflict"
-                                ? `Conflicts with: ${g.conflictsWith ?? ""}`
-                                : "Leg limit reached"
-                              : undefined;
-                          const yesTooltip = tooltipFor(gateYes);
-                          const noTooltip = tooltipFor(gateNo);
-                          // Sports markets read like a sportsbook: each side's
-                          // button carries the wager label (Padres -1.5,
-                          // Over 8.5) and the redundant question body in the
-                          // middle collapses into a small Polymarket link.
-                          const yesSportsLabel = sportsSideLabel(leg, 1);
-                          const noSportsLabel = sportsSideLabel(leg, 2);
-                          const isSports = yesSportsLabel !== null;
-                          return (
-                            <div
-                              key={leg.id.toString()}
-                              id={legIdx === 0 ? "ftue-market-card" : undefined}
-                              title={fullyGated ? (yesTooltip ?? noTooltip) : undefined}
-                              className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
-                                selected
-                                  ? selected.outcomeChoice === 1
-                                    ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
-                                    : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
-                                  : fullyGated
-                                    ? "opacity-40 grayscale"
-                                    : "hover:border-white/10"
+                    ))}
+                  {game.markets.map(({ title, legs }) => {
+                    // Hide the small uppercase bucket header when it would
+                    // duplicate what the leg card already says: either the
+                    // single leg's description matches the title (political
+                    // single-leg markets), or the leg is a sports wager whose
+                    // type is rendered as the middle-of-card label.
+                    const titleRedundant =
+                      legs.length === 1 &&
+                      (legs[0].description.trim() === title.trim() || legs[0].marketType !== undefined);
+                    return (
+                      <div key={`${game.gameGroup}::${title}`} className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          {!titleRedundant && (
+                            <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h3>
+                          )}
+                          {legs[0] && (
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                CATEGORY_COLORS[legs[0].category] ?? "bg-white/10 text-gray-400 border-white/10"
                               }`}
-                              style={{ animationDelay: `${legIdx * 50}ms` }}
                             >
-                              {/* Yes / Question / No — question centered, sides flanking */}
-                              <div className="flex items-stretch">
-                                <button
-                                  disabled={vaultEmpty || gatedYes}
-                                  onClick={() => toggleLeg(leg, 1)}
-                                  title={yesTooltip}
-                                  className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                                    selected?.outcomeChoice === 1
-                                      ? "bg-brand-green/20 text-brand-green"
-                                      : gatedYes
-                                        ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
-                                        : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
-                                  }`}
-                                >
-                                  {yesSportsLabel ? (
-                                    <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
-                                      {yesSportsLabel}
-                                    </span>
-                                  ) : (
-                                    <>
-                                      <span>Yes</span>
-                                      {leg.yesOutcome && (
-                                        <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
-                                          {leg.yesOutcome}
-                                        </span>
-                                      )}
-                                    </>
-                                  )}
-                                  <span
-                                    className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
-                                  >
-                                    {(leg.yesOdds * netLegFactor).toFixed(2)}x
-                                  </span>
-                                </button>
-                                <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
-                                  {isSports ? (
-                                    // Wager type the user is actually placing
-                                    // (Moneyline / Run Line -1.5 / Over/Under
-                                    // 8.5). Linked to Polymarket — same link
-                                    // is also on the game-header above and in
-                                    // the bet slip; the redundancy is on
-                                    // purpose so the user can click out from
-                                    // wherever their eye lands.
-                                    polymarketHref(leg) ? (
-                                      <a
-                                        href={polymarketHref(leg) ?? undefined}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={e => e.stopPropagation()}
-                                        title="Open on Polymarket"
-                                        className="text-sm font-semibold text-gray-200 transition-colors hover:text-brand-pink"
-                                      >
-                                        {leg.marketTitle}
-                                      </a>
-                                    ) : (
-                                      <span className="text-sm font-semibold text-gray-200">{leg.marketTitle}</span>
-                                    )
-                                  ) : polymarketHref(leg) ? (
-                                    <a
-                                      href={polymarketHref(leg) ?? undefined}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={e => e.stopPropagation()}
-                                      title="Open on Polymarket"
-                                      className="min-w-0 text-sm text-gray-200 underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
-                                    >
-                                      {leg.description}
-                                    </a>
-                                  ) : (
-                                    <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
-                                  )}
-                                </div>
-                                {hasNo && (
+                              {CATEGORY_LABELS[legs[0].category] ?? legs[0].category}
+                            </span>
+                          )}
+                          {legs[0]?.sourceRef.startsWith("0x") && (
+                            <span
+                              title="Odds captured when this market was registered on-chain. They don't update mid-flight."
+                              className="rounded-full border border-brand-purple/30 bg-brand-purple/10 px-2 py-0.5 text-[10px] font-medium text-brand-purple"
+                            >
+                              Odds locked
+                            </span>
+                          )}
+                          {legs[0]?.eventStart !== undefined && (
+                            <span
+                              title={new Date(legs[0].eventStart * 1000).toLocaleString()}
+                              className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-gray-400"
+                            >
+                              {formatEventStart(legs[0].eventStart)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {legs.map((leg, legIdx) => {
+                            const selected = selectedLegs.find(s => s.leg.id === leg.id);
+                            const hasNo = leg.noId !== undefined;
+                            const gateInfo = legGate.get(leg.id.toString());
+                            // Per-side gating. A side is gated if there's an
+                            // entry for it AND the user isn't already on that
+                            // side (so they can deselect by clicking again).
+                            const gateYes = gateInfo?.yes && selected?.outcomeChoice !== 1 ? gateInfo.yes : undefined;
+                            const gateNo = gateInfo?.no && selected?.outcomeChoice !== 2 ? gateInfo.no : undefined;
+                            const gatedYes = gateYes !== undefined;
+                            const gatedNo = gateNo !== undefined;
+                            // Whole-leg gating only when both sides are gated
+                            // and nothing is selected (used for card grayout +
+                            // outer tooltip).
+                            const fullyGated = !selected && gatedYes && gatedNo;
+                            const tooltipFor = (g: SideGate | undefined) =>
+                              g
+                                ? g.reason === "conflict"
+                                  ? `Conflicts with: ${g.conflictsWith ?? ""}`
+                                  : "Leg limit reached"
+                                : undefined;
+                            const yesTooltip = tooltipFor(gateYes);
+                            const noTooltip = tooltipFor(gateNo);
+                            // Sports markets read like a sportsbook: each side's
+                            // button carries the wager label (Padres -1.5,
+                            // Over 8.5) and the redundant question body in the
+                            // middle collapses into a small Polymarket link.
+                            const yesSportsLabel = sportsSideLabel(leg, 1);
+                            const noSportsLabel = sportsSideLabel(leg, 2);
+                            const isSports = yesSportsLabel !== null;
+                            return (
+                              <div
+                                key={leg.id.toString()}
+                                id={legIdx === 0 ? "ftue-market-card" : undefined}
+                                title={fullyGated ? (yesTooltip ?? noTooltip) : undefined}
+                                className={`animate-market-card-enter glass-card overflow-hidden transition-all ${
+                                  selected
+                                    ? selected.outcomeChoice === 1
+                                      ? "border-brand-green/40 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
+                                      : "border-brand-amber/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
+                                    : fullyGated
+                                      ? "opacity-40 grayscale"
+                                      : "hover:border-white/10"
+                                }`}
+                                style={{ animationDelay: `${legIdx * 50}ms` }}
+                              >
+                                {/* Yes / Question / No — question centered, sides flanking */}
+                                <div className="flex items-stretch">
                                   <button
-                                    disabled={vaultEmpty || gatedNo}
-                                    onClick={() => toggleLeg(leg, 2)}
-                                    title={noTooltip}
-                                    className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                                      selected?.outcomeChoice === 2
-                                        ? "bg-brand-amber/20 text-brand-amber"
-                                        : gatedNo
+                                    disabled={vaultEmpty || gatedYes}
+                                    onClick={() => toggleLeg(leg, 1)}
+                                    title={yesTooltip}
+                                    className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                      selected?.outcomeChoice === 1
+                                        ? "bg-brand-green/20 text-brand-green"
+                                        : gatedYes
                                           ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
-                                          : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                                          : "bg-white/[0.02] text-gray-400 hover:bg-brand-green/10 hover:text-brand-green/70"
                                     }`}
                                   >
-                                    {noSportsLabel ? (
+                                    {yesSportsLabel ? (
                                       <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
-                                        {noSportsLabel}
+                                        {yesSportsLabel}
                                       </span>
                                     ) : (
                                       <>
-                                        <span>No</span>
-                                        {leg.noOutcome && (
+                                        <span>Yes</span>
+                                        {leg.yesOutcome && (
                                           <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
-                                            {leg.noOutcome}
+                                            {leg.yesOutcome}
                                           </span>
                                         )}
                                       </>
@@ -1093,290 +1036,556 @@ export function ParlayBuilder() {
                                     <span
                                       className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
                                     >
-                                      {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
+                                      {(leg.yesOdds * netLegFactor).toFixed(2)}x
                                     </span>
                                   </button>
-                                )}
+                                  <div className="flex min-w-0 flex-1 items-center justify-center px-3 py-3 text-center">
+                                    {isSports ? (
+                                      // Wager type the user is actually placing
+                                      // (Moneyline / Run Line -1.5 / Over/Under
+                                      // 8.5). Linked to Polymarket — same link
+                                      // is also on the game-header above and in
+                                      // the bet slip; the redundancy is on
+                                      // purpose so the user can click out from
+                                      // wherever their eye lands.
+                                      polymarketHref(leg) ? (
+                                        <a
+                                          href={polymarketHref(leg) ?? undefined}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={e => e.stopPropagation()}
+                                          title="Open on Polymarket"
+                                          className="text-sm font-semibold text-gray-200 transition-colors hover:text-brand-pink"
+                                        >
+                                          {leg.marketTitle}
+                                        </a>
+                                      ) : (
+                                        <span className="text-sm font-semibold text-gray-200">{leg.marketTitle}</span>
+                                      )
+                                    ) : polymarketHref(leg) ? (
+                                      <a
+                                        href={polymarketHref(leg) ?? undefined}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={e => e.stopPropagation()}
+                                        title="Open on Polymarket"
+                                        className="min-w-0 text-sm text-gray-200 underline decoration-gray-600 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                                      >
+                                        {leg.description}
+                                      </a>
+                                    ) : (
+                                      <span className="min-w-0 text-sm text-gray-200">{leg.description}</span>
+                                    )}
+                                  </div>
+                                  {hasNo && (
+                                    <button
+                                      disabled={vaultEmpty || gatedNo}
+                                      onClick={() => toggleLeg(leg, 2)}
+                                      title={noTooltip}
+                                      className={`flex ${isSports ? "w-36" : "w-24"} flex-shrink-0 flex-col items-center justify-center gap-0.5 border-l border-white/5 px-2 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                                        selected?.outcomeChoice === 2
+                                          ? "bg-brand-amber/20 text-brand-amber"
+                                          : gatedNo
+                                            ? "cursor-not-allowed bg-white/[0.02] text-gray-600 opacity-40"
+                                            : "bg-white/[0.02] text-gray-400 hover:bg-brand-amber/10 hover:text-brand-amber/70"
+                                      }`}
+                                    >
+                                      {noSportsLabel ? (
+                                        <span className="max-w-full text-balance text-[13px] font-semibold normal-case leading-tight tracking-normal">
+                                          {noSportsLabel}
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <span>No</span>
+                                          {leg.noOutcome && (
+                                            <span className="max-w-full truncate text-[10px] font-medium normal-case tracking-normal text-current/80">
+                                              {leg.noOutcome}
+                                            </span>
+                                          )}
+                                        </>
+                                      )}
+                                      <span
+                                        className={`tabular-nums font-semibold text-brand-gold/90 ${isSports ? "text-[13px]" : "text-[11px]"}`}
+                                      >
+                                        {((leg.noOdds ?? effectiveOdds(leg, 2)) * netLegFactor).toFixed(2)}x
+                                      </span>
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Ticket builder / summary panel */}
-      <div className="lg:col-span-2">
-        <div
-          id="parlay-panel"
-          className="glass-card-glow sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6"
-        >
-          {/* Multiplier climb */}
-          <div id="parlay-multiplier">
-            <MultiplierClimb legMultipliers={climbLegMultipliers} animated />
-            {selectedLegs.length === 0 && (
-              <p className="mt-3 text-center text-xs text-gray-500">
-                Pick 2 to 5 markets on the left to build your parlay.
-              </p>
-            )}
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
+        </div>
 
-          {/* Selected legs summary with numbered badges */}
-          {selectedLegs.length > 0 && (
-            <div className="space-y-2">
-              {selectedLegs.map(s => {
-                const startLabel = formatEventStart(s.leg.eventStart);
-                const slipHref = polymarketHref(s.leg);
-                return (
-                  <div
-                    key={s.leg.id.toString()}
-                    className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
-                  >
-                    <div className="min-w-0 flex-1">
-                      {slipHref ? (
-                        <a
-                          href={slipHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Open on Polymarket"
-                          className="block truncate text-gray-300 underline decoration-gray-700 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+        {/* Ticket builder — sticky sidebar, desktop only */}
+        <div className="hidden lg:col-span-2 lg:block">
+          <div className="sticky top-20">
+            <div id="parlay-panel" className="glass-card-glow max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto p-6">
+              {/* Multiplier climb */}
+              <div id="parlay-multiplier">
+                <MultiplierClimb legMultipliers={climbLegMultipliers} animated />
+                {selectedLegs.length === 0 && (
+                  <p className="mt-3 text-center text-xs text-gray-500">
+                    Pick 2 to 5 markets on the left to build your parlay.
+                  </p>
+                )}
+              </div>
+
+              {/* Selected legs summary with numbered badges */}
+              {selectedLegs.length > 0 && (
+                <div className="space-y-2">
+                  {selectedLegs.map(s => {
+                    const startLabel = formatEventStart(s.leg.eventStart);
+                    const slipHref = polymarketHref(s.leg);
+                    return (
+                      <div
+                        key={s.leg.id.toString()}
+                        className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
+                      >
+                        <div className="min-w-0 flex-1">
+                          {slipHref ? (
+                            <a
+                              href={slipHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open on Polymarket"
+                              className="block truncate text-gray-300 underline decoration-gray-700 decoration-dotted underline-offset-4 transition-colors hover:text-white hover:decoration-brand-pink"
+                            >
+                              {s.leg.description}
+                            </a>
+                          ) : (
+                            <p className="truncate text-gray-300">{s.leg.description}</p>
+                          )}
+                          {startLabel && (
+                            <p
+                              title={s.leg.eventStart ? new Date(s.leg.eventStart * 1000).toLocaleString() : undefined}
+                              className="truncate text-[10px] text-gray-500"
+                            >
+                              {startLabel}
+                            </p>
+                          )}
+                        </div>
+                        <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
+                          {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
+                        </span>
+                        <span
+                          className={`ml-2 flex-shrink-0 text-xs font-bold ${
+                            s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
+                          }`}
                         >
-                          {s.leg.description}
-                        </a>
-                      ) : (
-                        <p className="truncate text-gray-300">{s.leg.description}</p>
-                      )}
-                      {startLabel && (
-                        <p
-                          title={s.leg.eventStart ? new Date(s.leg.eventStart * 1000).toLocaleString() : undefined}
-                          className="truncate text-[10px] text-gray-500"
+                          {sportsSideLabel(s.leg, s.outcomeChoice === 1 ? 1 : 2) ??
+                            (s.outcomeChoice === 1 ? "YES" : "NO")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
+                          aria-label={`Remove ${s.leg.description}`}
+                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
                         >
-                          {startLabel}
-                        </p>
-                      )}
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            className="h-3 w-3"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Lossless toggle — swaps the source of stake from USDC to promo credit */}
+              {hasAnyCredit && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Lossless mode</p>
+                      <p className="mt-0.5 text-[11px] text-amber-200/70">
+                        Use promo credit (${parseFloat(formatUnits(credit!, 6)).toFixed(2)}) instead of USDC. Wins lock
+                        VOO; losses just burn credit.
+                      </p>
                     </div>
-                    <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
-                      {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
-                    </span>
-                    <span
-                      className={`ml-2 flex-shrink-0 text-xs font-bold ${
-                        s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={useLossless}
+                      onClick={() => {
+                        resetSuccess();
+                        setUseLossless(v => !v);
+                      }}
+                      className={`relative h-6 w-11 flex-shrink-0 self-center rounded-full transition-colors ${
+                        useLossless ? "bg-amber-500" : "bg-white/10"
                       }`}
                     >
-                      {sportsSideLabel(s.leg, s.outcomeChoice === 1 ? 1 : 2) ?? (s.outcomeChoice === 1 ? "YES" : "NO")}
+                      <span
+                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                          useLossless ? "right-0.5" : "left-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Stake input */}
+              <div id="stake-input">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                    {useLossless ? "Stake (Credit)" : "Stake (USDC)"}
+                  </label>
+                  {useLossless ? (
+                    <span className="text-xs text-gray-500">Credit: {creditNum.toFixed(2)}</span>
+                  ) : (
+                    usdcBalance !== undefined && (
+                      <span className="flex items-center gap-2 text-xs text-gray-500">
+                        Balance: {parseFloat(formatUnits(usdcBalance, 6)).toFixed(2)}
+                        {isConnected && (
+                          <button
+                            onClick={() => mintHook.mint()}
+                            disabled={mintHook.isPending || mintHook.isConfirming}
+                            className="rounded-md bg-brand-pink/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand-pink transition-colors hover:bg-brand-pink/30 disabled:opacity-50"
+                          >
+                            {mintHook.isPending
+                              ? "..."
+                              : mintHook.isConfirming
+                                ? "Minting"
+                                : mintHook.isSuccess
+                                  ? "Done!"
+                                  : "+ Mint"}
+                          </button>
+                        )}
+                      </span>
+                    )
+                  )}
+                  {mintHook.error && <p className="text-xs text-red-400">{mintHook.error}</p>}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={stake}
+                    onKeyDown={blockNonNumericKeys}
+                    onChange={e => {
+                      resetSuccess();
+                      setStake(sanitizeNumericInput(e.target.value));
+                    }}
+                    placeholder={`Min ${effectiveMinStake} ${useLossless ? "credit" : "USDC"}`}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-24 text-lg font-semibold text-white placeholder-gray-600 outline-none transition-colors focus:border-brand-pink/50"
+                  />
+                  <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                    {useLossless && credit !== undefined && credit > 0n && (
+                      <button
+                        type="button"
+                        onClick={() => setStake(formatUnits(credit, 6))}
+                        className="rounded-md bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/30"
+                      >
+                        MAX
+                      </button>
+                    )}
+                    {!useLossless && usdcBalance !== undefined && usdcBalance > 0n && (
+                      <button
+                        type="button"
+                        onClick={() => setStake(formatUnits(usdcBalance!, 6))}
+                        className="rounded-md bg-brand-pink/20 px-2 py-0.5 text-xs font-semibold text-brand-pink transition-colors hover:bg-brand-pink/30"
+                      >
+                        MAX
+                      </button>
+                    )}
+                    <span className="text-sm text-gray-500">{useLossless ? "CREDIT" : "USDC"}</span>
+                  </div>
+                </div>
+                {stakeNum > 0 && (
+                  <p className="mt-1 text-right text-xs text-gray-500">
+                    {useLossless ? "= " : "Payment: "}$
+                    {paymentAmountUsdc.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                )}
+                {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                    <span>
+                      Vault caps this parlay at{" "}
+                      <span className="font-semibold text-gray-300">${impliedMaxStake.toFixed(2)}</span> stake
                     </span>
                     <button
                       type="button"
-                      onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
-                      aria-label={`Remove ${s.leg.description}`}
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 transition-colors hover:bg-neon-red/20 hover:text-neon-red"
+                      onClick={() => {
+                        resetSuccess();
+                        setStake(impliedMaxStake.toFixed(2));
+                      }}
+                      className="rounded-md bg-white/5 px-2 py-0.5 font-semibold text-gray-300 transition-colors hover:bg-white/10"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="h-3 w-3"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
+                      Use cap
                     </button>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
 
-          {/* Lossless toggle — swaps the source of stake from USDC to promo credit */}
-          {hasAnyCredit && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Lossless mode</p>
-                  <p className="mt-0.5 text-[11px] text-amber-200/70">
-                    Use promo credit (${parseFloat(formatUnits(credit!, 6)).toFixed(2)}) instead of USDC. Wins lock VOO;
-                    losses just burn credit.
-                  </p>
+              {/* fee + correlation baked into multiplier per docs/changes/B_SLOG_SPRINT.md */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between text-gray-400">
+                  <span>Potential Payout</span>
+                  <span className="font-semibold text-white">${potentialPayout.toFixed(2)}</span>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={useLossless}
-                  onClick={() => {
-                    resetSuccess();
-                    setUseLossless(v => !v);
-                  }}
-                  className={`relative h-6 w-11 flex-shrink-0 self-center rounded-full transition-colors ${
-                    useLossless ? "bg-amber-500" : "bg-white/10"
+                <div className="flex justify-between text-gray-400">
+                  <span>Combined Odds</span>
+                  <span className="gradient-text-gold text-glow-gold font-bold">{multiplier.toFixed(2)}x</span>
+                </div>
+              </div>
+
+              {/* Buy button */}
+              <button
+                onClick={!mounted || !isConnected ? () => openConnectModal?.() : handleBuy}
+                disabled={mounted && isConnected && (!canBuy || vaultEmpty || isPending || isConfirming)}
+                className={`btn-gradient w-full rounded-xl py-3.5 text-sm font-bold uppercase tracking-wider text-white transition-all ${
+                  !mounted || !isConnected
+                    ? ""
+                    : canBuy && !vaultEmpty && !isPending && !isConfirming
+                      ? ""
+                      : "!bg-none !bg-gray-800 !text-gray-500 cursor-not-allowed !shadow-none"
+                }`}
+              >
+                {buyButtonLabel()}
+              </button>
+
+              {/* Tx feedback */}
+              {txState && (
+                <div
+                  className={`rounded-lg px-4 py-2.5 text-center text-sm font-medium animate-fade-in ${
+                    txState === "confirmed"
+                      ? "bg-neon-green/10 text-neon-green"
+                      : "bg-brand-purple/10 text-brand-purple-1"
                   }`}
                 >
-                  <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-                      useLossless ? "right-0.5" : "left-0.5"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Stake input */}
-          <div id="stake-input">
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                {useLossless ? "Stake (Credit)" : "Stake (USDC)"}
-              </label>
-              {useLossless ? (
-                <span className="text-xs text-gray-500">Credit: {creditNum.toFixed(2)}</span>
-              ) : (
-                usdcBalance !== undefined && (
-                  <span className="flex items-center gap-2 text-xs text-gray-500">
-                    Balance: {parseFloat(formatUnits(usdcBalance, 6)).toFixed(2)}
-                    {isConnected && (
-                      <button
-                        onClick={() => mintHook.mint()}
-                        disabled={mintHook.isPending || mintHook.isConfirming}
-                        className="rounded-md bg-brand-pink/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand-pink transition-colors hover:bg-brand-pink/30 disabled:opacity-50"
-                      >
-                        {mintHook.isPending
-                          ? "..."
-                          : mintHook.isConfirming
-                            ? "Minting"
-                            : mintHook.isSuccess
-                              ? "Done!"
-                              : "+ Mint"}
-                      </button>
-                    )}
-                  </span>
-                )
+                  {txState === "pending" && "Transaction submitted..."}
+                  {txState === "confirming" && "Waiting for confirmation..."}
+                  {txState === "confirmed" && lastTicketId != null && (
+                    <Link
+                      href={`/ticket/${lastTicketId.toString()}`}
+                      className="underline underline-offset-2 hover:text-neon-green/80"
+                    >
+                      Your parlay ticket is live! View Ticket #{lastTicketId.toString()} &rarr;
+                    </Link>
+                  )}
+                  {txState === "confirmed" && lastTicketId == null && "Your parlay ticket is live!"}
+                </div>
               )}
-              {mintHook.error && <p className="text-xs text-red-400">{mintHook.error}</p>}
-            </div>
-            <div className="relative">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={stake}
-                onKeyDown={blockNonNumericKeys}
-                onChange={e => {
-                  resetSuccess();
-                  setStake(sanitizeNumericInput(e.target.value));
-                }}
-                placeholder={`Min ${effectiveMinStake} ${useLossless ? "credit" : "USDC"}`}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-24 text-lg font-semibold text-white placeholder-gray-600 outline-none transition-colors focus:border-brand-pink/50"
-              />
-              <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                {useLossless && credit !== undefined && credit > 0n && (
-                  <button
-                    type="button"
-                    onClick={() => setStake(formatUnits(credit, 6))}
-                    className="rounded-md bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/30"
-                  >
-                    MAX
-                  </button>
-                )}
-                {!useLossless && usdcBalance !== undefined && usdcBalance > 0n && (
-                  <button
-                    type="button"
-                    onClick={() => setStake(formatUnits(usdcBalance!, 6))}
-                    className="rounded-md bg-brand-pink/20 px-2 py-0.5 text-xs font-semibold text-brand-pink transition-colors hover:bg-brand-pink/30"
-                  >
-                    MAX
-                  </button>
-                )}
-                <span className="text-sm text-gray-500">{useLossless ? "CREDIT" : "USDC"}</span>
-              </div>
-            </div>
-            {stakeNum > 0 && (
-              <p className="mt-1 text-right text-xs text-gray-500">
-                {useLossless ? "= " : "Payment: "}$
-                {paymentAmountUsdc.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-            )}
-            {selectedLegs.length >= MIN_LEGS && statsLoaded && impliedMaxStake > 0 && (
-              <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                <span>
-                  Vault caps this parlay at{" "}
-                  <span className="font-semibold text-gray-300">${impliedMaxStake.toFixed(2)}</span> stake
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetSuccess();
-                    setStake(impliedMaxStake.toFixed(2));
-                  }}
-                  className="rounded-md bg-white/5 px-2 py-0.5 font-semibold text-gray-300 transition-colors hover:bg-white/10"
-                >
-                  Use cap
-                </button>
-              </div>
-            )}
-          </div>
 
-          {/* fee + correlation baked into multiplier per docs/changes/B_SLOG_SPRINT.md */}
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between text-gray-400">
-              <span>Potential Payout</span>
-              <span className="font-semibold text-white">${potentialPayout.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-gray-400">
-              <span>Combined Odds</span>
-              <span className="gradient-text-gold text-glow-gold font-bold">{multiplier.toFixed(2)}x</span>
+              {error && (
+                <div className="rounded-lg bg-neon-red/10 px-4 py-2.5 text-center text-sm text-neon-red animate-fade-in">
+                  {error.message.length > 100 ? error.message.slice(0, 100) + "..." : error.message}
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Buy button */}
-          <button
-            onClick={!mounted || !isConnected ? () => openConnectModal?.() : handleBuy}
-            disabled={mounted && isConnected && (!canBuy || vaultEmpty || isPending || isConfirming)}
-            className={`btn-gradient w-full rounded-xl py-3.5 text-sm font-bold uppercase tracking-wider text-white transition-all ${
-              !mounted || !isConnected
-                ? ""
-                : canBuy && !vaultEmpty && !isPending && !isConfirming
-                  ? ""
-                  : "!bg-none !bg-gray-800 !text-gray-500 cursor-not-allowed !shadow-none"
-            }`}
-          >
-            {buyButtonLabel()}
-          </button>
-
-          {/* Tx feedback */}
-          {txState && (
-            <div
-              className={`rounded-lg px-4 py-2.5 text-center text-sm font-medium animate-fade-in ${
-                txState === "confirmed" ? "bg-neon-green/10 text-neon-green" : "bg-brand-purple/10 text-brand-purple-1"
-              }`}
-            >
-              {txState === "pending" && "Transaction submitted..."}
-              {txState === "confirming" && "Waiting for confirmation..."}
-              {txState === "confirmed" && lastTicketId != null && (
-                <Link
-                  href={`/ticket/${lastTicketId.toString()}`}
-                  className="underline underline-offset-2 hover:text-neon-green/80"
-                >
-                  Your parlay ticket is live! View Ticket #{lastTicketId.toString()} &rarr;
-                </Link>
-              )}
-              {txState === "confirmed" && lastTicketId == null && "Your parlay ticket is live!"}
-            </div>
-          )}
-
-          {error && (
-            <div className="rounded-lg bg-neon-red/10 px-4 py-2.5 text-center text-sm text-neon-red animate-fade-in">
-              {error.message.length > 100 ? error.message.slice(0, 100) + "..." : error.message}
-            </div>
-          )}
         </div>
       </div>
-    </div>
+
+      {/* Mobile cart bar — fixed at bottom when legs are selected */}
+      {selectedLegs.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 p-3 lg:hidden">
+          <button
+            onClick={() => setMobileCartOpen(true)}
+            className="btn-gradient w-full rounded-xl py-4 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-brand-pink/30"
+          >
+            {selectedLegs.length} Leg{selectedLegs.length !== 1 ? "s" : ""} <span className="mx-2 opacity-40">·</span>
+            <span className="gradient-text-gold">{multiplier.toFixed(2)}x</span>
+            <span className="mx-2 opacity-40">·</span>
+            View Cart →
+          </button>
+        </div>
+      )}
+
+      {/* Mobile cart bottom sheet — z-[60] sits above header and ChatPanel (both z-50) */}
+      {mobileCartOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col justify-end bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileCartOpen(false)}
+        >
+          <div
+            className="glass-card-glow max-h-[90dvh] overflow-y-auto rounded-t-2xl p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20" />
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="font-bold text-white">Your Parlay</h3>
+              <button
+                aria-label="Close cart"
+                onClick={() => setMobileCartOpen(false)}
+                className="btn btn-sm btn-ghost btn-circle hover:text-white"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path
+                    fillRule="evenodd"
+                    d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-5">
+              {/* Selected legs */}
+              {selectedLegs.length > 0 && (
+                <div className="space-y-2">
+                  {selectedLegs.map(s => (
+                    <div
+                      key={s.leg.id.toString()}
+                      className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm animate-fade-in"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-gray-300">{s.leg.description}</p>
+                      </div>
+                      <span className="flex-shrink-0 rounded-md bg-brand-pink/15 px-2 py-0.5 font-mono text-sm font-bold text-brand-pink">
+                        {(effectiveOdds(s.leg, s.outcomeChoice) * netLegFactor).toFixed(2)}x
+                      </span>
+                      <span
+                        className={`flex-shrink-0 text-xs font-bold ${
+                          s.outcomeChoice === 1 ? "text-brand-green" : "text-brand-amber"
+                        }`}
+                      >
+                        {sportsSideLabel(s.leg, s.outcomeChoice === 1 ? 1 : 2) ??
+                          (s.outcomeChoice === 1 ? "YES" : "NO")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleLeg(s.leg, s.outcomeChoice)}
+                        aria-label={`Remove ${s.leg.description}`}
+                        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-gray-500 hover:bg-neon-red/20 hover:text-neon-red"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="h-3 w-3"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M4.28 3.22a.75.75 0 00-1.06 1.06L8.94 10l-5.72 5.72a.75.75 0 101.06 1.06L10 11.06l5.72 5.72a.75.75 0 101.06-1.06L11.06 10l5.72-5.72a.75.75 0 00-1.06-1.06L10 8.94 4.28 3.22z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Payout summary */}
+              {selectedLegs.length >= MIN_LEGS && (
+                <div className="flex justify-between rounded-lg bg-white/5 px-4 py-2.5 text-sm">
+                  <span className="text-gray-400">Combined Odds</span>
+                  <span className="gradient-text-gold font-bold">{multiplier.toFixed(2)}x</span>
+                </div>
+              )}
+
+              {/* Stake input */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                    {useLossless ? "Stake (Credit)" : "Stake (USDC)"}
+                  </label>
+                  {useLossless ? (
+                    <span className="text-xs text-gray-500">Credit: {creditNum.toFixed(2)}</span>
+                  ) : (
+                    usdcBalance !== undefined && (
+                      <span className="text-xs text-gray-500">
+                        Balance: {parseFloat(formatUnits(usdcBalance, 6)).toFixed(2)}
+                      </span>
+                    )
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={stake}
+                    onKeyDown={blockNonNumericKeys}
+                    onChange={e => {
+                      resetSuccess();
+                      setStake(sanitizeNumericInput(e.target.value));
+                    }}
+                    placeholder={`Min ${effectiveMinStake} USDC`}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-24 text-lg font-semibold text-white placeholder-gray-600 outline-none focus:border-brand-pink/50"
+                  />
+                  <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                    {!useLossless && usdcBalance !== undefined && usdcBalance > 0n && (
+                      <button
+                        type="button"
+                        onClick={() => setStake(formatUnits(usdcBalance!, 6))}
+                        className="rounded-md bg-brand-pink/20 px-2 py-0.5 text-xs font-semibold text-brand-pink hover:bg-brand-pink/30"
+                      >
+                        MAX
+                      </button>
+                    )}
+                    <span className="text-sm text-gray-500">{useLossless ? "CREDIT" : "USDC"}</span>
+                  </div>
+                </div>
+                {stakeNum > 0 && (
+                  <p className="mt-1 text-right text-xs text-gray-500">Payout: ${potentialPayout.toFixed(2)}</p>
+                )}
+              </div>
+
+              {/* Buy button */}
+              <button
+                onClick={!mounted || !isConnected ? () => openConnectModal?.() : handleBuy}
+                disabled={mounted && isConnected && (!canBuy || vaultEmpty || isPending || isConfirming)}
+                className={`btn-gradient w-full rounded-xl py-3.5 text-sm font-bold uppercase tracking-wider text-white transition-all ${
+                  !mounted || !isConnected
+                    ? ""
+                    : canBuy && !vaultEmpty && !isPending && !isConfirming
+                      ? ""
+                      : "!bg-none !bg-gray-800 !text-gray-500 cursor-not-allowed !shadow-none"
+                }`}
+              >
+                {buyButtonLabel()}
+              </button>
+
+              {/* Tx feedback */}
+              {txState && (
+                <div
+                  className={`rounded-lg px-4 py-2.5 text-center text-sm font-medium animate-fade-in ${
+                    txState === "confirmed"
+                      ? "bg-neon-green/10 text-neon-green"
+                      : "bg-brand-purple/10 text-brand-purple-1"
+                  }`}
+                >
+                  {txState === "pending" && "Transaction submitted..."}
+                  {txState === "confirming" && "Waiting for confirmation..."}
+                  {txState === "confirmed" && lastTicketId != null && (
+                    <Link
+                      href={`/ticket/${lastTicketId.toString()}`}
+                      className="underline underline-offset-2 hover:text-neon-green/80"
+                    >
+                      Your parlay ticket is live! View Ticket #{lastTicketId.toString()} &rarr;
+                    </Link>
+                  )}
+                  {txState === "confirmed" && lastTicketId == null && "Your parlay ticket is live!"}
+                </div>
+              )}
+
+              {error && (
+                <div className="rounded-lg bg-neon-red/10 px-4 py-2.5 text-center text-sm text-neon-red animate-fade-in">
+                  {error.message.length > 100 ? error.message.slice(0, 100) + "..." : error.message}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

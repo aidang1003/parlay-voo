@@ -32,6 +32,7 @@
     "account:reveal-pk": "echo 'pnpm account:reveal-pk is not used — WARM_DEPLOYER_PRIVATE_KEY is in .env'"
   },
   "devDependencies": {
-    "dotenv-cli": "^7.4.2"
+    "dotenv-cli": "^7.4.2",
+    "prettier": "~3.5.3"
   }
 }

@@ -26,6 +26,9 @@ importers:
       dotenv-cli:
         specifier: ^7.4.2
         version: 7.4.4
+      prettier:
+        specifier: ~3.5.3
+        version: 3.5.3
 
   packages/nextjs:
     dependencies:

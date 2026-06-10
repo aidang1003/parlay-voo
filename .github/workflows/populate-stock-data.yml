@@ -24,7 +24,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install fetcher deps
-        run: pip install yfinance
+        working-directory: 100xportfolio
+        run: pip install -r requirements.txt yfinance
       - name: Fetch prices -> app/stocks.json
         working-directory: 100xportfolio
         run: python scripts/fetch_prices.py

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="parlay">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>100xPortfolio — Can you 100x?</title>
+    <meta
+      name="description"
+      content="A daily stock-picking game. Random eras, random industries, five picks. Can your portfolio 100x?"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="glow glow-a"></div>
+    <div class="glow glow-b"></div>
+
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark">100x</span><span class="brand-rest">Portfolio</span>
+      </div>
+      <div class="tagline">Pick 5 stocks across 5 random eras. Can you 100×?</div>
+    </header>
+
+    <main id="app">
+      <!-- INTRO -->
+      <section id="intro" class="screen card">
+        <h1 class="hero-title">Can your portfolio go <span class="gradient">100x?</span></h1>
+        <p class="hero-sub">
+          The slot machine deals you a random <strong>5-year era</strong> and a random
+          <strong>industry</strong>. Pick the one stock you think crushed it. Do it five times.
+          Then we simulate your portfolio and grade your run.
+        </p>
+        <ul class="rules">
+          <li><span class="dot">①</span> 5 rounds. $10,000 invested per pick — $50,000 total.</li>
+          <li><span class="dot">②</span> Stats are hidden. This is a test of market history.</li>
+          <li><span class="dot">③</span> One <em>era skip</em> + one <em>industry skip</em> for the whole game.</li>
+          <li><span class="dot">④</span> Everyone gets the same spins each day. One run, make it count.</li>
+        </ul>
+        <button id="start-btn" class="btn btn-primary btn-lg">Start today's run →</button>
+        <p id="already-played" class="hint hidden">You've already played today — showing your result.</p>
+      </section>
+
+      <!-- GAME -->
+      <section id="game" class="screen hidden">
+        <div class="progress-rail" id="progress-rail"></div>
+
+        <div class="slot card" id="slot">
+          <div class="slot-row">
+            <div class="slot-label">ERA</div>
+            <div class="slot-reel" id="reel-era">––––</div>
+          </div>
+          <div class="slot-x">×</div>
+          <div class="slot-row">
+            <div class="slot-label">INDUSTRY</div>
+            <div class="slot-reel" id="reel-industry">––––</div>
+          </div>
+        </div>
+
+        <div class="skip-bar">
+          <button id="skip-era" class="btn btn-ghost btn-sm">↻ Era skip</button>
+          <span class="round-counter" id="round-counter">Round 1 / 5</span>
+          <button id="skip-industry" class="btn btn-ghost btn-sm">↻ Industry skip</button>
+        </div>
+
+        <div class="stock-grid" id="stock-grid"></div>
+      </section>
+
+      <!-- RESULT -->
+      <section id="result" class="screen hidden">
+        <div class="result-head card">
+          <div class="grade-badge" id="grade-badge">–</div>
+          <div class="result-headline">
+            <div class="result-multiple" id="result-multiple">–×</div>
+            <div class="result-verdict" id="result-verdict"></div>
+          </div>
+          <div class="result-money">
+            <div><span class="muted">Invested</span> <b id="res-invested">$50,000</b></div>
+            <div><span class="muted">Final value</span> <b id="res-final">–</b></div>
+          </div>
+        </div>
+
+        <div class="result-legs" id="result-legs"></div>
+
+        <div class="result-callouts">
+          <div class="callout best">
+            <div class="callout-label">🏆 Best pick</div>
+            <div class="callout-body" id="best-pick">–</div>
+          </div>
+          <div class="callout weak">
+            <div class="callout-label">🪨 Biggest drag</div>
+            <div class="callout-body" id="weak-pick">–</div>
+          </div>
+        </div>
+
+        <div class="result-actions">
+          <button id="share-btn" class="btn btn-primary">Share result</button>
+          <button id="replay-btn" class="btn btn-ghost">Practice again</button>
+        </div>
+        <p id="share-toast" class="hint hidden">Copied to clipboard!</p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      Educational game. Returns are hand-curated historical approximations — not investment advice.
+    </footer>
+
+    <script src="{{ url_for('static', filename='game.js') }}"></script>
+  </body>
+</html>

@@ -1,0 +1,41 @@
+name: Populate 100xPortfolio stock data
+
+# Fetches real historical stock returns on GitHub's runners (open internet),
+# then commits the regenerated app/stocks.json back to the branch. Runs when the
+# scraper or catalog changes, or on manual dispatch.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/100xportfolio-game-app-ye2rg6]
+    paths:
+      - "100xportfolio/scripts/fetch_prices.py"
+      - "100xportfolio/app/catalog.py"
+      - ".github/workflows/populate-stock-data.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  populate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install fetcher deps
+        run: pip install yfinance
+      - name: Fetch prices -> app/stocks.json
+        working-directory: 100xportfolio
+        run: python scripts/fetch_prices.py
+      - name: Commit populated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add 100xportfolio/app/stocks.json
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "Populate 100xPortfolio stock data from market sources [skip ci]"
+            git push
+          fi

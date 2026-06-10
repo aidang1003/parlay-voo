@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Fetch real 5-year stock multiples from Stooq and write app/stocks.json.
+"""Fetch real 5-year stock multiples and write app/stocks.json.
 
-Stooq serves free, no-API-key historical CSVs and is split-adjusted. For each
-stock in the editorial catalog we pull monthly closes over its era window and
-compute multiple = last_close / first_close. Anything we can't fetch (delisted,
-bankrupt, or a ticker that now points at a different company) falls back to the
-seed multiple in app/catalog.py.
+For each stock in the editorial catalog we pull monthly closes over its era
+window and compute multiple = last_close / first_close. Providers are tried in
+order: yfinance (Yahoo, dividend+split adjusted) -> Stooq (no key, split
+adjusted) -> seed (curated fallback in app/catalog.py). Anything we can't fetch
+(delisted, bankrupt, or a ticker that now points at a different company) keeps
+its seed multiple.
 
-Run from anywhere with open internet:
+Run from anywhere with open internet (locally, or via the GitHub Action):
 
+    pip install yfinance        # optional but preferred
     python scripts/fetch_prices.py
 """
 
@@ -24,12 +26,19 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import catalog  # noqa: E402
 
+try:
+    import yfinance  # type: ignore
+
+    _HAS_YF = True
+except ImportError:
+    _HAS_YF = False
+
 OUT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "stocks.json")
 USER_AGENT = "Mozilla/5.0 (100xPortfolio data fetcher)"
-REQUEST_DELAY = 0.4  # seconds between requests, be polite
+REQUEST_DELAY = 0.4  # seconds between network requests, be polite
 
-# Display ticker -> Stooq symbol when they differ.
-STOOQ_SYMBOL = {"BRK": "brk-b", "FB": "meta"}
+# Display ticker -> data-provider symbol when they differ.
+SYMBOL = {"BRK": "BRK-B", "FB": "META"}
 
 # Tickers we never fetch: delisted/bankrupt, or the symbol now belongs to a
 # different company (e.g. PETS = PetMed Express today, not Pets.com). Use seed.
@@ -38,37 +47,64 @@ FORCE_SEED = {
 }
 
 
-def stooq_url(ticker, era):
+def _window(era):
     start, end = era.split("-")
-    sym = STOOQ_SYMBOL.get(ticker, ticker).lower()
-    return f"https://stooq.com/q/d/l/?s={sym}.us&d1={start}0101&d2={end}1231&i=m"
+    return f"{start}-01-01", f"{end}-12-31"
 
 
-def fetch_multiple(ticker, era):
-    """Return (multiple, source) or (None, reason) on failure."""
-    if ticker in FORCE_SEED:
-        return None, "forced-seed"
-    url = stooq_url(ticker, era)
+def try_yfinance(ticker, era):
+    if not _HAS_YF:
+        return None
+    sym = SYMBOL.get(ticker, ticker)
+    start, end = _window(era)
+    try:
+        df = yfinance.download(
+            sym, start=start, end=end, interval="1mo",
+            auto_adjust=True, progress=False, threads=False,
+        )
+        closes = [float(x) for x in df["Close"].dropna().values.ravel() if float(x) > 0]
+    except Exception:  # noqa: BLE001 - network is best-effort
+        return None
+    if len(closes) < 2:
+        return None
+    return round(closes[-1] / closes[0], 2)
+
+
+def try_stooq(ticker, era):
+    sym = SYMBOL.get(ticker, ticker).lower().replace("-", "-")
+    start, end = era.split("-")
+    url = f"https://stooq.com/q/d/l/?s={sym}.us&d1={start}0101&d2={end}1231&i=m"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=20) as resp:
             text = resp.read().decode("utf-8", "replace")
-    except Exception as e:  # noqa: BLE001 - network is best-effort
-        return None, f"http-error:{type(e).__name__}"
-
+    except Exception:  # noqa: BLE001
+        return None
     closes = []
     for row in csv.DictReader(io.StringIO(text)):
-        raw = (row.get("Close") or "").strip()
         try:
-            val = float(raw)
+            val = float((row.get("Close") or "").strip())
         except ValueError:
             continue
         if val > 0:
             closes.append(val)
-
     if len(closes) < 2:
-        return None, "no-data"
-    return round(closes[-1] / closes[0], 2), "stooq"
+        return None
+    return round(closes[-1] / closes[0], 2)
+
+
+def fetch_multiple(ticker, era):
+    """Return (multiple, source). Falls back to seed via caller on None."""
+    if ticker in FORCE_SEED:
+        return None, "forced-seed"
+    mult = try_yfinance(ticker, era)
+    if mult is not None:
+        return mult, "yfinance"
+    time.sleep(REQUEST_DELAY)
+    mult = try_stooq(ticker, era)
+    if mult is not None:
+        return mult, "stooq"
+    return None, "no-data"
 
 
 def main():
